@@ -13,7 +13,7 @@ from .service import BacktestRequest, execute_backtest
 
 CAPABILITIES = {
     "service": "bktstr",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "timeframes": ["1m", "5m", "15m", "1h", "1d"],
     "sides": ["long", "short"],
     "rule_syntax": {
@@ -37,6 +37,11 @@ CAPABILITIES = {
     "providers": {
         "massive": "used when MASSIVE_API_KEY is configured",
         "yahoo": "fallback for recent intraday data only",
+    },
+    "cache": {
+        "type": "daily compressed OHLCV files",
+        "persistent_when": "Railway Volume is attached or BKTSTR_CACHE_DIR is set",
+        "default_path": "RAILWAY_VOLUME_MOUNT_PATH/bktstr-cache or /tmp/bktstr-cache",
     },
 }
 
@@ -94,7 +99,7 @@ def _trim_result(result: dict, trade_limit: int) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "BKTSTR/0.1"
+    server_version = "BKTSTR/0.2"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         print(f"{self.address_string()} - {format % args}")
@@ -112,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path in {"/", "/health"}:
-            self._json(200, {"status": "ok", "service": "bktstr", "version": "0.1.0"})
+            self._json(200, {"status": "ok", "service": "bktstr", "version": "0.2.0"})
             return
         if parsed.path == "/api/v1/capabilities":
             self._json(200, CAPABILITIES)

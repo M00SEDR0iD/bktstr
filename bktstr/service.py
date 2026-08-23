@@ -5,6 +5,7 @@ from datetime import date
 import os
 import re
 
+from .cache import BarCache, CachedProvider
 from .engine import BacktestConfig, run_backtest_on_bars
 from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
 from .rules import parse_rules
@@ -93,9 +94,10 @@ def provider_name_for_request(request: BacktestRequest, *, today: date | None = 
 async def execute_backtest(request: BacktestRequest) -> dict:
     provider_name = provider_name_for_request(request)
     if provider_name == "massive":
-        provider = MassiveProvider(os.environ["MASSIVE_API_KEY"])
+        upstream = MassiveProvider(os.environ["MASSIVE_API_KEY"])
     else:
-        provider = YahooProvider()
+        upstream = YahooProvider()
+    provider = CachedProvider(upstream, BarCache(), provider_name=provider_name)
     bars = await provider.fetch_bars(request.symbol, request.start, request.end, request.timeframe)
     result = run_backtest_on_bars(
         bars,
@@ -127,6 +129,10 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "starting_capital": request.starting_capital,
             "slippage_bps": request.slippage_bps,
         },
-        "data": {"bars": int(len(bars)), "provider": provider_name},
+        "data": {
+            "bars": int(len(bars)),
+            "provider": provider_name,
+            "cache": dict(provider.last_stats),
+        },
         **result,
     }

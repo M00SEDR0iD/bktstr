@@ -79,3 +79,39 @@ Then open `http://localhost:8000/health`.
 - No commissions/borrow fees yet; slippage is modeled.
 - Aggregate max drawdown currently uses closed-trade equity. MFE/MAE expose intratrade excursions, but a mark-to-market equity curve is a planned improvement.
 - Data-provider quality and entitlements still matter. Yahoo is only a smoke-test fallback; long-history research should use a proper paid feed.
+
+## Persistent market-data cache
+
+BKTSTR caches raw OHLCV bars by provider, symbol, timeframe, and trading date. Strategy results are **not** cached, so changing entry rules, stops, targets, or other simulation parameters reuses the same market data without returning stale backtest output.
+
+On Railway, attach a persistent Volume to the BKTSTR service. A simple mount path is:
+
+```text
+/data
+```
+
+Railway automatically exposes the mount path through `RAILWAY_VOLUME_MOUNT_PATH`; BKTSTR will then store cached bars under:
+
+```text
+/data/bktstr-cache
+```
+
+You can override this with:
+
+```text
+BKTSTR_CACHE_DIR=/some/other/path
+```
+
+Historical dates are cached persistently. The current New York trading date is always fetched live so an intraday request cannot reuse a stale partial-day snapshot.
+
+Each backtest response reports cache activity in `data.cache`, for example:
+
+```json
+{
+  "hit_days": 58,
+  "miss_days": 0,
+  "fetched_ranges": 0
+}
+```
+
+A cold request will show missing days and one or more fetched ranges. Subsequent strategy variations over the same symbol/date/timeframe should show cache hits and make no Massive request for those historical days.
