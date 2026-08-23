@@ -89,9 +89,10 @@ def run_backtest_on_bars(bars: pd.DataFrame, config: BacktestConfig) -> dict:
     if missing:
         raise ValueError(f"bars missing columns: {sorted(missing)}")
 
-    frame = add_indicators(bars)
+    frame = bars.copy().sort_index()
     if config.regular_hours_only:
         frame = _regular_hours(frame)
+    frame = add_indicators(frame)
     if len(frame) < 2:
         return {"summary": _empty_summary(config.starting_capital), "trades": []}
 
