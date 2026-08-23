@@ -47,7 +47,7 @@ Use URL encoding when necessary (`:` becomes `%3A`, comma can become `%2C`).
 
 ## Market data
 
-If `MASSIVE_API_KEY` is set, the service uses Massive's aggregates API and chunks long ranges into 30-day requests. Without that key, recent intraday requests can use Yahoo as a temporary fallback. The fallback is deliberately not treated as our long-term research dataset.
+If `MASSIVE_API_KEY` is set, the service uses Massive's aggregates API. Cold historical requests now send the full missing date range and follow Massive's 50,000-row pagination instead of splitting the range into many 30-day calls. The provider authenticates with an `Authorization` header, automatically retries HTTP 429 and transient 5xx responses with `Retry-After`/exponential backoff, and then persists the completed historical days into the Railway cache. Without that key, recent intraday requests can use Yahoo as a temporary fallback. The fallback is deliberately not treated as our long-term research dataset.
 
 ## Railway
 
@@ -71,7 +71,7 @@ PORT=8000 python -m bktstr.server
 
 Then open `http://localhost:8000/health`.
 
-## Important v0.1 limitations
+## Important limitations
 
 - Backtests the underlying stock/ETF, not historical option contracts yet.
 - No multi-symbol regime rules yet (for example `NVDA` signal conditioned on `SOXX`).
@@ -128,3 +128,8 @@ Each backtest response reports cache activity in `data.cache`, for example:
 ```
 
 A cold request will show missing days and one or more fetched ranges. Subsequent strategy variations over the same symbol/date/timeframe should show cache hits and make no Massive request for those historical days.
+
+
+## Historical download behavior
+
+For a cold long-range request, BKTSTR minimizes Massive API calls by requesting the entire missing date range once and following server-provided pagination. This is especially important on rate-limited plans. If Massive responds with HTTP 429, BKTSTR honors `Retry-After` when supplied and otherwise uses bounded exponential backoff. HTTP 500/502/503/504 responses use the same retry path. API credentials are sent in the Authorization header rather than the URL.

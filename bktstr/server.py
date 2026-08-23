@@ -13,7 +13,7 @@ from .service import BacktestRequest, execute_backtest
 
 CAPABILITIES = {
     "service": "bktstr",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "timeframes": ["1m", "5m", "15m", "1h", "1d"],
     "sides": ["long", "short"],
     "rule_syntax": {
@@ -36,7 +36,7 @@ CAPABILITIES = {
         "entry_window": "optional entry_start_time/entry_end_time in America/New_York, HH:MM; end is exclusive",
     },
     "providers": {
-        "massive": "used when MASSIVE_API_KEY is configured",
+        "massive": "full-range pagination with 429/5xx retry; used when MASSIVE_API_KEY is configured",
         "yahoo": "fallback for recent intraday data only",
     },
     "cache": {
@@ -102,7 +102,7 @@ def _trim_result(result: dict, trade_limit: int) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "BKTSTR/0.2.1"
+    server_version = "BKTSTR/0.2.2"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         print(f"{self.address_string()} - {format % args}")
@@ -120,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path in {"/", "/health"}:
-            self._json(200, {"status": "ok", "service": "bktstr", "version": "0.2.1"})
+            self._json(200, {"status": "ok", "service": "bktstr", "version": "0.2.2"})
             return
         if parsed.path == "/api/v1/capabilities":
             self._json(200, CAPABILITIES)

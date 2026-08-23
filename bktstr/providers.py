@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import asyncio
 import re
+from typing import Awaitable, Callable
 
 import httpx
 import pandas as pd
@@ -39,37 +41,88 @@ def massive_aggregate_url(symbol: str, start: date, end: date, timeframe: str) -
 
 
 class MassiveProvider:
-    def __init__(self, api_key: str, timeout_seconds: float = 30.0):
+    RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+    def __init__(
+        self,
+        api_key: str,
+        timeout_seconds: float = 30.0,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        max_retries: int = 6,
+        backoff_base_seconds: float = 2.0,
+        backoff_cap_seconds: float = 30.0,
+        max_pages: int = 100,
+    ):
         if not api_key:
             raise ValueError("MASSIVE_API_KEY is not configured")
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
+        self.transport = transport
+        self.sleep_fn = sleep_fn
+        self.max_retries = max_retries
+        self.backoff_base_seconds = backoff_base_seconds
+        self.backoff_cap_seconds = backoff_cap_seconds
+        self.max_pages = max_pages
+
+    def _retry_delay(self, response: httpx.Response, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is not None:
+            try:
+                return max(0.0, float(retry_after))
+            except ValueError:
+                pass
+        return min(self.backoff_cap_seconds, self.backoff_base_seconds * (2 ** attempt))
+
+    async def _get_with_retry(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        params: dict | None = None,
+    ) -> httpx.Response:
+        for attempt in range(self.max_retries + 1):
+            response = await client.get(url, params=params)
+            if response.status_code not in self.RETRYABLE_STATUS_CODES:
+                response.raise_for_status()
+                return response
+            if attempt >= self.max_retries:
+                response.raise_for_status()
+            await self.sleep_fn(self._retry_delay(response, attempt))
+        raise RuntimeError("unreachable")
 
     async def fetch_bars(self, symbol: str, start: date, end: date, timeframe: str = "1m") -> pd.DataFrame:
+        if end < start:
+            raise ValueError("end must be on or after start")
+
         records: list[dict] = []
-        async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True) as client:
-            for chunk_start, chunk_end in iter_date_chunks(start, end, days=30):
-                url: str | None = massive_aggregate_url(symbol, chunk_start, chunk_end, timeframe)
-                first = True
-                pages = 0
-                while url:
-                    pages += 1
-                    if pages > 10:
-                        raise RuntimeError("Massive pagination exceeded safety limit")
-                    params = {
-                        "adjusted": "true",
-                        "sort": "asc",
-                        "limit": 50000,
-                        "apiKey": self.api_key,
-                    } if first else {"apiKey": self.api_key}
-                    response = await client.get(url, params=params)
-                    response.raise_for_status()
-                    payload = response.json()
-                    if payload.get("status") not in {"OK", "DELAYED", None}:
-                        raise RuntimeError(f"Massive returned status {payload.get('status')}")
-                    records.extend(payload.get("results") or [])
-                    url = payload.get("next_url")
-                    first = False
+        url: str | None = massive_aggregate_url(symbol, start, end, timeframe)
+        first = True
+        pages = 0
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        async with httpx.AsyncClient(
+            timeout=self.timeout_seconds,
+            follow_redirects=True,
+            headers=headers,
+            transport=self.transport,
+        ) as client:
+            while url:
+                pages += 1
+                if pages > self.max_pages:
+                    raise RuntimeError("Massive pagination exceeded safety limit")
+                params = {
+                    "adjusted": "true",
+                    "sort": "asc",
+                    "limit": 50000,
+                } if first else None
+                response = await self._get_with_retry(client, url, params=params)
+                payload = response.json()
+                if payload.get("status") not in {"OK", "DELAYED", None}:
+                    raise RuntimeError(f"Massive returned status {payload.get('status')}")
+                records.extend(payload.get("results") or [])
+                url = payload.get("next_url")
+                first = False
 
         if not records:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
