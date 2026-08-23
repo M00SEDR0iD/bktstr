@@ -31,6 +31,8 @@ class BacktestRequest:
     slippage_bps: float = 2.0
     regular_hours_only: bool = True
     same_day_only: bool = True
+    entry_start_time: str | None = None
+    entry_end_time: str | None = None
 
     @classmethod
     def from_values(
@@ -50,6 +52,8 @@ class BacktestRequest:
         slippage_bps: float = 2.0,
         regular_hours_only: bool = True,
         same_day_only: bool = True,
+        entry_start_time: str | None = None,
+        entry_end_time: str | None = None,
     ) -> "BacktestRequest":
         symbol = symbol.strip().upper()
         if not _SYMBOL.match(symbol):
@@ -64,6 +68,7 @@ class BacktestRequest:
             raise ValueError(f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}")
         if side not in {"long", "short"}:
             raise ValueError("side must be long or short")
+        _validate_entry_window(entry_start_time, entry_end_time)
         parse_rules(entry)
         return cls(
             symbol=symbol,
@@ -80,7 +85,26 @@ class BacktestRequest:
             slippage_bps=float(slippage_bps),
             regular_hours_only=bool(regular_hours_only),
             same_day_only=bool(same_day_only),
+            entry_start_time=entry_start_time,
+            entry_end_time=entry_end_time,
         )
+
+
+def _validate_entry_window(start: str | None, end: str | None) -> None:
+    from datetime import datetime
+
+    def parse(value: str | None):
+        if value is None:
+            return None
+        try:
+            return datetime.strptime(value, "%H:%M").time()
+        except ValueError as exc:
+            raise ValueError("entry times must use 24-hour HH:MM format") from exc
+
+    start_time = parse(start)
+    end_time = parse(end)
+    if start_time is not None and end_time is not None and start_time >= end_time:
+        raise ValueError("entry_start_time must be before entry_end_time")
 
 
 def provider_name_for_request(request: BacktestRequest, *, today: date | None = None) -> str:
@@ -112,6 +136,8 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             slippage_bps=request.slippage_bps,
             regular_hours_only=request.regular_hours_only,
             same_day_only=request.same_day_only,
+            entry_start_time=request.entry_start_time,
+            entry_end_time=request.entry_end_time,
         ),
     )
     return {
@@ -128,6 +154,8 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "position_size": request.position_size,
             "starting_capital": request.starting_capital,
             "slippage_bps": request.slippage_bps,
+            "entry_start_time": request.entry_start_time,
+            "entry_end_time": request.entry_end_time,
         },
         "data": {
             "bars": int(len(bars)),

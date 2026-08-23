@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 import pandas as pd
 
@@ -19,6 +20,8 @@ class BacktestConfig:
     slippage_bps: float = 2.0
     regular_hours_only: bool = True
     same_day_only: bool = True
+    entry_start_time: str | None = None
+    entry_end_time: str | None = None
 
     def __post_init__(self) -> None:
         if self.side not in {"long", "short"}:
@@ -31,6 +34,19 @@ class BacktestConfig:
             raise ValueError("capital values must be positive")
         if self.slippage_bps < 0:
             raise ValueError("slippage_bps cannot be negative")
+        start = _parse_market_time(self.entry_start_time)
+        end = _parse_market_time(self.entry_end_time)
+        if start is not None and end is not None and start >= end:
+            raise ValueError("entry_start_time must be before entry_end_time")
+
+
+def _parse_market_time(value: str | None):
+    if value is None:
+        return None
+    try:
+        return datetime.strptime(value, "%H:%M").time()
+    except ValueError as exc:
+        raise ValueError("entry times must use 24-hour HH:MM format") from exc
 
 
 def add_indicators(bars: pd.DataFrame) -> pd.DataFrame:
@@ -97,6 +113,8 @@ def run_backtest_on_bars(bars: pd.DataFrame, config: BacktestConfig) -> dict:
         return {"summary": _empty_summary(config.starting_capital), "trades": []}
 
     signal = evaluate_rules(frame, parse_rules(config.entry_rules))
+    start_clock = _parse_market_time(config.entry_start_time)
+    end_clock = _parse_market_time(config.entry_end_time)
     trades: list[dict] = []
     i = 0
     while i < len(frame) - 1:
@@ -108,6 +126,13 @@ def run_backtest_on_bars(bars: pd.DataFrame, config: BacktestConfig) -> dict:
         signal_ts = frame.index[i]
         entry_ts = frame.index[entry_i]
         if config.same_day_only and entry_ts.date() != signal_ts.date():
+            i += 1
+            continue
+        entry_clock = entry_ts.time().replace(tzinfo=None)
+        if start_clock is not None and entry_clock < start_clock:
+            i += 1
+            continue
+        if end_clock is not None and entry_clock >= end_clock:
             i += 1
             continue
 

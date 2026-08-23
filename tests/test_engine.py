@@ -118,3 +118,43 @@ def test_regular_hours_indicators_exclude_premarket_data():
     result = run_backtest_on_bars(data, config)
     assert result["summary"]["trades"] == 1
     assert result["trades"][0]["entry_time"].startswith("2026-08-03T09:32")
+
+
+def test_entry_time_window_blocks_entries_before_start_time():
+    data = bars(
+        [
+            ("2026-08-03 16:58:00+00:00", 100, 101, 99, 101, 1000),  # 12:58 ET
+            ("2026-08-03 16:59:00+00:00", 101, 101, 98, 99, 1000),   # signal 12:59 ET
+            ("2026-08-03 17:00:00+00:00", 98, 99, 97, 98, 1000),     # entry 13:00 ET
+            ("2026-08-03 17:01:00+00:00", 98, 99, 97, 98, 1000),
+        ]
+    )
+    allowed = run_backtest_on_bars(
+        data,
+        BacktestConfig(
+            side="short",
+            entry_rules="close.cross_below:vwap",
+            stop_pct=10,
+            target_pct=10,
+            max_hold_minutes=1,
+            slippage_bps=0,
+            entry_start_time="13:00",
+            entry_end_time="16:00",
+        ),
+    )
+    blocked = run_backtest_on_bars(
+        data,
+        BacktestConfig(
+            side="short",
+            entry_rules="close.cross_below:vwap",
+            stop_pct=10,
+            target_pct=10,
+            max_hold_minutes=1,
+            slippage_bps=0,
+            entry_start_time="13:01",
+            entry_end_time="16:00",
+        ),
+    )
+    assert allowed["summary"]["trades"] == 1
+    assert allowed["trades"][0]["entry_time"].startswith("2026-08-03T13:00")
+    assert blocked["summary"]["trades"] == 0

@@ -32,7 +32,7 @@ This service never places trades and has no brokerage write access.
 Example:
 
 ```text
-GET /api/v1/backtest?symbol=NVDA&start=2026-08-18&end=2026-08-23&timeframe=1m&side=short&entry=close.cross_below%3Avwap&stop_pct=1&target_pct=3&max_hold_minutes=240&position_size=1000&slippage_bps=2
+GET /api/v1/backtest?symbol=NVDA&start=2026-08-18&end=2026-08-23&timeframe=1m&side=short&entry=close.cross_below%3Avwap&stop_pct=1&target_pct=3&max_hold_minutes=240&position_size=1000&slippage_bps=2&entry_start_time=13%3A00&entry_end_time=16%3A00
 ```
 
 Rules are comma-separated and ANDed. Supported examples:
@@ -79,6 +79,19 @@ Then open `http://localhost:8000/health`.
 - No commissions/borrow fees yet; slippage is modeled.
 - Aggregate max drawdown currently uses closed-trade equity. MFE/MAE expose intratrade excursions, but a mark-to-market equity curve is a planned improvement.
 - Data-provider quality and entitlements still matter. Yahoo is only a smoke-test fallback; long-history research should use a proper paid feed.
+
+### Optional entry-time window
+
+Use `entry_start_time` and `entry_end_time` to restrict when a new position may actually be entered. Values use 24-hour `HH:MM` in `America/New_York` market time. The start is inclusive and the end is exclusive.
+
+For example:
+
+```text
+entry_start_time=13:00
+entry_end_time=16:00
+```
+
+This permits entries from 1:00 PM through 3:59 PM ET. Because execution is still the next bar open, a 12:59 PM signal may qualify if its simulated fill occurs at 1:00 PM. Existing positions are still managed normally after entry; the window only controls new entries. Omitting either parameter leaves that side of the window unrestricted.
 
 ## Persistent market-data cache
 

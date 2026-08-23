@@ -95,3 +95,33 @@ def test_execute_backtest_reuses_market_data_cache(monkeypatch, tmp_path):
     assert calls["count"] == 1
     assert first["data"]["cache"] == {"hit_days": 0, "miss_days": 1, "fetched_ranges": 1}
     assert second["data"]["cache"] == {"hit_days": 1, "miss_days": 0, "fetched_ranges": 0}
+
+
+def test_request_accepts_and_validates_entry_time_window():
+    req = BacktestRequest.from_values(
+        symbol="NVDA",
+        start="2026-08-01",
+        end="2026-08-10",
+        side="short",
+        entry="close.cross_below:vwap",
+        entry_start_time="13:00",
+        entry_end_time="16:00",
+    )
+    assert req.entry_start_time == "13:00"
+    assert req.entry_end_time == "16:00"
+
+    for start_time, end_time in [("13", "16:00"), ("16:00", "13:00")]:
+        try:
+            BacktestRequest.from_values(
+                symbol="NVDA",
+                start="2026-08-01",
+                end="2026-08-10",
+                side="short",
+                entry="close.cross_below:vwap",
+                entry_start_time=start_time,
+                entry_end_time=end_time,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected invalid entry time window to be rejected")
