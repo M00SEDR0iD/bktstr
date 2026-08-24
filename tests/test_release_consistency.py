@@ -99,6 +99,40 @@ def test_even_backslashes_do_not_escape_inline_code_delimiters(tmp_path):
     assert module.find_broken_local_links(tmp_path) == []
 
 
+def test_backslash_before_closer_does_not_prevent_inline_code_closure(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "`[inside](inside.md)\\`\n",
+        encoding="utf-8",
+    )
+    assert module.find_broken_local_links(tmp_path) == []
+
+
+def test_list_then_blockquote_fence_preserves_ordered_containers(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "- > ```markdown\n"
+        "  > [inside](inside-missing.md)\n"
+        "  > ```\n"
+        "[outside](outside-missing.md)\n",
+        encoding="utf-8",
+    )
+    errors = module.find_broken_local_links(tmp_path)
+    assert len(errors) == 1
+    assert "outside-missing.md" in errors[0]
+
+
+def test_blockquote_list_blockquote_fence_preserves_ordered_containers(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "> - > ```markdown\n"
+        ">   > [inside](inside-missing.md)\n"
+        ">   > ```\n"
+        "[outside](outside-missing.md)\n",
+        encoding="utf-8",
+    )
+    errors = module.find_broken_local_links(tmp_path)
+    assert len(errors) == 1
+    assert "outside-missing.md" in errors[0]
+
+
 def test_broken_link_check_does_not_mask_invalid_backtick_fence_openers(tmp_path):
     (tmp_path / "README.md").write_text(
         "```bad`info\n[example](missing.md)\n",
