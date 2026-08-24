@@ -12,6 +12,48 @@ ROOT = Path(__file__).parents[1]
 LINK_PATTERN = re.compile(r"(?<!!)\[[^\]]+\]\((<[^>]+>|[^)\s]+)")
 README_VERSION_PATTERN = re.compile(r"\*\*Current release: v([^*]+)\*\*")
 IGNORED_PREFIXES = ("http:", "https:", "mailto:", "app:", "#")
+CONTAINER_PREFIX_PATTERN = re.compile(
+    r"^(?:(?: {0,3}>[ \t]?)|(?: {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+))*"
+)
+
+
+def _container_content(line: str) -> str:
+    match = CONTAINER_PREFIX_PATTERN.match(line)
+    return line[match.end() :] if match else line
+
+
+def _mask_inline_code(text: str) -> str:
+    masked = list(text)
+    index = 0
+    while index < len(text):
+        if text[index] != "`":
+            index += 1
+            continue
+        opener_start = index
+        while index < len(text) and text[index] == "`":
+            index += 1
+        opener_length = index - opener_start
+        search_from = index
+        closer_end = None
+        while search_from < len(text):
+            closer_start = text.find("`", search_from)
+            if closer_start < 0:
+                break
+            candidate_end = closer_start
+            while candidate_end < len(text) and text[candidate_end] == "`":
+                candidate_end += 1
+            if candidate_end - closer_start == opener_length:
+                closer_end = candidate_end
+                break
+            search_from = candidate_end
+        if closer_end is None:
+            index = opener_start + opener_length
+            continue
+        for position in range(opener_start, closer_end):
+            if masked[position] not in "\r\n":
+                masked[position] = " "
+        index = closer_end
+    return "".join(masked)
 
 
 def markdown_without_fenced_code(text: str) -> str:
@@ -20,11 +62,17 @@ def markdown_without_fenced_code(text: str) -> str:
     fence_length = 0
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
-        stripped = content.lstrip(" ")
-        indent = len(content) - len(stripped)
+        container_content = _container_content(content)
+        stripped = container_content.lstrip(" ")
+        indent = len(container_content) - len(stripped)
         marker = re.match(r"(`{3,}|~{3,})", stripped) if indent <= 3 else None
         if fence_character is None:
-            if marker:
+            invalid_backtick_info = (
+                marker
+                and marker.group(1)[0] == "`"
+                and "`" in stripped[marker.end() :]
+            )
+            if marker and not invalid_backtick_info:
                 fence_character = marker.group(1)[0]
                 fence_length = len(marker.group(1))
             else:
@@ -39,7 +87,7 @@ def markdown_without_fenced_code(text: str) -> str:
         ):
             fence_character = None
             fence_length = 0
-    return "".join(lines)
+    return _mask_inline_code("".join(lines))
 
 
 def extract_python_version(path: Path) -> str:
@@ -81,7 +129,7 @@ def find_broken_local_links(root: Path) -> list[str]:
         markdown = markdown_without_fenced_code(document.read_text(encoding="utf-8"))
         for match in LINK_PATTERN.finditer(markdown):
             target = match.group(1).strip("<>")
-            if target.startswith(IGNORED_PREFIXES):
+            if target.lower().startswith(IGNORED_PREFIXES):
                 continue
             path_text = unquote(target.split("#", 1)[0].split("?", 1)[0])
             if not path_text:

@@ -27,6 +27,57 @@ def test_broken_link_check_ignores_urls_and_reports_missing_files(tmp_path):
     assert "docs/missing.md" in errors[0]
 
 
+def test_broken_link_check_ignores_ordinary_fenced_code(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "```markdown\n[example](missing.md)\n```\n",
+        encoding="utf-8",
+    )
+    assert module.find_broken_local_links(tmp_path) == []
+
+
+def test_broken_link_check_ignores_blockquoted_fenced_code(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "> ```markdown\n> [example](missing.md)\n> ```\n",
+        encoding="utf-8",
+    )
+    assert module.find_broken_local_links(tmp_path) == []
+
+
+def test_broken_link_check_ignores_list_container_fenced_code(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "- ```markdown\n  [example](missing.md)\n  ```\n",
+        encoding="utf-8",
+    )
+    assert module.find_broken_local_links(tmp_path) == []
+
+
+def test_broken_link_check_ignores_inline_code(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "`[single](missing.md)` and ``[double](also-missing.md)``\n",
+        encoding="utf-8",
+    )
+    assert module.find_broken_local_links(tmp_path) == []
+
+
+def test_broken_link_check_does_not_mask_invalid_backtick_fence_openers(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "```bad`info\n[example](missing.md)\n",
+        encoding="utf-8",
+    )
+    errors = module.find_broken_local_links(tmp_path)
+    assert len(errors) == 1
+    assert "missing.md" in errors[0]
+
+
+def test_broken_link_check_ignores_mixed_case_url_schemes(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "[http](HtTp://example.com) [web](hTtPs://example.com) "
+        "[email](MaIlTo:user@example.com) [app](ApP://resource)\n",
+        encoding="utf-8",
+    )
+    assert module.find_broken_local_links(tmp_path) == []
+
+
 def test_repository_release_identity_and_links_are_consistent():
     assert module.check_repository(ROOT) == []
 
