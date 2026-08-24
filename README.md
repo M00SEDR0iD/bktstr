@@ -2,7 +2,7 @@
 
 Granular, read-only equity backtesting service intended to be called by an AI research workflow.
 
-## What v0.1 does
+## What v0.3.0 does
 
 - 1m / 5m / 15m / 1h / 1d OHLCV input
 - Long and short underlying-equity simulations
@@ -14,8 +14,13 @@ Granular, read-only equity backtesting service intended to be called by an AI re
 - Trade-by-trade P/L, MFE, MAE, hold time, and aggregate metrics
 - Massive historical-data adapter
 - Yahoo recent-intraday fallback so the deployment can be smoke-tested without an API key
+- Look-ahead-safe daily regime filters with optional benchmark-relative strength
 
 This service never places trades and has no brokerage write access.
+
+## Versioning
+
+BKTSTR uses `major.minor.sub-build` numbering for this research series. Sub-builds advance from `0` through `9` (for example `0.3.0` through `0.3.9`); the next change after `0.3.9` rolls to `0.4.0`.
 
 ## Endpoints
 
@@ -45,9 +50,38 @@ Rules are comma-separated and ANDed. Supported examples:
 
 Use URL encoding when necessary (`:` becomes `%3A`, comma can become `%2C`).
 
+
+## Daily regime filters (v0.3.0)
+
+Use the optional `regime` parameter to require a completed-daily-market condition in addition to the intraday `entry` rules. Use `benchmark` when the regime references benchmark-relative fields. Regime data is fetched at `1d`, cached independently from intraday bars, and computed with a 120-calendar-day warm-up.
+
+Example:
+
+```text
+GET /api/v1/backtest?symbol=NVDA&start=2025-01-01&end=2025-12-31&timeframe=1m&side=short&entry=close.cross_below%3Avwap%2Crsi14.lt%3A50%2Cvolume_ratio20.gt%3A1.1&regime=day_close.lt%3Aday_sma20%2Crelative_return20.lt%3A0&benchmark=SOXX&entry_start_time=12%3A30&entry_end_time=16%3A00&stop_pct=1&target_pct=3
+```
+
+Supported regime fields:
+
+- `day_close` — latest completed close before the intraday session
+- `day_sma20` — 20-session SMA through that completed daily bar
+- `day_sma50` — 50-session SMA
+- `day_sma20_slope5` — percent change in SMA20 versus five completed sessions earlier
+- `day_return20` — traded symbol's 20-session percent return
+- `benchmark_return20` — benchmark's 20-session percent return
+- `relative_return20` — `day_return20 - benchmark_return20` in percentage points
+
+Regime rules support `lt`, `lte`, `gt`, `gte`, and `eq`. Cross operators are intentionally not supported for regime rules in v0.3.0.
+
+### Look-ahead guard
+
+For an intraday session on date D, regime values come from the latest completed daily feature row whose trading date is **strictly before D**. A Tuesday trade can use Monday's completed daily close and indicators, never Tuesday's eventual close. This also makes live/current-day regime evaluation safe when the current daily candle is incomplete or absent.
+
+When a regime is used, the response keeps `data.cache` for the intraday cache and adds `data.regime` with daily subject/benchmark bar counts and cache statistics.
+
 ## Market data
 
-If `MASSIVE_API_KEY` is set, the service uses Massive's aggregates API. Cold historical requests now send the full missing date range and follow Massive's 50,000-row pagination instead of splitting the range into many 30-day calls. The provider authenticates with an `Authorization` header, automatically retries HTTP 429 and transient 5xx responses with `Retry-After`/exponential backoff, and then persists the completed historical days into the Railway cache. Without that key, recent intraday requests can use Yahoo as a temporary fallback. The fallback is deliberately not treated as our long-term research dataset.
+If `MASSIVE_API_KEY` is set, the service uses Massive's aggregates API. Cold historical requests now send the full missing date range and follow Massive's 50,000-row pagination instead of splitting the range into many 30-day calls. The provider authenticates with an `Authorization` header, automatically retries HTTP 429 and transient 5xx responses with `Retry-After`/exponential backoff, and then persists the completed historical days into the Railway cache. Without that key, recent intraday requests can use Yahoo as a temporary fallback. Regime-filter backtests require Massive in v0.3.0 because the fallback is intentionally limited to recent intraday data. The fallback is deliberately not treated as our long-term research dataset.
 
 ## Railway
 
@@ -74,8 +108,7 @@ Then open `http://localhost:8000/health`.
 ## Important limitations
 
 - Backtests the underlying stock/ETF, not historical option contracts yet.
-- No multi-symbol regime rules yet (for example `NVDA` signal conditioned on `SOXX`).
-- No multi-timeframe indicators yet; RSI is calculated on the requested base bars.
+- Intraday RSI/VWAP/volume indicators are still calculated on the requested base bars; v0.3.0 adds a focused completed-daily regime layer rather than arbitrary multi-timeframe indicators.
 - No commissions/borrow fees yet; slippage is modeled.
 - Aggregate max drawdown currently uses closed-trade equity. MFE/MAE expose intratrade excursions, but a mark-to-market equity curve is a planned improvement.
 - Data-provider quality and entitlements still matter. Yahoo is only a smoke-test fallback; long-history research should use a proper paid feed.

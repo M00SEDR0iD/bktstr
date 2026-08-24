@@ -158,3 +158,66 @@ def test_entry_time_window_blocks_entries_before_start_time():
     assert allowed["summary"]["trades"] == 1
     assert allowed["trades"][0]["entry_time"].startswith("2026-08-03T13:00")
     assert blocked["summary"]["trades"] == 0
+
+
+def test_regime_rules_gate_an_otherwise_valid_entry():
+    data = bars(
+        [
+            ("2026-08-03 13:30:00+00:00", 100, 101, 99, 101, 1000),
+            ("2026-08-03 13:31:00+00:00", 101, 101, 98, 99, 1000),
+            ("2026-08-03 13:32:00+00:00", 98, 99, 97, 98, 1000),
+            ("2026-08-03 13:33:00+00:00", 98, 99, 97, 98, 1000),
+        ]
+    )
+    data["day_close"] = 100.0
+
+    allowed = run_backtest_on_bars(
+        data,
+        BacktestConfig(
+            side="short",
+            entry_rules="close.cross_below:vwap",
+            regime_rules="day_close.gt:90",
+            stop_pct=10,
+            target_pct=10,
+            max_hold_minutes=1,
+            slippage_bps=0,
+        ),
+    )
+    blocked = run_backtest_on_bars(
+        data,
+        BacktestConfig(
+            side="short",
+            entry_rules="close.cross_below:vwap",
+            regime_rules="day_close.lt:90",
+            stop_pct=10,
+            target_pct=10,
+            max_hold_minutes=1,
+            slippage_bps=0,
+        ),
+    )
+
+    assert allowed["summary"]["trades"] == 1
+    assert blocked["summary"]["trades"] == 0
+
+
+def test_cross_rule_does_not_compare_first_bar_with_prior_session():
+    data = bars(
+        [
+            ("2026-08-03 19:59:00+00:00", 100, 100, 100, 100, 1000),  # 15:59 ET
+            ("2026-08-04 13:30:00+00:00", 100, 110, 90, 95, 1000),    # 09:30 ET
+            ("2026-08-04 13:31:00+00:00", 95, 100, 90, 94, 1000),
+        ]
+    )
+    result = run_backtest_on_bars(
+        data,
+        BacktestConfig(
+            side="short",
+            entry_rules="close.cross_below:vwap",
+            stop_pct=10,
+            target_pct=10,
+            max_hold_minutes=1,
+            slippage_bps=0,
+        ),
+    )
+
+    assert result["summary"]["trades"] == 0

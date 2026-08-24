@@ -19,3 +19,20 @@ def test_parse_backtest_query_accepts_entry_time_window():
     )
     assert req.entry_start_time == "13:00"
     assert req.entry_end_time == "16:00"
+
+
+def test_parse_backtest_query_accepts_regime_and_benchmark():
+    req, _ = parse_backtest_query(
+        "symbol=nvda&start=2026-08-18&end=2026-08-23&timeframe=1m&side=short&"
+        "entry=close.cross_below%3Avwap&regime=relative_return20.lt%3A0&benchmark=soxx"
+    )
+    assert req.regime == "relative_return20.lt:0"
+    assert req.benchmark == "SOXX"
+
+
+def test_capabilities_report_v030_regime_support():
+    from bktstr.server import CAPABILITIES
+
+    assert CAPABILITIES["version"] == "0.3.0"
+    assert "regime" in CAPABILITIES
+    assert "relative_return20" in CAPABILITIES["regime"]["fields"]

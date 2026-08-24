@@ -125,3 +125,112 @@ def test_request_accepts_and_validates_entry_time_window():
             pass
         else:
             raise AssertionError("expected invalid entry time window to be rejected")
+
+
+def test_request_accepts_regime_and_benchmark_and_validates_dependencies():
+    req = BacktestRequest.from_values(
+        symbol="NVDA",
+        start="2026-08-01",
+        end="2026-08-10",
+        timeframe="1m",
+        side="short",
+        entry="close.cross_below:vwap",
+        regime="relative_return20.lt:0",
+        benchmark="soxx",
+    )
+    assert req.regime == "relative_return20.lt:0"
+    assert req.benchmark == "SOXX"
+
+    try:
+        BacktestRequest.from_values(
+            symbol="NVDA",
+            start="2026-08-01",
+            end="2026-08-10",
+            timeframe="1m",
+            side="short",
+            entry="close.cross_below:vwap",
+            regime="relative_return20.lt:0",
+        )
+    except ValueError as exc:
+        assert "benchmark is required" in str(exc)
+    else:
+        raise AssertionError("expected benchmark-dependent regime to require benchmark")
+
+
+def test_execute_backtest_fetches_and_reports_daily_regime_data(monkeypatch, tmp_path):
+    import asyncio
+    from datetime import timedelta
+
+    import pandas as pd
+
+    from bktstr.providers import MassiveProvider
+    from bktstr.service import execute_backtest
+
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_CACHE_DIR", str(tmp_path))
+    calls = []
+
+    def daily_frame(start, end, base):
+        dates = pd.date_range(start=start, end=end, freq="B", tz="America/New_York")
+        closes = [base + i * 0.1 for i in range(len(dates))]
+        return pd.DataFrame(
+            {
+                "open": closes,
+                "high": [v + 1 for v in closes],
+                "low": [v - 1 for v in closes],
+                "close": closes,
+                "volume": [1000.0] * len(dates),
+            },
+            index=dates,
+        )
+
+    async def fake_fetch(self, symbol, start, end, timeframe="1m"):
+        calls.append((symbol, start, end, timeframe))
+        if timeframe == "1d":
+            return daily_frame(start, end, 100.0 if symbol == "NVDA" else 200.0)
+        idx = pd.DatetimeIndex(
+            [
+                "2026-08-17 13:00:00",
+                "2026-08-17 13:01:00",
+                "2026-08-17 13:02:00",
+            ],
+            tz="America/New_York",
+        )
+        return pd.DataFrame(
+            {
+                "open": [100.0, 99.0, 98.0],
+                "high": [101.0, 100.0, 99.0],
+                "low": [99.0, 98.0, 97.0],
+                "close": [100.0, 99.0, 98.0],
+                "volume": [1000.0, 1000.0, 1000.0],
+            },
+            index=idx,
+        )
+
+    monkeypatch.setattr(MassiveProvider, "fetch_bars", fake_fetch)
+    req = BacktestRequest.from_values(
+        symbol="NVDA",
+        start="2026-08-17",
+        end="2026-08-17",
+        timeframe="1m",
+        side="short",
+        entry="close.lt:1000",
+        regime="day_close.gt:0,relative_return20.gt:-100",
+        benchmark="SOXX",
+        stop_pct=10,
+        target_pct=10,
+        max_hold_minutes=1,
+        slippage_bps=0,
+    )
+
+    result = asyncio.run(execute_backtest(req))
+
+    assert result["request"]["regime"] == req.regime
+    assert result["request"]["benchmark"] == "SOXX"
+    assert result["data"]["regime"]["subject_daily_bars"] > 50
+    assert result["data"]["regime"]["benchmark_daily_bars"] > 50
+    assert result["summary"]["trades"] == 1
+    assert any(call[0] == "NVDA" and call[3] == "1d" for call in calls)
+    assert any(call[0] == "SOXX" and call[3] == "1d" for call in calls)
+    daily_nvda_call = next(call for call in calls if call[0] == "NVDA" and call[3] == "1d")
+    assert daily_nvda_call[1] == req.start - timedelta(days=120)

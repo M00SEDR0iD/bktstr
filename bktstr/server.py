@@ -8,12 +8,13 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from . import __version__
 from .service import BacktestRequest, execute_backtest
 
 
 CAPABILITIES = {
     "service": "bktstr",
-    "version": "0.2.2",
+    "version": __version__,
     "timeframes": ["1m", "5m", "15m", "1h", "1d"],
     "sides": ["long", "short"],
     "rule_syntax": {
@@ -26,6 +27,21 @@ CAPABILITIES = {
         ],
         "combine": "comma-separated rules are ANDed",
         "operators": ["lt", "lte", "gt", "gte", "eq", "cross_below", "cross_above"],
+    },
+    "regime": {
+        "parameter": "regime",
+        "benchmark_parameter": "benchmark",
+        "fields": [
+            "day_close",
+            "day_sma20",
+            "day_sma50",
+            "day_sma20_slope5",
+            "day_return20",
+            "benchmark_return20",
+            "relative_return20",
+        ],
+        "operators": ["lt", "lte", "gt", "gte", "eq"],
+        "lookahead_guard": "intraday session uses latest completed daily feature row strictly before that session date",
     },
     "execution_model": {
         "entry": "next bar open after signal",
@@ -84,6 +100,8 @@ def parse_backtest_query(query: str) -> tuple[BacktestRequest, dict]:
         same_day_only=_bool(_first(params, "same_day_only", "true")),
         entry_start_time=_first(params, "entry_start_time", "") or None,
         entry_end_time=_first(params, "entry_end_time", "") or None,
+        regime=_first(params, "regime", "") or None,
+        benchmark=_first(params, "benchmark", "") or None,
     )
     trade_limit = int(_first(params, "trade_limit", "100"))
     if not 0 <= trade_limit <= 1000:
@@ -102,7 +120,7 @@ def _trim_result(result: dict, trade_limit: int) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "BKTSTR/0.2.2"
+    server_version = f"BKTSTR/{__version__}"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         print(f"{self.address_string()} - {format % args}")
@@ -120,7 +138,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path in {"/", "/health"}:
-            self._json(200, {"status": "ok", "service": "bktstr", "version": "0.2.2"})
+            self._json(200, {"status": "ok", "service": "bktstr", "version": __version__})
             return
         if parsed.path == "/api/v1/capabilities":
             self._json(200, CAPABILITIES)

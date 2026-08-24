@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 import os
 import re
 
 from .cache import BarCache, CachedProvider
 from .engine import BacktestConfig, run_backtest_on_bars
 from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
+from .regime import attach_regime_to_intraday, build_daily_regime, validate_regime_rules
 from .rules import parse_rules
 
 
@@ -33,6 +34,8 @@ class BacktestRequest:
     same_day_only: bool = True
     entry_start_time: str | None = None
     entry_end_time: str | None = None
+    regime: str | None = None
+    benchmark: str | None = None
 
     @classmethod
     def from_values(
@@ -54,6 +57,8 @@ class BacktestRequest:
         same_day_only: bool = True,
         entry_start_time: str | None = None,
         entry_end_time: str | None = None,
+        regime: str | None = None,
+        benchmark: str | None = None,
     ) -> "BacktestRequest":
         symbol = symbol.strip().upper()
         if not _SYMBOL.match(symbol):
@@ -70,6 +75,12 @@ class BacktestRequest:
             raise ValueError("side must be long or short")
         _validate_entry_window(entry_start_time, entry_end_time)
         parse_rules(entry)
+        normalized_regime = regime.strip() if regime and regime.strip() else None
+        normalized_benchmark = benchmark.strip().upper() if benchmark and benchmark.strip() else None
+        if normalized_benchmark and not _SYMBOL.match(normalized_benchmark):
+            raise ValueError("invalid benchmark symbol")
+        if normalized_regime:
+            validate_regime_rules(normalized_regime, normalized_benchmark)
         return cls(
             symbol=symbol,
             start=start_date,
@@ -87,6 +98,8 @@ class BacktestRequest:
             same_day_only=bool(same_day_only),
             entry_start_time=entry_start_time,
             entry_end_time=entry_end_time,
+            regime=normalized_regime,
+            benchmark=normalized_benchmark,
         )
 
 
@@ -110,6 +123,8 @@ def _validate_entry_window(start: str | None, end: str | None) -> None:
 def provider_name_for_request(request: BacktestRequest, *, today: date | None = None) -> str:
     if os.getenv("MASSIVE_API_KEY", ""):
         return "massive"
+    if request.regime:
+        raise RuntimeError("MASSIVE_API_KEY is required for regime-filter backtests")
     if can_use_yahoo_intraday(request.start, request.end, request.timeframe, today=today):
         return "yahoo"
     raise RuntimeError("MASSIVE_API_KEY is required for historical intraday ranges older than the Yahoo fallback window")
@@ -122,12 +137,39 @@ async def execute_backtest(request: BacktestRequest) -> dict:
     else:
         upstream = YahooProvider()
     provider = CachedProvider(upstream, BarCache(), provider_name=provider_name)
+
     bars = await provider.fetch_bars(request.symbol, request.start, request.end, request.timeframe)
+    intraday_cache = dict(provider.last_stats)
+    regime_data = None
+
+    if request.regime:
+        warmup_start = request.start - timedelta(days=120)
+        subject_daily = await provider.fetch_bars(request.symbol, warmup_start, request.end, "1d")
+        subject_cache = dict(provider.last_stats)
+        benchmark_daily = None
+        benchmark_cache = None
+        if request.benchmark:
+            benchmark_daily = await provider.fetch_bars(request.benchmark, warmup_start, request.end, "1d")
+            benchmark_cache = dict(provider.last_stats)
+
+        daily_regime = build_daily_regime(subject_daily, benchmark_daily)
+        bars = attach_regime_to_intraday(bars, daily_regime)
+        regime_data = {
+            "subject": request.symbol,
+            "subject_daily_bars": int(len(subject_daily)),
+            "subject_cache": subject_cache,
+            "benchmark": request.benchmark,
+            "benchmark_daily_bars": int(len(benchmark_daily)) if benchmark_daily is not None else 0,
+            "benchmark_cache": benchmark_cache,
+            "warmup_start": warmup_start.isoformat(),
+        }
+
     result = run_backtest_on_bars(
         bars,
         BacktestConfig(
             side=request.side,
             entry_rules=request.entry,
+            regime_rules=request.regime,
             stop_pct=request.stop_pct,
             target_pct=request.target_pct,
             max_hold_minutes=request.max_hold_minutes,
@@ -140,6 +182,14 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             entry_end_time=request.entry_end_time,
         ),
     )
+    data = {
+        "bars": int(len(bars)),
+        "provider": provider_name,
+        "cache": intraday_cache,
+    }
+    if regime_data is not None:
+        data["regime"] = regime_data
+
     return {
         "request": {
             "symbol": request.symbol,
@@ -148,6 +198,8 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "timeframe": request.timeframe,
             "side": request.side,
             "entry": request.entry,
+            "regime": request.regime,
+            "benchmark": request.benchmark,
             "stop_pct": request.stop_pct,
             "target_pct": request.target_pct,
             "max_hold_minutes": request.max_hold_minutes,
@@ -157,10 +209,6 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "entry_start_time": request.entry_start_time,
             "entry_end_time": request.entry_end_time,
         },
-        "data": {
-            "bars": int(len(bars)),
-            "provider": provider_name,
-            "cache": dict(provider.last_stats),
-        },
+        "data": data,
         **result,
     }

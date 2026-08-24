@@ -12,6 +12,7 @@ from .rules import evaluate_rules, parse_rules
 class BacktestConfig:
     side: str = "long"
     entry_rules: str = "close.cross_above:vwap"
+    regime_rules: str | None = None
     stop_pct: float = 1.0
     target_pct: float = 3.0
     max_hold_minutes: int = 240
@@ -112,7 +113,10 @@ def run_backtest_on_bars(bars: pd.DataFrame, config: BacktestConfig) -> dict:
     if len(frame) < 2:
         return {"summary": _empty_summary(config.starting_capital), "trades": []}
 
-    signal = evaluate_rules(frame, parse_rules(config.entry_rules))
+    session_group = pd.Series(frame.index.date, index=frame.index)
+    signal = evaluate_rules(frame, parse_rules(config.entry_rules), cross_group=session_group)
+    if config.regime_rules:
+        signal &= evaluate_rules(frame, parse_rules(config.regime_rules))
     start_clock = _parse_market_time(config.entry_start_time)
     end_clock = _parse_market_time(config.entry_end_time)
     trades: list[dict] = []

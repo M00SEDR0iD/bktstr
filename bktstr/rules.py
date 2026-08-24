@@ -44,7 +44,11 @@ def _operand(frame: pd.DataFrame, value: str | float) -> pd.Series:
     return frame[value]
 
 
-def evaluate_rules(frame: pd.DataFrame, rules: list[Rule]) -> pd.Series:
+def evaluate_rules(
+    frame: pd.DataFrame,
+    rules: list[Rule],
+    cross_group: pd.Series | None = None,
+) -> pd.Series:
     signal = pd.Series(True, index=frame.index, dtype=bool)
     for rule in rules:
         if rule.left not in frame.columns:
@@ -63,8 +67,12 @@ def evaluate_rules(frame: pd.DataFrame, rules: list[Rule]) -> pd.Series:
             current = left == right
         elif rule.op == "cross_below":
             current = (left < right) & (left.shift(1) >= right.shift(1))
+            if cross_group is not None:
+                current &= cross_group.eq(cross_group.shift(1))
         elif rule.op == "cross_above":
             current = (left > right) & (left.shift(1) <= right.shift(1))
+            if cross_group is not None:
+                current &= cross_group.eq(cross_group.shift(1))
         else:  # pragma: no cover - protected by parser
             raise ValueError(f"unsupported operator '{rule.op}'")
         signal &= current.fillna(False)
