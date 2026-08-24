@@ -147,6 +147,19 @@ CAPABILITIES = {
         "type": "daily compressed OHLCV files",
         "persistent_when": "Railway Volume is attached or BKTSTR_CACHE_DIR is set",
         "default_path": "RAILWAY_VOLUME_MOUNT_PATH/bktstr-cache or /tmp/bktstr-cache",
+        "raw": {
+            "type": "daily compressed OHLCV files",
+            "persistent_when": "Railway Volume is attached or BKTSTR_CACHE_DIR is set",
+            "default_path": "RAILWAY_VOLUME_MOUNT_PATH/bktstr-cache or /tmp/bktstr-cache",
+        },
+        "derived": {
+            "type": "deterministic feature/context DataFrames",
+            "namespaces": ["intraday_features", "daily_regime", "daily_sentiment"],
+            "toggle": "BKTSTR_DERIVED_CACHE_ENABLED",
+            "default_enabled": True,
+            "override_path_variable": "BKTSTR_DERIVED_CACHE_DIR",
+            "strategy_decisions_cached": False,
+        },
     },
 }
 

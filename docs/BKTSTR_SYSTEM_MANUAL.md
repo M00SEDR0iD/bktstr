@@ -1,7 +1,7 @@
 # BKTSTR System Manual
 
-**Behavioral release:** v0.3.3  
-**Performance candidate:** v0.3.4 derived-cache layer (merge package; deploy only after equality verification)  
+**Release:** v0.3.4  
+**Behavioral baseline:** v0.3.3 trading semantics preserved; v0.3.4 adds integrated deterministic derived caching  
 **Purpose:** architecture reference, research-methodology white paper, API/user manual, and future GUI implementation guide.
 
 BKTSTR is a read-only historical market-research service. It separates slow background context from intermediate market regime and fast technical entries so that each layer can be tested independently and combined without hiding assumptions. It never places brokerage orders.
@@ -68,7 +68,7 @@ No layer should silently substitute for another. A strong technical setup can ex
 
 ## Persistent cache architecture
 
-The existing raw OHLCV cache is Layer 0. The v0.3.4 performance candidate adds reusable deterministic layers **without caching trading decisions**:
+The existing raw OHLCV cache is Layer 0. v0.3.4 adds integrated reusable deterministic layers **without caching trading decisions**:
 
 ```text
 L0 raw OHLCV cache
@@ -107,7 +107,7 @@ The merge package's default path resolution is:
 3. `RAILWAY_VOLUME_MOUNT_PATH/bktstr-cache/derived`
 4. `/tmp/bktstr-cache/derived`
 
-The persistent Railway volume should therefore carry both the raw cache and the new derived cache in production.
+The persistent Railway volume should therefore carry both the raw cache and the derived cache in production. Set `BKTSTR_DERIVED_CACHE_ENABLED=false` to perform a cache-off equality control; the default is enabled. `BKTSTR_DERIVED_CACHE_DIR` can override the derived-cache path.
 
 ## Core execution model
 

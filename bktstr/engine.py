@@ -23,6 +23,7 @@ class BacktestConfig:
     same_day_only: bool = True
     entry_start_time: str | None = None
     entry_end_time: str | None = None
+    features_precomputed: bool = False
 
     def __post_init__(self) -> None:
         if self.side not in {"long", "short"}:
@@ -85,6 +86,18 @@ def _regular_hours(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.loc[mask]
 
 
+def prepare_bars_for_backtest(bars: pd.DataFrame, *, regular_hours_only: bool = True) -> pd.DataFrame:
+    """Apply the deterministic intraday feature layer exactly once.
+
+    This function is the cache boundary for v0.3.4. It deliberately contains
+    no strategy thresholds or execution decisions.
+    """
+    frame = bars.copy().sort_index()
+    if regular_hours_only:
+        frame = _regular_hours(frame)
+    return add_indicators(frame)
+
+
 def _apply_slippage(price: float, side: str, is_entry: bool, bps: float) -> float:
     slip = bps / 10000.0
     if side == "long":
@@ -140,10 +153,10 @@ def run_backtest_on_bars(bars: pd.DataFrame, config: BacktestConfig) -> dict:
     if missing:
         raise ValueError(f"bars missing columns: {sorted(missing)}")
 
-    frame = bars.copy().sort_index()
-    if config.regular_hours_only:
-        frame = _regular_hours(frame)
-    frame = add_indicators(frame)
+    if config.features_precomputed:
+        frame = bars.copy().sort_index()
+    else:
+        frame = prepare_bars_for_backtest(bars, regular_hours_only=config.regular_hours_only)
     if len(frame) < 2:
         return {"summary": _empty_summary(config.starting_capital), "trades": []}
 

@@ -8,8 +8,10 @@ import re
 import httpx
 import pandas as pd
 
+from bktstr_cache.derived import DerivedFrameCache
+
 from .cache import BarCache, CachedProvider
-from .engine import BacktestConfig, run_backtest_on_bars
+from .engine import BacktestConfig, prepare_bars_for_backtest, run_backtest_on_bars
 from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
 from .regime import (
     attach_regime_to_intraday,
@@ -24,6 +26,30 @@ from .rules import parse_rules
 
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 _ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "1d"}
+
+INTRADAY_FEATURE_FORMULA_VERSION = "intraday-v1"
+REGIME_FORMULA_VERSION = "regime-v1"
+SENTIMENT_FORMULA_VERSION = "sentiment-v0.3.3"
+
+
+def _derived_cache_enabled() -> bool:
+    value = os.getenv("BKTSTR_DERIVED_CACHE_ENABLED", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _cache_status(status) -> dict:
+    return {
+        "hit": bool(status.hit),
+        "elapsed_seconds": round(float(status.elapsed_seconds), 6),
+        "recovered_corruption": bool(status.recovered_corruption),
+    }
+
+
+def _derived_frame(cache, enabled: bool, namespace: str, dimensions: dict, inputs: dict, compute):
+    if not enabled:
+        return compute(), {"hit": False, "elapsed_seconds": 0.0, "recovered_corruption": False}
+    result = cache.get_or_compute(namespace, dimensions, inputs, compute)
+    return result.frame, _cache_status(result.status)
 
 
 @dataclass(frozen=True)
@@ -227,8 +253,25 @@ async def execute_backtest(request: BacktestRequest) -> dict:
         upstream = YahooProvider()
     provider = CachedProvider(upstream, BarCache(), provider_name=provider_name)
 
-    bars = await provider.fetch_bars(request.symbol, request.start, request.end, request.timeframe)
+    derived_enabled = _derived_cache_enabled()
+    derived_cache = DerivedFrameCache()
+    derived_stats: dict = {"enabled": derived_enabled}
+
+    raw_bars = await provider.fetch_bars(request.symbol, request.start, request.end, request.timeframe)
     intraday_cache = dict(provider.last_stats)
+    bars, derived_stats["intraday"] = _derived_frame(
+        derived_cache,
+        derived_enabled,
+        "intraday_features",
+        {
+            "symbol": request.symbol,
+            "timeframe": request.timeframe,
+            "regular_hours_only": request.regular_hours_only,
+            "formula_version": INTRADAY_FEATURE_FORMULA_VERSION,
+        },
+        {"raw": raw_bars},
+        lambda: prepare_bars_for_backtest(raw_bars, regular_hours_only=request.regular_hours_only),
+    )
     regime_data = None
 
     if request.regime and regime_uses_market_fields(request.regime):
@@ -241,7 +284,21 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             benchmark_daily = await provider.fetch_bars(request.benchmark, warmup_start, request.end, "1d")
             benchmark_cache = dict(provider.last_stats)
 
-        daily_regime = build_daily_regime(subject_daily, benchmark_daily)
+        regime_inputs = {"subject": subject_daily}
+        if benchmark_daily is not None:
+            regime_inputs["benchmark"] = benchmark_daily
+        daily_regime, derived_stats["regime"] = _derived_frame(
+            derived_cache,
+            derived_enabled,
+            "daily_regime",
+            {
+                "subject": request.symbol,
+                "benchmark": request.benchmark,
+                "formula_version": REGIME_FORMULA_VERSION,
+            },
+            regime_inputs,
+            lambda: build_daily_regime(subject_daily, benchmark_daily),
+        )
         bars = attach_regime_to_intraday(bars, daily_regime)
         regime_data = {
             "subject": request.symbol,
@@ -265,7 +322,25 @@ async def execute_backtest(request: BacktestRequest) -> dict:
         market_daily, market_coverage = await _fetch_sentiment_daily(
             provider, request.sentiment_market_benchmark, sentiment_warmup_start, request.start, request.end
         )
-        daily_sentiment = build_daily_sentiment(sentiment_subject_daily, sector_daily, market_daily)
+        daily_sentiment, derived_stats["sentiment"] = _derived_frame(
+            derived_cache,
+            derived_enabled,
+            "daily_sentiment",
+            {
+                "subject": request.symbol,
+                "sector_benchmark": request.sentiment_sector_benchmark,
+                "market_benchmark": request.sentiment_market_benchmark,
+                "data_profile": request.sentiment_data_profile,
+                "sources": list(request.sentiment_sources),
+                "formula_version": SENTIMENT_FORMULA_VERSION,
+            },
+            {
+                "subject": sentiment_subject_daily,
+                "sector": sector_daily,
+                "market": market_daily,
+            },
+            lambda: build_daily_sentiment(sentiment_subject_daily, sector_daily, market_daily),
+        )
         bars = attach_sentiment_to_intraday(bars, daily_sentiment)
         coverage_items = (subject_coverage, sector_coverage, market_coverage)
         starts = [x["coverage_start"] for x in coverage_items]
@@ -312,12 +387,14 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             same_day_only=request.same_day_only,
             entry_start_time=request.entry_start_time,
             entry_end_time=request.entry_end_time,
+            features_precomputed=True,
         ),
     )
     data = {
-        "bars": int(len(bars)),
+        "bars": int(len(raw_bars)),
         "provider": provider_name,
         "cache": intraday_cache,
+        "derived_cache": derived_stats,
     }
     if regime_data is not None:
         data["regime"] = regime_data

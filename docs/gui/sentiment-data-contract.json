@@ -1,5 +1,5 @@
 {
-  "version": "0.3.3",
+  "version": "0.3.4",
   "purpose": "Stable sentiment/provenance field contract for future BKTSTR GUI clients",
   "layers": [
     "sentiment",
@@ -265,6 +265,14 @@
     "cache_strategy_decisions": false,
     "cache_deterministic_features": true,
     "cache_context": true,
-    "exact_result_cache_optional": true
+    "exact_result_cache_optional": true,
+    "derived_cache_enabled_by_default": true,
+    "derived_cache_toggle": "BKTSTR_DERIVED_CACHE_ENABLED",
+    "derived_cache_path_override": "BKTSTR_DERIVED_CACHE_DIR",
+    "namespaces": [
+      "intraday_features",
+      "daily_regime",
+      "daily_sentiment"
+    ]
   }
 }

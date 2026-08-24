@@ -65,7 +65,7 @@ def default_cache_root() -> Path:
         return Path(explicit)
     raw_cache = os.getenv("BKTSTR_CACHE_DIR")
     if raw_cache:
-        return Path(raw_cache) / "derived"
+        return Path(raw_cache) / "bktstr-cache" / "derived"
     volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
     if volume:
         return Path(volume) / "bktstr-cache" / "derived"

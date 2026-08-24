@@ -1,6 +1,7 @@
 # BKTSTR Agent Backtest Runbook
 
-**Behavioral baseline:** v0.3.3  
+**Current release:** v0.3.4  
+**Behavioral baseline:** v0.3.3 trading semantics, with deterministic derived caching integrated  
 **Research purpose:** identify short-duration scalp opportunities that occur inside a broader bearish or deteriorating market/sector regime.  
 **Production API:** `https://bktstr-production.up.railway.app`
 
@@ -201,3 +202,8 @@ sentiment_component_spread.gte:0.50,sentiment_volatility_stress.lt:0.50
 ```
 
 must **not** recompute unchanged VWAP/RSI/daily EMA/ATR/sentiment primitives. Threshold evaluation and execution simulation still run live.
+
+
+## v0.3.4 derived cache verification
+
+Production `/api/v1/capabilities` must report version `0.3.4` and the derived namespaces `intraday_features`, `daily_regime`, and `daily_sentiment`. Backtest responses expose `data.derived_cache`. For correctness controls, set `BKTSTR_DERIVED_CACHE_ENABLED=false` and verify trade records are exactly equal to the cache-enabled run; this toggle changes computation reuse only, never strategy semantics.

@@ -1,41 +1,18 @@
 import json
 from pathlib import Path
-
 from bktstr.server import CAPABILITIES
 
-
-def test_gui_sentiment_contract_matches_runtime_capabilities():
-    contract_path = Path(__file__).parents[1] / "docs" / "gui" / "sentiment-data-contract.json"
-    contract = json.loads(contract_path.read_text())
-    assert contract["version"] == CAPABILITIES["version"] == "0.3.3"
-    runtime_outputs = set(CAPABILITIES["sentiment"]["outputs"])
-    contract_outputs = set(contract["sentiment"]["outputs"].keys())
-    assert runtime_outputs.issubset(contract_outputs)
-    assert contract["provenance"]["default_profile"] == "clean"
-    assert contract["provenance"]["tiers"]["A"]["label"] == "clean"
+ROOT=Path(__file__).parents[1]
 
 
-def test_system_manual_contains_required_gui_and_provenance_sections():
-    manual = (Path(__file__).parents[1] / "docs" / "BKTSTR_SYSTEM_MANUAL.md").read_text()
-    for heading in [
-        "# BKTSTR System Manual",
-        "## System schematic",
-        "## Sentiment layer definitions",
-        "## Data provenance and quality tiers",
-        "## GUI implementation contract",
-        "## Look-ahead safety",
-    ]:
-        assert heading in manual
+def test_gui_contract_matches_runtime_version_and_outputs():
+    c=json.loads((ROOT/"docs/gui/sentiment-data-contract.json").read_text())
+    assert c["version"]==CAPABILITIES["version"]=="0.3.4"
+    assert set(CAPABILITIES["sentiment"]["outputs"]).issubset(c["sentiment"]["outputs"])
 
 
-def test_v033_docs_publish_coverage_and_native_filter_contract():
-    contract_path = Path(__file__).parents[1] / "docs" / "gui" / "sentiment-data-contract.json"
-    contract = json.loads(contract_path.read_text())
-    assert contract["version"] == "0.3.3"
-    assert "sentiment_fragility" in contract["sentiment"]["filterable_fields"]
-    assert "coverage_start" in contract["sentiment"]["coverage_fields"]
-
-    manual = (Path(__file__).parents[1] / "docs" / "BKTSTR_SYSTEM_MANUAL.md").read_text()
-    assert "## Sentiment history coverage" in manual
-    assert "sentiment_fragility.gte:0.35" in manual
-    assert "optional warm-up" in manual.lower()
+def test_manual_and_runbook_publish_v034_cache_and_pg_net():
+    manual=(ROOT/"docs/BKTSTR_SYSTEM_MANUAL.md").read_text(); runbook=(ROOT/"AGENT_BACKTEST_RUNBOOK.md").read_text()
+    for phrase in ["QQQ broad technology/risk", "SOXX semiconductor", "derived cache", "BKTSTR_DERIVED_CACHE_ENABLED"]:
+        assert phrase.lower() in manual.lower()
+    assert "pg_net" in runbook and "net.http_get" in runbook

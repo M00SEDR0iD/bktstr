@@ -129,7 +129,7 @@ class CachedProvider:
         self.cache = cache
         self.provider_name = provider_name
         self.today_fn = today_fn or (lambda: datetime.now(ZoneInfo("America/New_York")).date())
-        self.last_stats = {"hit_days": 0, "miss_days": 0, "fetched_ranges": 0}
+        self.last_stats = {"hit_days": 0, "missing_days": 0, "fetched_ranges": 0}
 
     def _read_available(
         self, symbol: str, start: date, end: date, timeframe: str
