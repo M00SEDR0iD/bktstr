@@ -1,0 +1,45 @@
+name: Documentation
+description: Correct or improve durable project documentation.
+title: "[Docs] "
+labels: ["type:docs"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Reader outcome
+      description: What will a reader understand or complete afterward?
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What documentation or product behavior is not changing?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: "- [ ] Published commands and links are verified"
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Name executable examples, link checks, and reviews.
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Primary impact
+      options:
+        - Trading semantics
+        - Market data
+        - API or schema
+        - Deployment or operations
+        - None
+    validations:
+      required: true

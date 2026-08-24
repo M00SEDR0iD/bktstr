@@ -1,0 +1,56 @@
+name: Release tracker
+description: Track one production version from scope through publication.
+title: "[Release] v"
+labels: ["type:maintenance"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: v0.4.0
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Production outcome
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Exit and acceptance criteria
+      placeholder: "- [ ] Milestone exit criterion"
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Production verification
+      description: Link CI, Railway health, production acceptance, and the retained report.
+    validations:
+      required: true
+  - type: textarea
+    id: limitations
+    attributes:
+      label: Known limitations
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback plan
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Primary impact
+      options:
+        - Trading semantics
+        - Market data
+        - API or schema
+        - Deployment or operations
+        - None
+    validations:
+      required: true
