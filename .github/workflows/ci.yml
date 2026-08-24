@@ -10,22 +10,12 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  hygiene:
+    name: Hygiene
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: requirements-dev.txt
-
-      - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
-
 
       - name: Reject tracked generated files
         shell: bash
@@ -37,11 +27,58 @@ jobs:
             exit 1
           fi
 
-      - name: Run tests
-        run: python -m pytest -q
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q
 
-      - name: Compile Python sources
-        run: python -m compileall -q bktstr bktstr_cache integration scripts benchmarks tests
+  compile:
+    name: Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m compileall -q bktstr bktstr_cache integration scripts benchmarks tests
 
-      - name: Smoke-test derived cache benchmark
-        run: python benchmarks/benchmark_cache.py
+  production_image:
+    name: Production image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build --tag bktstr:${{ github.sha }} .
+
+  documentation:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python scripts/check_release_consistency.py
+
+  cache_benchmark:
+    name: Cache benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python benchmarks/benchmark_cache.py
