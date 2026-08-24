@@ -1,6 +1,6 @@
 # BKTSTR System Manual
 
-**Release:** v0.3.2  
+**Release:** v0.3.3  
 **Purpose:** architecture reference, research-methodology white paper, API/user manual, and future GUI implementation guide.
 
 BKTSTR is a read-only historical market-research service. It separates slow background context from intermediate market regime and fast technical entries so that each layer can be tested independently and combined without hiding assumptions. It never places brokerage orders.
@@ -93,6 +93,22 @@ benchmark=SOXX
 ```
 
 Regime rules are hard filters: if the regime condition is false, the technical setup cannot open a trade.
+
+### Native sentiment filters — v0.3.3
+
+Sentiment outputs may also be referenced directly in the same `regime=` rule string when `sentiment=true`. This keeps sentiment as a separate calculated layer while allowing it to gate a technical setup without external SQL post-processing.
+
+Example:
+
+```text
+regime=day_sma20_slope5.lt:0,relative_return20.lt:0,sentiment_fragility.gte:0.35
+benchmark=SOXX
+sentiment=true
+sentiment_sector_benchmark=SOXX
+sentiment_market_benchmark=QQQ
+```
+
+Filterable sentiment fields are `sentiment_direction`, `sentiment_confidence`, `sentiment_momentum20`, `sentiment_momentum60`, `sentiment_momentum`, `sentiment_component_spread`, `sentiment_volatility_stress`, and `sentiment_fragility`. Cross operators remain disallowed for regime filters.
 
 ## Sentiment layer definitions
 
@@ -377,6 +393,23 @@ Every sentiment-enabled response includes provenance metadata such as:
 ```
 
 A future GUI should surface `non_clean_data_used` prominently whenever it becomes true.
+
+
+## Sentiment history coverage
+
+v0.3.3 treats pre-period sentiment history as **optional warm-up** while keeping the requested backtest period strict. BKTSTR first requests the full 460-calendar-day sentiment warm-up. If the provider rejects only that older prefix, BKTSTR fetches the requested backtest period normally, preserves any older daily history already present in the persistent cache, and continues with reduced sentiment completeness rather than failing the whole backtest.
+
+A failure while fetching required-period daily data is still fatal. The system does not silently reinterpret a required-data outage as missing warm-up.
+
+Every sentiment response reports:
+
+- `requested_warmup_start`: desired historical start for full sentiment context.
+- `coverage_start`: latest first available date across subject, sector benchmark, and market benchmark; this is the common usable start.
+- `coverage_end`: earliest last available date across those three series.
+- `warmup_degraded`: true when optional history had to fall back or common coverage could not be established.
+- `coverage.subject`, `coverage.sector`, `coverage.market`: per-source requested start, required start, actual coverage dates, fallback flag, daily bar count, and cache stats.
+
+The GUI should visibly warn when `warmup_degraded=true`, display the actual coverage range, and continue to show `sentiment_completeness` on individual trades.
 
 ## Look-ahead safety
 

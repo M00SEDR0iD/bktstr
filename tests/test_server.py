@@ -33,7 +33,7 @@ def test_parse_backtest_query_accepts_regime_and_benchmark():
 def test_capabilities_report_v031_regime_support():
     from bktstr.server import CAPABILITIES
 
-    assert CAPABILITIES["version"] == "0.3.2"
+    assert CAPABILITIES["version"] == "0.3.3"
     assert "regime" in CAPABILITIES
     assert "relative_return20" in CAPABILITIES["regime"]["fields"]
 
@@ -52,7 +52,7 @@ def test_parse_backtest_query_accepts_sentiment_layer_parameters():
 def test_capabilities_report_v031_sentiment_support():
     from bktstr.server import CAPABILITIES
 
-    assert CAPABILITIES["version"] == "0.3.2"
+    assert CAPABILITIES["version"] == "0.3.3"
     assert "sentiment" in CAPABILITIES
     assert CAPABILITIES["sentiment"]["direction_range"] == [-1.0, 1.0]
     assert CAPABILITIES["sentiment"]["multipliers_are_informational"] is True
@@ -71,10 +71,22 @@ def test_v032_query_accepts_clean_sentiment_profile_and_sources():
 def test_v032_capabilities_publish_transition_and_provenance_contract():
     from bktstr.server import CAPABILITIES
 
-    assert CAPABILITIES["version"] == "0.3.2"
+    assert CAPABILITIES["version"] == "0.3.3"
     sentiment = CAPABILITIES["sentiment"]
     assert sentiment["fragility_range"] == [0.0, 1.0]
     assert sentiment["momentum_range"] == [-1.0, 1.0]
     assert "sentiment_fragility" in sentiment["outputs"]
     assert sentiment["data_profiles"]["default"] == "clean"
     assert sentiment["data_profiles"]["tiers"]["A"]["label"] == "clean"
+
+
+def test_v033_capabilities_publish_native_sentiment_filters_and_coverage_contract():
+    from bktstr.server import CAPABILITIES
+
+    assert CAPABILITIES["version"] == "0.3.3"
+    assert "sentiment_fragility" in CAPABILITIES["regime"]["fields"]
+    assert "sentiment_momentum" in CAPABILITIES["regime"]["fields"]
+    sentiment = CAPABILITIES["sentiment"]
+    assert "sentiment_fragility" in sentiment["filterable_fields"]
+    assert "coverage_start" in sentiment["coverage_fields"]
+    assert sentiment["optional_warmup_behavior"] == "degrade completeness and report coverage; required-period data remains strict"

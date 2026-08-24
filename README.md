@@ -1,5 +1,7 @@
 # BKTSTR
 
+**Current release: v0.3.3**
+
 Granular, read-only equity backtesting service intended to be called by an AI research workflow.
 
 ## What v0.3.2 does
@@ -231,3 +233,10 @@ Version sequence for this branch is `0.3.0` through `0.3.9`, then `0.4.0`.
 ## System manual / GUI contract
 
 The white-paper-style architecture and user manual is `docs/BKTSTR_SYSTEM_MANUAL.md`. The stable machine-readable sentiment/provenance contract for future GUI development is `docs/gui/sentiment-data-contract.json`. Runtime field discovery remains available at `/api/v1/capabilities`.
+
+## v0.3.3 sentiment coverage and native filters
+
+- Optional pre-period sentiment warm-up can degrade without failing required-period backtests.
+- Responses expose `requested_warmup_start`, common `coverage_start`/`coverage_end`, `warmup_degraded`, and per-symbol coverage diagnostics.
+- Sentiment fields can be used natively in `regime=` when `sentiment=true`, for example `sentiment_fragility.gte:0.35`.
+- Required-period market-data failures remain fatal; non-clean sentiment sources remain explicit opt-ins only when implemented.

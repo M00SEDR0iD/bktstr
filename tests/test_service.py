@@ -417,3 +417,191 @@ def test_v032_sentiment_response_reports_clean_provenance(monkeypatch, tmp_path)
     assert provenance["all_point_in_time_safe"] is True
     assert provenance["sources"][0]["id"] == "price"
     assert provenance["sources"][0]["tier"] == "A"
+
+
+def test_v033_sentiment_optional_warmup_http_failure_degrades_instead_of_failing(monkeypatch, tmp_path):
+    import asyncio
+    from datetime import timedelta
+    import httpx
+    import pandas as pd
+
+    from bktstr.providers import MassiveProvider
+    from bktstr.service import execute_backtest
+
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_CACHE_DIR", str(tmp_path))
+    required_start = pd.Timestamp("2026-01-02").date()
+    required_end = pd.Timestamp("2026-04-30").date()
+    daily_calls = []
+
+    def daily_frame(start, end, base):
+        dates = pd.date_range(start=start, end=end, freq="B", tz="America/New_York")
+        closes = [base + i * 0.2 for i in range(len(dates))]
+        return pd.DataFrame({
+            "open": closes,
+            "high": [v + 1 for v in closes],
+            "low": [v - 1 for v in closes],
+            "close": closes,
+            "volume": [1000.0] * len(dates),
+        }, index=dates)
+
+    async def fake_fetch(self, symbol, start, end, timeframe="1m"):
+        if timeframe == "1d":
+            daily_calls.append((symbol, start, end))
+            if start < required_start:
+                request = httpx.Request("GET", "https://example.invalid/history")
+                response = httpx.Response(502, request=request)
+                raise httpx.HTTPStatusError("history unavailable", request=request, response=response)
+            base = {"NVDA": 100.0, "SOXX": 200.0, "QQQ": 300.0}[symbol]
+            return daily_frame(start, end, base)
+        idx = pd.DatetimeIndex(
+            ["2026-04-30 13:00", "2026-04-30 13:01", "2026-04-30 13:02"],
+            tz="America/New_York",
+        )
+        return pd.DataFrame({
+            "open": [100.0, 99.0, 98.0],
+            "high": [100.0, 99.0, 98.0],
+            "low": [99.0, 98.0, 97.0],
+            "close": [99.5, 98.5, 97.5],
+            "volume": [1000.0, 1000.0, 1000.0],
+        }, index=idx)
+
+    monkeypatch.setattr(MassiveProvider, "fetch_bars", fake_fetch)
+    req = BacktestRequest.from_values(
+        symbol="NVDA",
+        start=required_start.isoformat(),
+        end=required_end.isoformat(),
+        timeframe="1m",
+        side="short",
+        entry="close.lt:1000",
+        sentiment=True,
+        sentiment_sector_benchmark="SOXX",
+        sentiment_market_benchmark="QQQ",
+        stop_pct=10,
+        target_pct=10,
+        max_hold_minutes=1,
+        slippage_bps=0,
+    )
+
+    result = asyncio.run(execute_backtest(req))
+    sentiment = result["data"]["sentiment"]
+    assert sentiment["warmup_degraded"] is True
+    assert sentiment["requested_warmup_start"] == (required_start - timedelta(days=460)).isoformat()
+    assert sentiment["coverage_start"] == required_start.isoformat()
+    assert sentiment["coverage_end"] == required_end.isoformat()
+    assert sentiment["coverage"]["subject"]["fallback_used"] is True
+    assert sentiment["coverage"]["sector"]["fallback_used"] is True
+    assert sentiment["coverage"]["market"]["fallback_used"] is True
+    assert any(start == required_start for _, start, _ in daily_calls)
+
+
+def test_v033_sentiment_required_period_http_failure_remains_fatal(monkeypatch, tmp_path):
+    import asyncio
+    import httpx
+    import pandas as pd
+
+    from bktstr.providers import MassiveProvider
+    from bktstr.service import execute_backtest
+
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_CACHE_DIR", str(tmp_path))
+
+    async def fake_fetch(self, symbol, start, end, timeframe="1m"):
+        if timeframe == "1d":
+            request = httpx.Request("GET", "https://example.invalid/required")
+            response = httpx.Response(502, request=request)
+            raise httpx.HTTPStatusError("required unavailable", request=request, response=response)
+        idx = pd.DatetimeIndex(
+            ["2026-04-30 13:00", "2026-04-30 13:01"], tz="America/New_York"
+        )
+        return pd.DataFrame({
+            "open": [100.0, 99.0], "high": [100.0, 99.0], "low": [99.0, 98.0],
+            "close": [99.5, 98.5], "volume": [1000.0, 1000.0],
+        }, index=idx)
+
+    monkeypatch.setattr(MassiveProvider, "fetch_bars", fake_fetch)
+    req = BacktestRequest.from_values(
+        symbol="NVDA", start="2026-04-30", end="2026-04-30", timeframe="1m", side="short",
+        entry="close.lt:1000", sentiment=True,
+        sentiment_sector_benchmark="SOXX", sentiment_market_benchmark="QQQ",
+    )
+    try:
+        asyncio.run(execute_backtest(req))
+    except httpx.HTTPStatusError:
+        pass
+    else:
+        raise AssertionError("required-period daily failure must remain fatal")
+
+
+def test_v033_request_allows_sentiment_fragility_regime_when_sentiment_enabled():
+    req = BacktestRequest.from_values(
+        symbol="NVDA", start="2026-08-01", end="2026-08-10", timeframe="1m", side="short",
+        entry="close.cross_below:vwap", regime="sentiment_fragility.gte:0.35",
+        sentiment=True, sentiment_sector_benchmark="SOXX", sentiment_market_benchmark="QQQ",
+    )
+    assert req.regime == "sentiment_fragility.gte:0.35"
+
+    try:
+        BacktestRequest.from_values(
+            symbol="NVDA", start="2026-08-01", end="2026-08-10", timeframe="1m", side="short",
+            entry="close.cross_below:vwap", regime="sentiment_fragility.gte:0.35",
+        )
+    except ValueError as exc:
+        assert "sentiment=true" in str(exc)
+    else:
+        raise AssertionError("sentiment regime fields must require sentiment=true")
+
+
+def test_v033_sentiment_fallback_preserves_older_cached_daily_history(monkeypatch, tmp_path):
+    import asyncio
+    import httpx
+    import pandas as pd
+
+    from bktstr.cache import BarCache
+    from bktstr.providers import MassiveProvider
+    from bktstr.service import execute_backtest
+
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_CACHE_DIR", str(tmp_path))
+    required_start = pd.Timestamp("2026-01-02").date()
+    required_end = pd.Timestamp("2026-04-30").date()
+    cached_day = pd.Timestamp("2025-12-01").date()
+
+    cache = BarCache()
+    for symbol, base in [("NVDA", 100.0), ("SOXX", 200.0), ("QQQ", 300.0)]:
+        frame = pd.DataFrame({
+            "open": [base], "high": [base + 1], "low": [base - 1],
+            "close": [base], "volume": [1000.0],
+        }, index=pd.DatetimeIndex([pd.Timestamp(cached_day, tz="America/New_York")]))
+        cache.write_day("massive", symbol, "1d", cached_day, frame)
+
+    def daily_frame(start, end, base):
+        dates = pd.date_range(start=start, end=end, freq="B", tz="America/New_York")
+        closes = [base + i * 0.2 for i in range(len(dates))]
+        return pd.DataFrame({
+            "open": closes, "high": [v + 1 for v in closes], "low": [v - 1 for v in closes],
+            "close": closes, "volume": [1000.0] * len(dates),
+        }, index=dates)
+
+    async def fake_fetch(self, symbol, start, end, timeframe="1m"):
+        if timeframe == "1d":
+            if start < required_start:
+                request = httpx.Request("GET", "https://example.invalid/history")
+                response = httpx.Response(502, request=request)
+                raise httpx.HTTPStatusError("history unavailable", request=request, response=response)
+            return daily_frame(start, end, {"NVDA": 100.0, "SOXX": 200.0, "QQQ": 300.0}[symbol])
+        idx = pd.DatetimeIndex(["2026-04-30 13:00", "2026-04-30 13:01"], tz="America/New_York")
+        return pd.DataFrame({
+            "open": [100.0, 99.0], "high": [100.0, 99.0], "low": [99.0, 98.0],
+            "close": [99.5, 98.5], "volume": [1000.0, 1000.0],
+        }, index=idx)
+
+    monkeypatch.setattr(MassiveProvider, "fetch_bars", fake_fetch)
+    req = BacktestRequest.from_values(
+        symbol="NVDA", start=required_start.isoformat(), end=required_end.isoformat(),
+        timeframe="1m", side="short", entry="close.lt:1000", sentiment=True,
+        sentiment_sector_benchmark="SOXX", sentiment_market_benchmark="QQQ",
+    )
+    result = asyncio.run(execute_backtest(req))
+    assert result["data"]["sentiment"]["coverage_start"] == cached_day.isoformat()
+    assert result["data"]["sentiment"]["subject_daily_bars"] > 1

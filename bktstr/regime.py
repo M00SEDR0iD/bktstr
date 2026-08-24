@@ -13,7 +13,18 @@ SUBJECT_REGIME_FIELDS = {
     "day_return20",
 }
 BENCHMARK_FIELDS = {"benchmark_return20", "relative_return20"}
-REGIME_FIELDS = SUBJECT_REGIME_FIELDS | BENCHMARK_FIELDS
+SENTIMENT_REGIME_FIELDS = {
+    "sentiment_direction",
+    "sentiment_confidence",
+    "sentiment_momentum20",
+    "sentiment_momentum60",
+    "sentiment_momentum",
+    "sentiment_component_spread",
+    "sentiment_volatility_stress",
+    "sentiment_fragility",
+}
+MARKET_REGIME_FIELDS = SUBJECT_REGIME_FIELDS | BENCHMARK_FIELDS
+REGIME_FIELDS = MARKET_REGIME_FIELDS | SENTIMENT_REGIME_FIELDS
 _ALLOWED_REGIME_OPS = {"lt", "lte", "gt", "gte", "eq"}
 
 
@@ -88,7 +99,18 @@ def attach_regime_to_intraday(intraday: pd.DataFrame, daily_regime: pd.DataFrame
     return frame
 
 
-def validate_regime_rules(spec: str, benchmark: str | None) -> None:
+def regime_uses_market_fields(spec: str) -> bool:
+    rules = parse_rules(spec)
+    for rule in rules:
+        referenced = {rule.left}
+        if isinstance(rule.right, str):
+            referenced.add(rule.right)
+        if referenced & MARKET_REGIME_FIELDS:
+            return True
+    return False
+
+
+def validate_regime_rules(spec: str, benchmark: str | None, sentiment_enabled: bool = False) -> None:
     rules = parse_rules(spec)
     for rule in rules:
         if rule.op not in _ALLOWED_REGIME_OPS:
@@ -102,3 +124,5 @@ def validate_regime_rules(spec: str, benchmark: str | None) -> None:
             referenced.add(rule.right)
         if referenced & BENCHMARK_FIELDS and not benchmark:
             raise ValueError("benchmark is required for benchmark regime fields")
+        if referenced & SENTIMENT_REGIME_FIELDS and not sentiment_enabled:
+            raise ValueError("sentiment=true is required for sentiment regime fields")

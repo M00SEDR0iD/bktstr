@@ -315,3 +315,29 @@ def test_v032_engine_records_sentiment_transition_metadata_without_resizing():
     assert trade["sentiment_momentum"] == -0.43
     assert result["summary"]["average_sentiment_fragility"] == 0.65
     assert result["summary"]["average_sentiment_momentum"] == -0.43
+
+
+def test_v033_sentiment_fragility_rule_can_gate_entry_natively():
+    data = bars(
+        [
+            ("2026-08-03 16:30:00+00:00", 100, 101, 99, 100, 1000),
+            ("2026-08-03 16:31:00+00:00", 99, 100, 98, 99, 1000),
+            ("2026-08-03 16:32:00+00:00", 98, 99, 97, 98, 1000),
+            ("2026-08-03 16:33:00+00:00", 97, 98, 96, 97, 1000),
+        ]
+    )
+    data["sentiment_fragility"] = [0.20, 0.40, 0.40, 0.40]
+    result = run_backtest_on_bars(
+        data,
+        BacktestConfig(
+            side="short",
+            entry_rules="close.lt:1000",
+            regime_rules="sentiment_fragility.gte:0.35",
+            stop_pct=10,
+            target_pct=10,
+            max_hold_minutes=1,
+            slippage_bps=0,
+        ),
+    )
+    assert result["summary"]["trades"] == 1
+    assert result["trades"][0]["entry_time"].startswith("2026-08-03T12:32")

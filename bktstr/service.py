@@ -5,10 +5,18 @@ from datetime import date, timedelta
 import os
 import re
 
+import httpx
+import pandas as pd
+
 from .cache import BarCache, CachedProvider
 from .engine import BacktestConfig, run_backtest_on_bars
 from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
-from .regime import attach_regime_to_intraday, build_daily_regime, validate_regime_rules
+from .regime import (
+    attach_regime_to_intraday,
+    build_daily_regime,
+    regime_uses_market_fields,
+    validate_regime_rules,
+)
 from .sentiment import attach_sentiment_to_intraday, build_daily_sentiment
 from .provenance import resolve_sentiment_sources, sentiment_provenance
 from .rules import parse_rules
@@ -92,7 +100,9 @@ class BacktestRequest:
         if normalized_benchmark and not _SYMBOL.match(normalized_benchmark):
             raise ValueError("invalid benchmark symbol")
         if normalized_regime:
-            validate_regime_rules(normalized_regime, normalized_benchmark)
+            validate_regime_rules(
+                normalized_regime, normalized_benchmark, sentiment_enabled=bool(sentiment)
+            )
         normalized_sector_benchmark = (
             sentiment_sector_benchmark.strip().upper()
             if sentiment_sector_benchmark and sentiment_sector_benchmark.strip()
@@ -155,6 +165,50 @@ def _validate_entry_window(start: str | None, end: str | None) -> None:
         raise ValueError("entry_start_time must be before entry_end_time")
 
 
+def _coverage_bounds(frame: pd.DataFrame) -> tuple[str | None, str | None]:
+    if frame.empty:
+        return None, None
+    index = frame.index
+    if index.tz is None:
+        local = index.tz_localize("UTC").tz_convert("America/New_York")
+    else:
+        local = index.tz_convert("America/New_York")
+    return local[0].date().isoformat(), local[-1].date().isoformat()
+
+
+async def _fetch_sentiment_daily(
+    provider: CachedProvider,
+    symbol: str,
+    requested_start: date,
+    required_start: date,
+    end: date,
+) -> tuple[pd.DataFrame, dict]:
+    fallback_used = False
+    try:
+        frame = await provider.fetch_bars(symbol, requested_start, end, "1d")
+        cache_stats = dict(provider.last_stats)
+    except httpx.HTTPStatusError:
+        if requested_start >= required_start:
+            raise
+        fallback_used = True
+        # Requested-period data is mandatory. If this fails, propagate the error.
+        await provider.fetch_bars(symbol, required_start, end, "1d")
+        cache_stats = dict(provider.last_stats)
+        # Preserve any older successful cache history rather than discarding it.
+        frame, cached_stats = provider.read_cached_bars(symbol, requested_start, end, "1d")
+        cache_stats = {**cache_stats, **cached_stats}
+    coverage_start, coverage_end = _coverage_bounds(frame)
+    return frame, {
+        "requested_start": requested_start.isoformat(),
+        "required_start": required_start.isoformat(),
+        "coverage_start": coverage_start,
+        "coverage_end": coverage_end,
+        "fallback_used": fallback_used,
+        "daily_bars": int(len(frame)),
+        "cache": cache_stats,
+    }
+
+
 def provider_name_for_request(request: BacktestRequest, *, today: date | None = None) -> str:
     if os.getenv("MASSIVE_API_KEY", ""):
         return "massive"
@@ -177,7 +231,7 @@ async def execute_backtest(request: BacktestRequest) -> dict:
     intraday_cache = dict(provider.last_stats)
     regime_data = None
 
-    if request.regime:
+    if request.regime and regime_uses_market_fields(request.regime):
         warmup_start = request.start - timedelta(days=120)
         subject_daily = await provider.fetch_bars(request.symbol, warmup_start, request.end, "1d")
         subject_cache = dict(provider.last_stats)
@@ -202,31 +256,42 @@ async def execute_backtest(request: BacktestRequest) -> dict:
     sentiment_data = None
     if request.sentiment:
         sentiment_warmup_start = request.start - timedelta(days=460)
-        sentiment_subject_daily = await provider.fetch_bars(
-            request.symbol, sentiment_warmup_start, request.end, "1d"
+        sentiment_subject_daily, subject_coverage = await _fetch_sentiment_daily(
+            provider, request.symbol, sentiment_warmup_start, request.start, request.end
         )
-        sentiment_subject_cache = dict(provider.last_stats)
-        sector_daily = await provider.fetch_bars(
-            request.sentiment_sector_benchmark, sentiment_warmup_start, request.end, "1d"
+        sector_daily, sector_coverage = await _fetch_sentiment_daily(
+            provider, request.sentiment_sector_benchmark, sentiment_warmup_start, request.start, request.end
         )
-        sector_cache = dict(provider.last_stats)
-        market_daily = await provider.fetch_bars(
-            request.sentiment_market_benchmark, sentiment_warmup_start, request.end, "1d"
+        market_daily, market_coverage = await _fetch_sentiment_daily(
+            provider, request.sentiment_market_benchmark, sentiment_warmup_start, request.start, request.end
         )
-        market_cache = dict(provider.last_stats)
         daily_sentiment = build_daily_sentiment(sentiment_subject_daily, sector_daily, market_daily)
         bars = attach_sentiment_to_intraday(bars, daily_sentiment)
+        coverage_items = (subject_coverage, sector_coverage, market_coverage)
+        starts = [x["coverage_start"] for x in coverage_items]
+        ends = [x["coverage_end"] for x in coverage_items]
+        common_coverage_start = max(starts) if all(starts) else None
+        common_coverage_end = min(ends) if all(ends) else None
         sentiment_data = {
             "subject": request.symbol,
             "sector_benchmark": request.sentiment_sector_benchmark,
             "market_benchmark": request.sentiment_market_benchmark,
             "warmup_start": sentiment_warmup_start.isoformat(),
+            "requested_warmup_start": sentiment_warmup_start.isoformat(),
+            "coverage_start": common_coverage_start,
+            "coverage_end": common_coverage_end,
+            "warmup_degraded": any(x["fallback_used"] for x in coverage_items) or common_coverage_start is None,
+            "coverage": {
+                "subject": subject_coverage,
+                "sector": sector_coverage,
+                "market": market_coverage,
+            },
             "subject_daily_bars": int(len(sentiment_subject_daily)),
             "sector_daily_bars": int(len(sector_daily)),
             "market_daily_bars": int(len(market_daily)),
-            "subject_cache": sentiment_subject_cache,
-            "sector_cache": sector_cache,
-            "market_cache": market_cache,
+            "subject_cache": subject_coverage["cache"],
+            "sector_cache": sector_coverage["cache"],
+            "market_cache": market_coverage["cache"],
             "multipliers_are_informational": True,
             "provenance": sentiment_provenance(request.sentiment_data_profile, request.sentiment_sources),
         }

@@ -7,7 +7,7 @@ from bktstr.server import CAPABILITIES
 def test_gui_sentiment_contract_matches_runtime_capabilities():
     contract_path = Path(__file__).parents[1] / "docs" / "gui" / "sentiment-data-contract.json"
     contract = json.loads(contract_path.read_text())
-    assert contract["version"] == CAPABILITIES["version"] == "0.3.2"
+    assert contract["version"] == CAPABILITIES["version"] == "0.3.3"
     runtime_outputs = set(CAPABILITIES["sentiment"]["outputs"])
     contract_outputs = set(contract["sentiment"]["outputs"].keys())
     assert runtime_outputs.issubset(contract_outputs)
@@ -26,3 +26,16 @@ def test_system_manual_contains_required_gui_and_provenance_sections():
         "## Look-ahead safety",
     ]:
         assert heading in manual
+
+
+def test_v033_docs_publish_coverage_and_native_filter_contract():
+    contract_path = Path(__file__).parents[1] / "docs" / "gui" / "sentiment-data-contract.json"
+    contract = json.loads(contract_path.read_text())
+    assert contract["version"] == "0.3.3"
+    assert "sentiment_fragility" in contract["sentiment"]["filterable_fields"]
+    assert "coverage_start" in contract["sentiment"]["coverage_fields"]
+
+    manual = (Path(__file__).parents[1] / "docs" / "BKTSTR_SYSTEM_MANUAL.md").read_text()
+    assert "## Sentiment history coverage" in manual
+    assert "sentiment_fragility.gte:0.35" in manual
+    assert "optional warm-up" in manual.lower()

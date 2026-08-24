@@ -89,3 +89,18 @@ def test_regime_rule_validation_rejects_intraday_fields_and_cross_ops():
 
     with pytest.raises(ValueError, match="cross operators"):
         validate_regime_rules("day_close.cross_below:day_sma20", benchmark=None)
+
+
+def test_v033_regime_validation_accepts_sentiment_fields_only_when_sentiment_enabled():
+    validate_regime_rules(
+        "sentiment_fragility.gte:0.35,sentiment_momentum.lt:0",
+        benchmark=None,
+        sentiment_enabled=True,
+    )
+
+    with pytest.raises(ValueError, match="sentiment=true"):
+        validate_regime_rules(
+            "sentiment_fragility.gte:0.35",
+            benchmark=None,
+            sentiment_enabled=False,
+        )

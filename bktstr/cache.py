@@ -144,6 +144,21 @@ class CachedProvider:
                 available[day] = cached
         return available, missing
 
+    def read_cached_bars(self, symbol: str, start: date, end: date, timeframe: str = "1m") -> tuple[pd.DataFrame, dict]:
+        available, missing = self._read_available(symbol, start, end, timeframe)
+        frames = [
+            available[day]
+            for day in _days(start, end)
+            if day in available and not available[day].empty
+        ]
+        if frames:
+            result = pd.concat(frames).sort_index()
+            result = result[~result.index.duplicated(keep="last")]
+        else:
+            result = pd.DataFrame(columns=_COLUMNS)
+            result.index = pd.DatetimeIndex([], tz="America/New_York")
+        return result, {"cached_days": len(available), "missing_days": len(missing)}
+
     async def fetch_bars(self, symbol: str, start: date, end: date, timeframe: str = "1m") -> pd.DataFrame:
         if end < start:
             raise ValueError("end must be on or after start")

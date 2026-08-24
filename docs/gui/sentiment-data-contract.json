@@ -1,5 +1,5 @@
 {
-  "version": "0.3.2",
+  "version": "0.3.3",
   "purpose": "Stable sentiment/provenance field contract for future BKTSTR GUI clients",
   "layers": [
     "sentiment",
@@ -164,7 +164,43 @@
       "persistence_pressure_raw": {
         "unit": "ATR20_EWMA"
       }
-    }
+    },
+    "filterable_fields": [
+      "sentiment_direction",
+      "sentiment_confidence",
+      "sentiment_momentum20",
+      "sentiment_momentum60",
+      "sentiment_momentum",
+      "sentiment_component_spread",
+      "sentiment_volatility_stress",
+      "sentiment_fragility"
+    ],
+    "coverage_fields": {
+      "requested_warmup_start": {
+        "type": "date",
+        "label": "Requested sentiment warm-up start"
+      },
+      "coverage_start": {
+        "type": [
+          "date",
+          "null"
+        ],
+        "label": "Common actual sentiment coverage start"
+      },
+      "coverage_end": {
+        "type": [
+          "date",
+          "null"
+        ],
+        "label": "Common actual sentiment coverage end"
+      },
+      "warmup_degraded": {
+        "type": "boolean",
+        "label": "Optional warm-up degraded"
+      }
+    },
+    "native_filter_example": "sentiment_fragility.gte:0.35",
+    "optional_warmup_behavior": "degrade completeness and report coverage; required-period data remains strict"
   },
   "provenance": {
     "default_profile": "clean",
