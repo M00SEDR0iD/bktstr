@@ -30,9 +30,29 @@ def test_parse_backtest_query_accepts_regime_and_benchmark():
     assert req.benchmark == "SOXX"
 
 
-def test_capabilities_report_v030_regime_support():
+def test_capabilities_report_v031_regime_support():
     from bktstr.server import CAPABILITIES
 
-    assert CAPABILITIES["version"] == "0.3.0"
+    assert CAPABILITIES["version"] == "0.3.1"
     assert "regime" in CAPABILITIES
     assert "relative_return20" in CAPABILITIES["regime"]["fields"]
+
+
+def test_parse_backtest_query_accepts_sentiment_layer_parameters():
+    req, _ = parse_backtest_query(
+        "symbol=nvda&start=2026-08-18&end=2026-08-23&timeframe=1m&side=short&"
+        "entry=close.cross_below%3Avwap&sentiment=true&"
+        "sentiment_sector_benchmark=soxx&sentiment_market_benchmark=qqq"
+    )
+    assert req.sentiment is True
+    assert req.sentiment_sector_benchmark == "SOXX"
+    assert req.sentiment_market_benchmark == "QQQ"
+
+
+def test_capabilities_report_v031_sentiment_support():
+    from bktstr.server import CAPABILITIES
+
+    assert CAPABILITIES["version"] == "0.3.1"
+    assert "sentiment" in CAPABILITIES
+    assert CAPABILITIES["sentiment"]["direction_range"] == [-1.0, 1.0]
+    assert CAPABILITIES["sentiment"]["multipliers_are_informational"] is True

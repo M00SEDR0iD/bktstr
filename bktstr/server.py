@@ -43,6 +43,46 @@ CAPABILITIES = {
         "operators": ["lt", "lte", "gt", "gte", "eq"],
         "lookahead_guard": "intraday session uses latest completed daily feature row strictly before that session date",
     },
+    "sentiment": {
+        "enabled_parameter": "sentiment",
+        "sector_benchmark_parameter": "sentiment_sector_benchmark",
+        "market_benchmark_parameter": "sentiment_market_benchmark",
+        "direction_range": [-1.0, 1.0],
+        "confidence_range": [0.0, 1.0],
+        "multiplier_range": [0.5, 1.5],
+        "raw_features": [
+            "relative_return63_sector",
+            "relative_return126_sector",
+            "relative_return63_market",
+            "relative_return126_market",
+            "distance_from_52w_high",
+            "sma50_slope20",
+            "sma100_slope20",
+            "sma200_slope20",
+            "days_below_sma50",
+        ],
+        "component_scores": [
+            "sentiment_leadership_score",
+            "sentiment_trend_score",
+            "sentiment_peak_score",
+            "sentiment_persistence_score",
+        ],
+        "outputs": [
+            "sentiment_direction",
+            "sentiment_confidence",
+            "sentiment_completeness",
+            "sentiment_multiplier_long",
+            "sentiment_multiplier_short",
+        ],
+        "component_weights": {
+            "leadership": 0.35,
+            "trend": 0.30,
+            "peak": 0.20,
+            "persistence": 0.15,
+        },
+        "multipliers_are_informational": True,
+        "lookahead_guard": "intraday session uses latest completed sentiment row strictly before that session date",
+    },
     "execution_model": {
         "entry": "next bar open after signal",
         "same_bar_stop_target": "stop first (conservative)",
@@ -102,6 +142,9 @@ def parse_backtest_query(query: str) -> tuple[BacktestRequest, dict]:
         entry_end_time=_first(params, "entry_end_time", "") or None,
         regime=_first(params, "regime", "") or None,
         benchmark=_first(params, "benchmark", "") or None,
+        sentiment=_bool(_first(params, "sentiment", "false")),
+        sentiment_sector_benchmark=_first(params, "sentiment_sector_benchmark", "") or None,
+        sentiment_market_benchmark=_first(params, "sentiment_market_benchmark", "") or None,
     )
     trade_limit = int(_first(params, "trade_limit", "100"))
     if not 0 <= trade_limit <= 1000:

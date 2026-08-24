@@ -234,3 +234,115 @@ def test_execute_backtest_fetches_and_reports_daily_regime_data(monkeypatch, tmp
     assert any(call[0] == "SOXX" and call[3] == "1d" for call in calls)
     daily_nvda_call = next(call for call in calls if call[0] == "NVDA" and call[3] == "1d")
     assert daily_nvda_call[1] == req.start - timedelta(days=120)
+
+
+def test_request_accepts_sentiment_and_requires_both_benchmarks():
+    req = BacktestRequest.from_values(
+        symbol="NVDA",
+        start="2026-08-01",
+        end="2026-08-10",
+        timeframe="1m",
+        side="short",
+        entry="close.cross_below:vwap",
+        sentiment=True,
+        sentiment_sector_benchmark="soxx",
+        sentiment_market_benchmark="qqq",
+    )
+    assert req.sentiment is True
+    assert req.sentiment_sector_benchmark == "SOXX"
+    assert req.sentiment_market_benchmark == "QQQ"
+
+    for sector, market in [(None, "QQQ"), ("SOXX", None)]:
+        try:
+            BacktestRequest.from_values(
+                symbol="NVDA",
+                start="2026-08-01",
+                end="2026-08-10",
+                timeframe="1m",
+                side="short",
+                entry="close.cross_below:vwap",
+                sentiment=True,
+                sentiment_sector_benchmark=sector,
+                sentiment_market_benchmark=market,
+            )
+        except ValueError as exc:
+            assert "sentiment" in str(exc).lower() and "benchmark" in str(exc).lower()
+        else:
+            raise AssertionError("expected sentiment to require both benchmarks")
+
+
+def test_execute_backtest_fetches_attaches_and_reports_sentiment_data(monkeypatch, tmp_path):
+    import asyncio
+    from datetime import timedelta
+
+    import pandas as pd
+
+    from bktstr.providers import MassiveProvider
+    from bktstr.service import execute_backtest
+
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_CACHE_DIR", str(tmp_path))
+    calls = []
+
+    def daily_frame(start, end, base, slope):
+        dates = pd.date_range(start=start, end=end, freq="B", tz="America/New_York")
+        closes = [base + i * slope for i in range(len(dates))]
+        return pd.DataFrame(
+            {
+                "open": closes,
+                "high": [v + 1 for v in closes],
+                "low": [v - 1 for v in closes],
+                "close": closes,
+                "volume": [1000.0] * len(dates),
+            },
+            index=dates,
+        )
+
+    async def fake_fetch(self, symbol, start, end, timeframe="1m"):
+        calls.append((symbol, start, end, timeframe))
+        if timeframe == "1d":
+            slopes = {"NVDA": -0.3, "SOXX": 0.1, "QQQ": 0.05}
+            bases = {"NVDA": 300.0, "SOXX": 200.0, "QQQ": 500.0}
+            return daily_frame(start, end, bases[symbol], slopes[symbol])
+        idx = pd.DatetimeIndex(
+            ["2026-08-17 13:00", "2026-08-17 13:01", "2026-08-17 13:02"],
+            tz="America/New_York",
+        )
+        return pd.DataFrame(
+            {
+                "open": [100.0, 99.0, 98.0],
+                "high": [100.0, 99.0, 98.0],
+                "low": [99.0, 98.0, 97.0],
+                "close": [99.5, 98.5, 97.5],
+                "volume": [1000.0, 1000.0, 1000.0],
+            },
+            index=idx,
+        )
+
+    monkeypatch.setattr(MassiveProvider, "fetch_bars", fake_fetch)
+    req = BacktestRequest.from_values(
+        symbol="NVDA",
+        start="2026-08-17",
+        end="2026-08-17",
+        timeframe="1m",
+        side="short",
+        entry="close.lt:1000",
+        sentiment=True,
+        sentiment_sector_benchmark="SOXX",
+        sentiment_market_benchmark="QQQ",
+        stop_pct=10,
+        target_pct=10,
+        max_hold_minutes=1,
+        slippage_bps=0,
+    )
+
+    result = asyncio.run(execute_backtest(req))
+
+    assert result["request"]["sentiment"] is True
+    assert result["data"]["sentiment"]["sector_benchmark"] == "SOXX"
+    assert result["data"]["sentiment"]["market_benchmark"] == "QQQ"
+    assert result["data"]["sentiment"]["warmup_start"] == (req.start - timedelta(days=400)).isoformat()
+    assert result["summary"]["trades"] == 1
+    assert "sentiment_direction" in result["trades"][0]
+    assert any(call[0] == "SOXX" and call[3] == "1d" for call in calls)
+    assert any(call[0] == "QQQ" and call[3] == "1d" for call in calls)

@@ -221,3 +221,57 @@ def test_cross_rule_does_not_compare_first_bar_with_prior_session():
     )
 
     assert result["summary"]["trades"] == 0
+
+
+def test_engine_records_sentiment_metadata_without_changing_position_size():
+    import pandas as pd
+
+    from bktstr.engine import BacktestConfig, run_backtest_on_bars
+
+    idx = pd.DatetimeIndex(
+        ["2026-08-18 13:00", "2026-08-18 13:01", "2026-08-18 13:02"],
+        tz="America/New_York",
+    )
+    bars = pd.DataFrame(
+        {
+            "open": [100.0, 99.0, 98.0],
+            "high": [100.0, 99.0, 98.0],
+            "low": [99.0, 98.0, 97.0],
+            "close": [99.5, 98.5, 97.5],
+            "volume": [1000.0, 1000.0, 1000.0],
+            "sentiment_direction": [-0.6, -0.6, -0.6],
+            "sentiment_confidence": [0.8, 0.8, 0.8],
+            "sentiment_completeness": [1.0, 1.0, 1.0],
+            "sentiment_multiplier_long": [0.76, 0.76, 0.76],
+            "sentiment_multiplier_short": [1.24, 1.24, 1.24],
+            "sentiment_leadership_score": [-0.7, -0.7, -0.7],
+            "sentiment_trend_score": [-0.5, -0.5, -0.5],
+            "sentiment_peak_score": [-0.4, -0.4, -0.4],
+            "sentiment_persistence_score": [-0.8, -0.8, -0.8],
+        },
+        index=idx,
+    )
+    result = run_backtest_on_bars(
+        bars,
+        BacktestConfig(
+            side="short",
+            entry_rules="close.lt:1000",
+            stop_pct=10,
+            target_pct=10,
+            max_hold_minutes=1,
+            position_size=1000,
+            slippage_bps=0,
+        ),
+    )
+
+    assert result["summary"]["trades"] == 1
+    trade = result["trades"][0]
+    assert trade["position_size"] == 1000.0
+    assert trade["sentiment_direction"] == -0.6
+    assert trade["sentiment_confidence"] == 0.8
+    assert trade["sentiment_multiplier"] == 1.24
+    assert trade["sentiment_multiplier_short"] == 1.24
+    assert trade["sentiment_multiplier_long"] == 0.76
+    assert result["summary"]["average_sentiment_direction"] == -0.6
+    assert result["summary"]["average_sentiment_confidence"] == 0.8
+    assert result["summary"]["average_sentiment_multiplier"] == 1.24

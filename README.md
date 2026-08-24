@@ -166,3 +166,60 @@ A cold request will show missing days and one or more fetched ranges. Subsequent
 ## Historical download behavior
 
 For a cold long-range request, BKTSTR minimizes Massive API calls by requesting the entire missing date range once and following server-provided pagination. This is especially important on rate-limited plans. If Massive responds with HTTP 429, BKTSTR honors `Retry-After` when supplied and otherwise uses bounded exponential backoff. HTTP 500/502/503/504 responses use the same retry path. API credentials are sent in the Authorization header rather than the URL.
+
+## v0.3.1 background investor sentiment layer
+
+BKTSTR can compute a slow-moving, market-derived sentiment prior separately from the intraday entry rules and daily regime filters. Enable it with two explicit comparison benchmarks:
+
+```text
+sentiment=true
+sentiment_sector_benchmark=SOXX
+sentiment_market_benchmark=QQQ
+```
+
+Example NVDA request parameters:
+
+```text
+entry=close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.1
+regime=day_sma20_slope5.lt:0,relative_return20.lt:0
+benchmark=SOXX
+sentiment=true
+sentiment_sector_benchmark=SOXX
+sentiment_market_benchmark=QQQ
+entry_start_time=12:30
+entry_end_time=16:00
+```
+
+The sentiment layer uses completed daily data only. A Tuesday intraday trade can use at most Monday's completed sentiment row; Tuesday's daily close cannot influence Tuesday's trade.
+
+### Sentiment raw features
+
+- 63- and 126-session relative returns versus the sector benchmark.
+- 63- and 126-session relative returns versus the market benchmark.
+- Distance from the rolling 252-session high.
+- 20-session slopes of the 50-, 100-, and 200-session simple moving averages.
+- Count of the last 20 completed sessions spent below the 50-session moving average.
+
+Long-lookback fields are allowed to be unavailable when history coverage is short. Available components still produce a score, while `sentiment_completeness` and `sentiment_confidence` fall to reflect missing evidence.
+
+### Sentiment component scores
+
+All scores range from `-1` (bearish) to `+1` (bullish):
+
+- `sentiment_leadership_score`, weight `0.35`
+- `sentiment_trend_score`, weight `0.30`
+- `sentiment_peak_score`, weight `0.20`
+- `sentiment_persistence_score`, weight `0.15`
+
+`sentiment_direction` is their weighted mean over available components. `sentiment_confidence` combines evidence completeness, direction magnitude, and component magnitude. The layer then exposes symmetric bounded modifiers:
+
+```text
+sentiment_multiplier_long  = clip(1 + 0.5 * direction * confidence, 0.5, 1.5)
+sentiment_multiplier_short = clip(1 - 0.5 * direction * confidence, 0.5, 1.5)
+```
+
+In v0.3.1 these multipliers are **informational only**. They are attached to trades and summarized for research, but they do not change `position_size`, fills, or P&L. This lets us validate whether the sentiment prior separates profitable from unprofitable technical setups before allowing it to change risk.
+
+When a sentiment score is available at entry, each trade includes direction, confidence, completeness, both multipliers, the side-specific `sentiment_multiplier`, and the four component scores. Summary output includes the average direction, confidence, and side-specific multiplier across sentiment-scored trades.
+
+Version sequence for this branch is `0.3.0` through `0.3.9`, then `0.4.0`.

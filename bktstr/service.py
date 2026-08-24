@@ -9,6 +9,7 @@ from .cache import BarCache, CachedProvider
 from .engine import BacktestConfig, run_backtest_on_bars
 from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
 from .regime import attach_regime_to_intraday, build_daily_regime, validate_regime_rules
+from .sentiment import attach_sentiment_to_intraday, build_daily_sentiment
 from .rules import parse_rules
 
 
@@ -36,6 +37,9 @@ class BacktestRequest:
     entry_end_time: str | None = None
     regime: str | None = None
     benchmark: str | None = None
+    sentiment: bool = False
+    sentiment_sector_benchmark: str | None = None
+    sentiment_market_benchmark: str | None = None
 
     @classmethod
     def from_values(
@@ -59,6 +63,9 @@ class BacktestRequest:
         entry_end_time: str | None = None,
         regime: str | None = None,
         benchmark: str | None = None,
+        sentiment: bool = False,
+        sentiment_sector_benchmark: str | None = None,
+        sentiment_market_benchmark: str | None = None,
     ) -> "BacktestRequest":
         symbol = symbol.strip().upper()
         if not _SYMBOL.match(symbol):
@@ -81,6 +88,21 @@ class BacktestRequest:
             raise ValueError("invalid benchmark symbol")
         if normalized_regime:
             validate_regime_rules(normalized_regime, normalized_benchmark)
+        normalized_sector_benchmark = (
+            sentiment_sector_benchmark.strip().upper()
+            if sentiment_sector_benchmark and sentiment_sector_benchmark.strip()
+            else None
+        )
+        normalized_market_benchmark = (
+            sentiment_market_benchmark.strip().upper()
+            if sentiment_market_benchmark and sentiment_market_benchmark.strip()
+            else None
+        )
+        for value in (normalized_sector_benchmark, normalized_market_benchmark):
+            if value and not _SYMBOL.match(value):
+                raise ValueError("invalid sentiment benchmark symbol")
+        if sentiment and (not normalized_sector_benchmark or not normalized_market_benchmark):
+            raise ValueError("sentiment requires both sector and market benchmark symbols")
         return cls(
             symbol=symbol,
             start=start_date,
@@ -100,6 +122,9 @@ class BacktestRequest:
             entry_end_time=entry_end_time,
             regime=normalized_regime,
             benchmark=normalized_benchmark,
+            sentiment=bool(sentiment),
+            sentiment_sector_benchmark=normalized_sector_benchmark,
+            sentiment_market_benchmark=normalized_market_benchmark,
         )
 
 
@@ -123,8 +148,8 @@ def _validate_entry_window(start: str | None, end: str | None) -> None:
 def provider_name_for_request(request: BacktestRequest, *, today: date | None = None) -> str:
     if os.getenv("MASSIVE_API_KEY", ""):
         return "massive"
-    if request.regime:
-        raise RuntimeError("MASSIVE_API_KEY is required for regime-filter backtests")
+    if request.regime or request.sentiment:
+        raise RuntimeError("MASSIVE_API_KEY is required for regime or sentiment backtests")
     if can_use_yahoo_intraday(request.start, request.end, request.timeframe, today=today):
         return "yahoo"
     raise RuntimeError("MASSIVE_API_KEY is required for historical intraday ranges older than the Yahoo fallback window")
@@ -164,6 +189,37 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "warmup_start": warmup_start.isoformat(),
         }
 
+    sentiment_data = None
+    if request.sentiment:
+        sentiment_warmup_start = request.start - timedelta(days=400)
+        sentiment_subject_daily = await provider.fetch_bars(
+            request.symbol, sentiment_warmup_start, request.end, "1d"
+        )
+        sentiment_subject_cache = dict(provider.last_stats)
+        sector_daily = await provider.fetch_bars(
+            request.sentiment_sector_benchmark, sentiment_warmup_start, request.end, "1d"
+        )
+        sector_cache = dict(provider.last_stats)
+        market_daily = await provider.fetch_bars(
+            request.sentiment_market_benchmark, sentiment_warmup_start, request.end, "1d"
+        )
+        market_cache = dict(provider.last_stats)
+        daily_sentiment = build_daily_sentiment(sentiment_subject_daily, sector_daily, market_daily)
+        bars = attach_sentiment_to_intraday(bars, daily_sentiment)
+        sentiment_data = {
+            "subject": request.symbol,
+            "sector_benchmark": request.sentiment_sector_benchmark,
+            "market_benchmark": request.sentiment_market_benchmark,
+            "warmup_start": sentiment_warmup_start.isoformat(),
+            "subject_daily_bars": int(len(sentiment_subject_daily)),
+            "sector_daily_bars": int(len(sector_daily)),
+            "market_daily_bars": int(len(market_daily)),
+            "subject_cache": sentiment_subject_cache,
+            "sector_cache": sector_cache,
+            "market_cache": market_cache,
+            "multipliers_are_informational": True,
+        }
+
     result = run_backtest_on_bars(
         bars,
         BacktestConfig(
@@ -189,6 +245,8 @@ async def execute_backtest(request: BacktestRequest) -> dict:
     }
     if regime_data is not None:
         data["regime"] = regime_data
+    if sentiment_data is not None:
+        data["sentiment"] = sentiment_data
 
     return {
         "request": {
@@ -200,6 +258,9 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "entry": request.entry,
             "regime": request.regime,
             "benchmark": request.benchmark,
+            "sentiment": request.sentiment,
+            "sentiment_sector_benchmark": request.sentiment_sector_benchmark,
+            "sentiment_market_benchmark": request.sentiment_market_benchmark,
             "stop_pct": request.stop_pct,
             "target_pct": request.target_pct,
             "max_hold_minutes": request.max_hold_minutes,

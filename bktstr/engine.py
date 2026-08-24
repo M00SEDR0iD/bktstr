@@ -98,6 +98,34 @@ def _round_money(value: float) -> float:
     return round(float(value), 6)
 
 
+
+
+_SENTIMENT_BASE_FIELDS = [
+    "sentiment_direction",
+    "sentiment_confidence",
+    "sentiment_completeness",
+    "sentiment_multiplier_long",
+    "sentiment_multiplier_short",
+]
+_SENTIMENT_COMPONENT_FIELDS = [
+    "sentiment_leadership_score",
+    "sentiment_trend_score",
+    "sentiment_peak_score",
+    "sentiment_persistence_score",
+]
+
+
+def _sentiment_trade_metadata(row: pd.Series, side: str) -> dict:
+    if not all(field in row.index and pd.notna(row[field]) for field in _SENTIMENT_BASE_FIELDS):
+        return {}
+    metadata = {field: _round_money(float(row[field])) for field in _SENTIMENT_BASE_FIELDS}
+    metadata["sentiment_multiplier"] = metadata[f"sentiment_multiplier_{side}"]
+    for field in _SENTIMENT_COMPONENT_FIELDS:
+        if field in row.index and pd.notna(row[field]):
+            metadata[field] = _round_money(float(row[field]))
+    return metadata
+
+
 def run_backtest_on_bars(bars: pd.DataFrame, config: BacktestConfig) -> dict:
     if bars.empty:
         return {"summary": _empty_summary(config.starting_capital), "trades": []}
@@ -215,23 +243,23 @@ def run_backtest_on_bars(bars: pd.DataFrame, config: BacktestConfig) -> dict:
             pnl = (entry - exit_price) * shares
         return_pct = pnl / config.position_size * 100.0
         exit_ts = frame.index[exit_i]
-        trades.append(
-            {
-                "signal_time": signal_ts.isoformat(),
-                "entry_time": entry_ts.isoformat(),
-                "entry_price": _round_money(entry),
-                "exit_time": exit_ts.isoformat(),
-                "exit_price": _round_money(exit_price),
-                "exit_reason": exit_reason,
-                "side": config.side,
-                "position_size": _round_money(config.position_size),
-                "pnl_dollars": _round_money(pnl),
-                "return_pct": _round_money(return_pct),
-                "mfe_pct": _round_money(best_return),
-                "mae_pct": _round_money(worst_return),
-                "hold_minutes": int(round((exit_ts - entry_ts).total_seconds() / 60.0)),
-            }
-        )
+        trade = {
+            "signal_time": signal_ts.isoformat(),
+            "entry_time": entry_ts.isoformat(),
+            "entry_price": _round_money(entry),
+            "exit_time": exit_ts.isoformat(),
+            "exit_price": _round_money(exit_price),
+            "exit_reason": exit_reason,
+            "side": config.side,
+            "position_size": _round_money(config.position_size),
+            "pnl_dollars": _round_money(pnl),
+            "return_pct": _round_money(return_pct),
+            "mfe_pct": _round_money(best_return),
+            "mae_pct": _round_money(worst_return),
+            "hold_minutes": int(round((exit_ts - entry_ts).total_seconds() / 60.0)),
+        }
+        trade.update(_sentiment_trade_metadata(frame.iloc[entry_i], config.side))
+        trades.append(trade)
         i = max(i + 1, exit_i + 1)
 
     return {"summary": _summarize(trades, config.starting_capital), "trades": trades}
@@ -261,7 +289,7 @@ def _summarize(trades: list[dict], starting_capital: float) -> dict:
     equity = starting_capital + pnls.cumsum()
     peaks = pd.concat([pd.Series([starting_capital]), equity], ignore_index=True).cummax().iloc[1:].reset_index(drop=True)
     dd = (equity.reset_index(drop=True) - peaks) / peaks * 100.0
-    return {
+    summary = {
         "trades": int(len(trades)),
         "wins": wins,
         "losses": losses,
@@ -272,3 +300,16 @@ def _summarize(trades: list[dict], starting_capital: float) -> dict:
         "max_drawdown_pct": _round_money(dd.min()),
         "ending_equity": _round_money(starting_capital + pnls.sum()),
     }
+    sentiment_trades = [t for t in trades if "sentiment_direction" in t]
+    if sentiment_trades:
+        summary["sentiment_scored_trades"] = len(sentiment_trades)
+        summary["average_sentiment_direction"] = _round_money(
+            pd.Series([t["sentiment_direction"] for t in sentiment_trades], dtype=float).mean()
+        )
+        summary["average_sentiment_confidence"] = _round_money(
+            pd.Series([t["sentiment_confidence"] for t in sentiment_trades], dtype=float).mean()
+        )
+        summary["average_sentiment_multiplier"] = _round_money(
+            pd.Series([t["sentiment_multiplier"] for t in sentiment_trades], dtype=float).mean()
+        )
+    return summary
