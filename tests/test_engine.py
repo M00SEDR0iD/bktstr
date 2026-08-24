@@ -275,3 +275,43 @@ def test_engine_records_sentiment_metadata_without_changing_position_size():
     assert result["summary"]["average_sentiment_direction"] == -0.6
     assert result["summary"]["average_sentiment_confidence"] == 0.8
     assert result["summary"]["average_sentiment_multiplier"] == 1.24
+
+
+def test_v032_engine_records_sentiment_transition_metadata_without_resizing():
+    idx = pd.DatetimeIndex(
+        ["2026-08-18 13:00", "2026-08-18 13:01", "2026-08-18 13:02"],
+        tz="America/New_York",
+    )
+    bars = pd.DataFrame(
+        {
+            "open": [100.0, 99.0, 98.0], "high": [100.0, 99.0, 98.0],
+            "low": [99.0, 98.0, 97.0], "close": [99.5, 98.5, 97.5],
+            "volume": [1000.0, 1000.0, 1000.0],
+            "sentiment_direction": [-0.2] * 3,
+            "sentiment_confidence": [0.4] * 3,
+            "sentiment_completeness": [1.0] * 3,
+            "sentiment_multiplier_long": [0.96] * 3,
+            "sentiment_multiplier_short": [1.04] * 3,
+            "sentiment_leadership_score": [-0.6] * 3,
+            "sentiment_trend_score": [0.5] * 3,
+            "sentiment_peak_score": [0.4] * 3,
+            "sentiment_persistence_score": [-0.2] * 3,
+            "sentiment_momentum20": [-0.5] * 3,
+            "sentiment_momentum60": [-0.3] * 3,
+            "sentiment_momentum": [-0.43] * 3,
+            "sentiment_component_spread": [0.7] * 3,
+            "sentiment_volatility_stress": [0.6] * 3,
+            "sentiment_fragility": [0.65] * 3,
+        }, index=idx,
+    )
+    cfg = BacktestConfig(
+        side="short", entry_rules="close.lt:1000", stop_pct=10, target_pct=10,
+        max_hold_minutes=1, position_size=1000, starting_capital=10000, slippage_bps=0,
+    )
+    result = run_backtest_on_bars(bars, cfg)
+    trade = result["trades"][0]
+    assert trade["position_size"] == 1000.0
+    assert trade["sentiment_fragility"] == 0.65
+    assert trade["sentiment_momentum"] == -0.43
+    assert result["summary"]["average_sentiment_fragility"] == 0.65
+    assert result["summary"]["average_sentiment_momentum"] == -0.43

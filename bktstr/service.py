@@ -10,6 +10,7 @@ from .engine import BacktestConfig, run_backtest_on_bars
 from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
 from .regime import attach_regime_to_intraday, build_daily_regime, validate_regime_rules
 from .sentiment import attach_sentiment_to_intraday, build_daily_sentiment
+from .provenance import resolve_sentiment_sources, sentiment_provenance
 from .rules import parse_rules
 
 
@@ -40,6 +41,8 @@ class BacktestRequest:
     sentiment: bool = False
     sentiment_sector_benchmark: str | None = None
     sentiment_market_benchmark: str | None = None
+    sentiment_data_profile: str = "clean"
+    sentiment_sources: tuple[str, ...] = ("price",)
 
     @classmethod
     def from_values(
@@ -66,6 +69,8 @@ class BacktestRequest:
         sentiment: bool = False,
         sentiment_sector_benchmark: str | None = None,
         sentiment_market_benchmark: str | None = None,
+        sentiment_data_profile: str = "clean",
+        sentiment_sources: str | tuple[str, ...] | None = None,
     ) -> "BacktestRequest":
         symbol = symbol.strip().upper()
         if not _SYMBOL.match(symbol):
@@ -103,6 +108,9 @@ class BacktestRequest:
                 raise ValueError("invalid sentiment benchmark symbol")
         if sentiment and (not normalized_sector_benchmark or not normalized_market_benchmark):
             raise ValueError("sentiment requires both sector and market benchmark symbols")
+        normalized_data_profile, normalized_sources = resolve_sentiment_sources(
+            sentiment_data_profile, sentiment_sources
+        )
         return cls(
             symbol=symbol,
             start=start_date,
@@ -125,6 +133,8 @@ class BacktestRequest:
             sentiment=bool(sentiment),
             sentiment_sector_benchmark=normalized_sector_benchmark,
             sentiment_market_benchmark=normalized_market_benchmark,
+            sentiment_data_profile=normalized_data_profile,
+            sentiment_sources=normalized_sources,
         )
 
 
@@ -191,7 +201,7 @@ async def execute_backtest(request: BacktestRequest) -> dict:
 
     sentiment_data = None
     if request.sentiment:
-        sentiment_warmup_start = request.start - timedelta(days=400)
+        sentiment_warmup_start = request.start - timedelta(days=460)
         sentiment_subject_daily = await provider.fetch_bars(
             request.symbol, sentiment_warmup_start, request.end, "1d"
         )
@@ -218,6 +228,7 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "sector_cache": sector_cache,
             "market_cache": market_cache,
             "multipliers_are_informational": True,
+            "provenance": sentiment_provenance(request.sentiment_data_profile, request.sentiment_sources),
         }
 
     result = run_backtest_on_bars(
@@ -261,6 +272,8 @@ async def execute_backtest(request: BacktestRequest) -> dict:
             "sentiment": request.sentiment,
             "sentiment_sector_benchmark": request.sentiment_sector_benchmark,
             "sentiment_market_benchmark": request.sentiment_market_benchmark,
+            "sentiment_data_profile": request.sentiment_data_profile,
+            "sentiment_sources": list(request.sentiment_sources),
             "stop_pct": request.stop_pct,
             "target_pct": request.target_pct,
             "max_hold_minutes": request.max_hold_minutes,

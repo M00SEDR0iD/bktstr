@@ -1,0 +1,240 @@
+{
+  "version": "0.3.2",
+  "purpose": "Stable sentiment/provenance field contract for future BKTSTR GUI clients",
+  "layers": [
+    "sentiment",
+    "regime",
+    "technical",
+    "execution"
+  ],
+  "sentiment": {
+    "outputs": {
+      "sentiment_direction": {
+        "range": [
+          -1.0,
+          1.0
+        ],
+        "directional": true,
+        "label": "Background sentiment level"
+      },
+      "sentiment_confidence": {
+        "range": [
+          0.0,
+          1.0
+        ],
+        "directional": false,
+        "label": "Sentiment confidence"
+      },
+      "sentiment_completeness": {
+        "range": [
+          0.0,
+          1.0
+        ],
+        "directional": false,
+        "label": "Evidence completeness"
+      },
+      "sentiment_multiplier_long": {
+        "range": [
+          0.5,
+          1.5
+        ],
+        "directional": true,
+        "label": "Informational long multiplier",
+        "affects_position_size": false
+      },
+      "sentiment_multiplier_short": {
+        "range": [
+          0.5,
+          1.5
+        ],
+        "directional": true,
+        "label": "Informational short multiplier",
+        "affects_position_size": false
+      },
+      "sentiment_momentum20": {
+        "range": [
+          -1.0,
+          1.0
+        ],
+        "directional": true,
+        "label": "20-session sentiment momentum"
+      },
+      "sentiment_momentum60": {
+        "range": [
+          -1.0,
+          1.0
+        ],
+        "directional": true,
+        "label": "60-session sentiment momentum"
+      },
+      "sentiment_momentum": {
+        "range": [
+          -1.0,
+          1.0
+        ],
+        "directional": true,
+        "label": "Combined sentiment momentum"
+      },
+      "sentiment_component_spread": {
+        "range": [
+          0.0,
+          1.0
+        ],
+        "directional": false,
+        "label": "Component disagreement"
+      },
+      "sentiment_volatility_stress": {
+        "range": [
+          0.0,
+          1.0
+        ],
+        "directional": false,
+        "label": "Volatility expansion stress"
+      },
+      "sentiment_fragility": {
+        "range": [
+          0.0,
+          1.0
+        ],
+        "directional": false,
+        "label": "Sentiment fragility"
+      }
+    },
+    "components": {
+      "sentiment_leadership_score": {
+        "weight": 0.35,
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      "sentiment_trend_score": {
+        "weight": 0.3,
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      "sentiment_peak_score": {
+        "weight": 0.2,
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      "sentiment_persistence_score": {
+        "weight": 0.15,
+        "range": [
+          -1.0,
+          1.0
+        ]
+      }
+    },
+    "diagnostics": {
+      "ema50": {
+        "unit": "price"
+      },
+      "ema100": {
+        "unit": "price"
+      },
+      "ema200": {
+        "unit": "price"
+      },
+      "atr20_pct": {
+        "unit": "percent"
+      },
+      "realized_vol20": {
+        "unit": "annualized_percent"
+      },
+      "realized_vol60": {
+        "unit": "annualized_percent"
+      },
+      "volatility_ratio": {
+        "unit": "ratio"
+      },
+      "persistence_occupancy": {
+        "range": [
+          0.0,
+          1.0
+        ]
+      },
+      "normalized_ema50_distance": {
+        "unit": "ATR20"
+      },
+      "persistence_pressure_raw": {
+        "unit": "ATR20_EWMA"
+      }
+    }
+  },
+  "provenance": {
+    "default_profile": "clean",
+    "non_clean_warning_field": "non_clean_data_used",
+    "tiers": {
+      "A": {
+        "label": "clean",
+        "default_enabled": true
+      },
+      "B": {
+        "label": "structured",
+        "default_enabled": false
+      },
+      "C": {
+        "label": "derived",
+        "default_enabled": false
+      },
+      "D": {
+        "label": "experimental",
+        "default_enabled": false
+      }
+    },
+    "sources": {
+      "price": {
+        "tier": "A",
+        "available": true,
+        "point_in_time_safe": true,
+        "model_derived": false
+      },
+      "options": {
+        "tier": "B",
+        "available": false
+      },
+      "analyst": {
+        "tier": "B",
+        "available": false
+      },
+      "macro": {
+        "tier": "B",
+        "available": false
+      },
+      "news": {
+        "tier": "C",
+        "available": false,
+        "model_derived": true
+      },
+      "social": {
+        "tier": "D",
+        "available": false,
+        "model_derived": true
+      }
+    }
+  },
+  "gui": {
+    "primary_gauges": [
+      "sentiment_direction",
+      "sentiment_momentum",
+      "sentiment_fragility"
+    ],
+    "component_bars": [
+      "sentiment_leadership_score",
+      "sentiment_trend_score",
+      "sentiment_peak_score",
+      "sentiment_persistence_score"
+    ],
+    "always_show_provenance": true,
+    "warn_when_non_clean_data_used": true,
+    "show_multiplier_as_informational": true
+  },
+  "lookahead": {
+    "daily_attachment_rule": "strictly_prior_completed_session"
+  }
+}

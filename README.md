@@ -2,7 +2,7 @@
 
 Granular, read-only equity backtesting service intended to be called by an AI research workflow.
 
-## What v0.3.0 does
+## What v0.3.2 does
 
 - 1m / 5m / 15m / 1h / 1d OHLCV input
 - Long and short underlying-equity simulations
@@ -167,14 +167,16 @@ A cold request will show missing days and one or more fetched ranges. Subsequent
 
 For a cold long-range request, BKTSTR minimizes Massive API calls by requesting the entire missing date range once and following server-provided pagination. This is especially important on rate-limited plans. If Massive responds with HTTP 429, BKTSTR honors `Retry-After` when supplied and otherwise uses bounded exponential backoff. HTTP 500/502/503/504 responses use the same retry path. API credentials are sent in the Authorization header rather than the URL.
 
-## v0.3.1 background investor sentiment layer
+## v0.3.2 background investor sentiment and transition layer
 
-BKTSTR can compute a slow-moving, market-derived sentiment prior separately from the intraday entry rules and daily regime filters. Enable it with two explicit comparison benchmarks:
+BKTSTR can compute a slow-moving, market-derived sentiment prior separately from the intraday entry rules and daily regime filters. v0.3.2 adds sentiment momentum, fragility, volatility-aware EMA persistence, and explicit source provenance. Enable it with two explicit comparison benchmarks:
 
 ```text
 sentiment=true
 sentiment_sector_benchmark=SOXX
 sentiment_market_benchmark=QQQ
+sentiment_data_profile=clean
+sentiment_sources=price
 ```
 
 Example NVDA request parameters:
@@ -198,7 +200,8 @@ The sentiment layer uses completed daily data only. A Tuesday intraday trade can
 - 63- and 126-session relative returns versus the market benchmark.
 - Distance from the rolling 252-session high.
 - 20-session slopes of the 50-, 100-, and 200-session simple moving averages.
-- Count of the last 20 completed sessions spent below the 50-session moving average.
+- Legacy count of the last 20 completed sessions spent below SMA50 (diagnostic only in v0.3.2).
+- EMA50/100/200, ATR20%, 20/60-session realized volatility, volatility ratio, EMA50 occupancy, and ATR-normalized persistence pressure.
 
 Long-lookback fields are allowed to be unavailable when history coverage is short. Available components still produce a score, while `sentiment_completeness` and `sentiment_confidence` fall to reflect missing evidence.
 
@@ -218,8 +221,13 @@ sentiment_multiplier_long  = clip(1 + 0.5 * direction * confidence, 0.5, 1.5)
 sentiment_multiplier_short = clip(1 - 0.5 * direction * confidence, 0.5, 1.5)
 ```
 
-In v0.3.1 these multipliers are **informational only**. They are attached to trades and summarized for research, but they do not change `position_size`, fills, or P&L. This lets us validate whether the sentiment prior separates profitable from unprofitable technical setups before allowing it to change risk.
+In v0.3.2 these multipliers are **informational only**. They are attached to trades and summarized for research, but they do not change `position_size`, fills, or P&L. This lets us validate whether the sentiment prior separates profitable from unprofitable technical setups before allowing it to change risk.
 
 When a sentiment score is available at entry, each trade includes direction, confidence, completeness, both multipliers, the side-specific `sentiment_multiplier`, and the four component scores. Summary output includes the average direction, confidence, and side-specific multiplier across sentiment-scored trades.
 
 Version sequence for this branch is `0.3.0` through `0.3.9`, then `0.4.0`.
+
+
+## System manual / GUI contract
+
+The white-paper-style architecture and user manual is `docs/BKTSTR_SYSTEM_MANUAL.md`. The stable machine-readable sentiment/provenance contract for future GUI development is `docs/gui/sentiment-data-contract.json`. Runtime field discovery remains available at `/api/v1/capabilities`.

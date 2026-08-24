@@ -10,6 +10,7 @@ import httpx
 
 from . import __version__
 from .service import BacktestRequest, execute_backtest
+from .provenance import capability_provenance
 
 
 CAPABILITIES = {
@@ -49,6 +50,8 @@ CAPABILITIES = {
         "market_benchmark_parameter": "sentiment_market_benchmark",
         "direction_range": [-1.0, 1.0],
         "confidence_range": [0.0, 1.0],
+        "momentum_range": [-1.0, 1.0],
+        "fragility_range": [0.0, 1.0],
         "multiplier_range": [0.5, 1.5],
         "raw_features": [
             "relative_return63_sector",
@@ -60,6 +63,16 @@ CAPABILITIES = {
             "sma100_slope20",
             "sma200_slope20",
             "days_below_sma50",
+            "ema50",
+            "ema100",
+            "ema200",
+            "atr20_pct",
+            "realized_vol20",
+            "realized_vol60",
+            "volatility_ratio",
+            "persistence_occupancy",
+            "normalized_ema50_distance",
+            "persistence_pressure_raw",
         ],
         "component_scores": [
             "sentiment_leadership_score",
@@ -73,6 +86,12 @@ CAPABILITIES = {
             "sentiment_completeness",
             "sentiment_multiplier_long",
             "sentiment_multiplier_short",
+            "sentiment_momentum20",
+            "sentiment_momentum60",
+            "sentiment_momentum",
+            "sentiment_component_spread",
+            "sentiment_volatility_stress",
+            "sentiment_fragility",
         ],
         "component_weights": {
             "leadership": 0.35,
@@ -81,6 +100,9 @@ CAPABILITIES = {
             "persistence": 0.15,
         },
         "multipliers_are_informational": True,
+        "data_profile_parameter": "sentiment_data_profile",
+        "sources_parameter": "sentiment_sources",
+        "data_profiles": capability_provenance(),
         "lookahead_guard": "intraday session uses latest completed sentiment row strictly before that session date",
     },
     "execution_model": {
@@ -145,6 +167,8 @@ def parse_backtest_query(query: str) -> tuple[BacktestRequest, dict]:
         sentiment=_bool(_first(params, "sentiment", "false")),
         sentiment_sector_benchmark=_first(params, "sentiment_sector_benchmark", "") or None,
         sentiment_market_benchmark=_first(params, "sentiment_market_benchmark", "") or None,
+        sentiment_data_profile=_first(params, "sentiment_data_profile", "clean"),
+        sentiment_sources=_first(params, "sentiment_sources", "") or None,
     )
     trade_limit = int(_first(params, "trade_limit", "100"))
     if not 0 <= trade_limit <= 1000:

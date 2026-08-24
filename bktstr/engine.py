@@ -112,6 +112,12 @@ _SENTIMENT_COMPONENT_FIELDS = [
     "sentiment_trend_score",
     "sentiment_peak_score",
     "sentiment_persistence_score",
+    "sentiment_momentum20",
+    "sentiment_momentum60",
+    "sentiment_momentum",
+    "sentiment_component_spread",
+    "sentiment_volatility_stress",
+    "sentiment_fragility",
 ]
 
 
@@ -312,4 +318,10 @@ def _summarize(trades: list[dict], starting_capital: float) -> dict:
         summary["average_sentiment_multiplier"] = _round_money(
             pd.Series([t["sentiment_multiplier"] for t in sentiment_trades], dtype=float).mean()
         )
+        fragility = [t["sentiment_fragility"] for t in sentiment_trades if "sentiment_fragility" in t]
+        if fragility:
+            summary["average_sentiment_fragility"] = _round_money(pd.Series(fragility, dtype=float).mean())
+        momentum = [t["sentiment_momentum"] for t in sentiment_trades if "sentiment_momentum" in t]
+        if momentum:
+            summary["average_sentiment_momentum"] = _round_money(pd.Series(momentum, dtype=float).mean())
     return summary

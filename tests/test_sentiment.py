@@ -113,3 +113,106 @@ def test_attach_sentiment_uses_strictly_prior_completed_day():
 
     assert list(attached["sentiment_direction"]) == [-0.2, -0.2]
     assert list(attached["sentiment_confidence"]) == [0.4, 0.4]
+
+
+def test_v032_exposes_ema_volatility_and_persistence_features():
+    n = 420
+    subject = _daily_frame([100 + i * 0.2 + (2 if i % 7 == 0 else 0) for i in range(n)])
+    sector = _daily_frame([100 + i * 0.1 for i in range(n)])
+    market = _daily_frame([100 + i * 0.08 for i in range(n)])
+
+    result = build_daily_sentiment(subject, sector, market)
+    last = result.iloc[-1]
+
+    for field in [
+        "ema50", "ema100", "ema200", "atr20_pct", "realized_vol20", "realized_vol60",
+        "volatility_ratio", "persistence_occupancy", "normalized_ema50_distance",
+        "persistence_pressure_raw",
+    ]:
+        assert field in result.columns
+        assert pd.notna(last[field])
+    assert 0 <= last["persistence_occupancy"] <= 1
+    assert last["volatility_ratio"] > 0
+    assert -1 <= last["sentiment_persistence_score"] <= 1
+
+
+def test_v032_persistence_distinguishes_sustained_below_ema_pressure():
+    n = 420
+    sector = _daily_frame([100 + i * 0.1 for i in range(n)])
+    market = _daily_frame([100 + i * 0.08 for i in range(n)])
+    above = _daily_frame([100 + i * 0.25 for i in range(n)])
+    below_values = [220 + i * 0.05 for i in range(320)] + [236 - (i - 320) * 0.45 for i in range(320, n)]
+    below = _daily_frame(below_values)
+
+    above_score = build_daily_sentiment(above, sector, market).iloc[-1]
+    below_score = build_daily_sentiment(below, sector, market).iloc[-1]
+
+    assert below_score["persistence_occupancy"] > above_score["persistence_occupancy"]
+    assert below_score["persistence_pressure_raw"] < above_score["persistence_pressure_raw"]
+    assert below_score["sentiment_persistence_score"] < above_score["sentiment_persistence_score"]
+
+
+def test_v032_sentiment_momentum_is_negative_when_level_deteriorates():
+    n = 460
+    sector = _daily_frame([100 + i * 0.12 for i in range(n)])
+    market = _daily_frame([100 + i * 0.10 for i in range(n)])
+    subject_values = [100 + i * 0.35 for i in range(360)] + [226 - (i - 360) * 0.55 for i in range(360, n)]
+    subject = _daily_frame(subject_values)
+
+    result = build_daily_sentiment(subject, sector, market)
+    last = result.iloc[-1]
+
+    assert "sentiment_momentum20" in result.columns
+    assert "sentiment_momentum60" in result.columns
+    assert "sentiment_momentum" in result.columns
+    assert last["sentiment_momentum20"] < 0
+    assert last["sentiment_momentum"] < 0
+
+
+def test_v032_fragility_rises_with_component_disagreement_and_volatility_expansion():
+    n = 460
+    sector = _daily_frame([100 + i * 0.1 for i in range(n)])
+    market = _daily_frame([100 + i * 0.08 for i in range(n)])
+    coherent = _daily_frame([100 + i * 0.30 for i in range(n)])
+
+    fractured_values = [100 + i * 0.32 for i in range(360)]
+    price = fractured_values[-1]
+    for i in range(100):
+        shock = 4.0 if i % 2 == 0 else -4.5
+        price = max(20.0, price + shock - 0.15)
+        fractured_values.append(price)
+    fractured = _daily_frame(fractured_values)
+
+    coherent_last = build_daily_sentiment(coherent, sector, market).iloc[-1]
+    fractured_last = build_daily_sentiment(fractured, sector, market).iloc[-1]
+
+    for field in ["sentiment_component_spread", "sentiment_volatility_stress", "sentiment_fragility"]:
+        assert field in coherent_last.index
+        assert field in fractured_last.index
+        assert 0 <= coherent_last[field] <= 1
+        assert 0 <= fractured_last[field] <= 1
+    assert fractured_last["sentiment_volatility_stress"] > coherent_last["sentiment_volatility_stress"]
+    assert fractured_last["sentiment_fragility"] > coherent_last["sentiment_fragility"]
+
+
+def test_attach_sentiment_carries_v032_transition_outputs_from_prior_day_only():
+    daily_idx = pd.DatetimeIndex(["2026-08-17", "2026-08-18"], tz="America/New_York")
+    sentiment = pd.DataFrame(
+        {
+            "sentiment_direction": [0.4, -0.2],
+            "sentiment_confidence": [0.5, 0.7],
+            "sentiment_fragility": [0.8, 0.3],
+            "sentiment_momentum": [-0.6, 0.2],
+        },
+        index=daily_idx,
+    )
+    intraday_idx = pd.DatetimeIndex(["2026-08-18 13:00", "2026-08-18 14:00"], tz="America/New_York")
+    intraday = pd.DataFrame(
+        {"open": [100, 99], "high": [101, 100], "low": [98, 97], "close": [99, 98], "volume": [1000, 1000]},
+        index=intraday_idx,
+    )
+
+    attached = attach_sentiment_to_intraday(intraday, sentiment)
+
+    assert list(attached["sentiment_fragility"]) == [0.8, 0.8]
+    assert list(attached["sentiment_momentum"]) == [-0.6, -0.6]

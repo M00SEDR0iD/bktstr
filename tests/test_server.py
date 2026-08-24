@@ -33,7 +33,7 @@ def test_parse_backtest_query_accepts_regime_and_benchmark():
 def test_capabilities_report_v031_regime_support():
     from bktstr.server import CAPABILITIES
 
-    assert CAPABILITIES["version"] == "0.3.1"
+    assert CAPABILITIES["version"] == "0.3.2"
     assert "regime" in CAPABILITIES
     assert "relative_return20" in CAPABILITIES["regime"]["fields"]
 
@@ -52,7 +52,29 @@ def test_parse_backtest_query_accepts_sentiment_layer_parameters():
 def test_capabilities_report_v031_sentiment_support():
     from bktstr.server import CAPABILITIES
 
-    assert CAPABILITIES["version"] == "0.3.1"
+    assert CAPABILITIES["version"] == "0.3.2"
     assert "sentiment" in CAPABILITIES
     assert CAPABILITIES["sentiment"]["direction_range"] == [-1.0, 1.0]
     assert CAPABILITIES["sentiment"]["multipliers_are_informational"] is True
+
+
+def test_v032_query_accepts_clean_sentiment_profile_and_sources():
+    req, _ = parse_backtest_query(
+        "symbol=nvda&start=2026-08-18&end=2026-08-23&timeframe=1m&side=short&"
+        "entry=close.cross_below%3Avwap&sentiment=true&sentiment_sector_benchmark=soxx&"
+        "sentiment_market_benchmark=qqq&sentiment_data_profile=clean&sentiment_sources=price"
+    )
+    assert req.sentiment_data_profile == "clean"
+    assert req.sentiment_sources == ("price",)
+
+
+def test_v032_capabilities_publish_transition_and_provenance_contract():
+    from bktstr.server import CAPABILITIES
+
+    assert CAPABILITIES["version"] == "0.3.2"
+    sentiment = CAPABILITIES["sentiment"]
+    assert sentiment["fragility_range"] == [0.0, 1.0]
+    assert sentiment["momentum_range"] == [-1.0, 1.0]
+    assert "sentiment_fragility" in sentiment["outputs"]
+    assert sentiment["data_profiles"]["default"] == "clean"
+    assert sentiment["data_profiles"]["tiers"]["A"]["label"] == "clean"
