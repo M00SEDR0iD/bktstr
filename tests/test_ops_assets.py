@@ -80,30 +80,41 @@ def _job_steps(lines: list[str]) -> list[str]:
     return steps
 
 
-def _named_step(lines: list[str], name: str) -> list[str]:
-    step_header = f"      - name: {name}"
-    indices = [index for index, line in enumerate(lines) if line == step_header]
-    assert len(indices) == 1, f"expected one {name!r} step"
-
-    step: list[str] = []
-    for line in lines[indices[0] :]:
-        if step and line.startswith("      - "):
-            break
-        step.append(line)
-    return step
-
-
-def _step_values(lines: list[str], key: str) -> list[str]:
-    values: list[str] = []
+def _step_blocks(lines: list[str]) -> list[list[str]]:
+    blocks: list[list[str]] = []
     for line in lines:
-        stripped = line.strip()
-        for prefix in (f"- {key}: ", f"{key}: "):
-            if stripped.startswith(prefix):
-                value = stripped.removeprefix(prefix)
-                if value != "|":
-                    values.append(value)
+        if line.startswith("      - "):
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+    assert blocks, "steps must contain explicit step mappings"
+    return blocks
+
+
+def _direct_step_values(lines: list[str], key: str) -> list[str]:
+    values: list[str] = []
+    prefixes = (f"      - {key}: ", f"        {key}: ")
+    for line in lines:
+        for prefix in prefixes:
+            if line.startswith(prefix):
+                values.append(line.removeprefix(prefix))
                 break
     return values
+
+
+def _step_values(blocks: list[list[str]], key: str) -> list[str]:
+    return [
+        value
+        for block in blocks
+        for value in _direct_step_values(block, key)
+        if value != "|"
+    ]
+
+
+def _named_step(blocks: list[list[str]], name: str) -> list[str]:
+    matches = [block for block in blocks if _direct_step_values(block, "name") == [name]]
+    assert len(matches) == 1, f"expected one {name!r} step"
+    return matches[0]
 
 
 def _assert_ci_workflow_contract(text: str) -> None:
@@ -163,13 +174,17 @@ def _assert_ci_workflow_contract(text: str) -> None:
         assert _job_name(job) == expected["name"]
         assert _job_scalar(job, "runs-on") == "ubuntu-latest"
         assert not any(line.startswith("    needs:") for line in job)
-        steps = _job_steps(job)
+        assert not any(line.startswith("    if:") for line in job)
+        steps = _step_blocks(_job_steps(job))
+        assert not any(_direct_step_values(step, "if") for step in steps)
         assert _step_values(steps, "uses") == expected["actions"]
         assert _step_values(steps, "run") == expected["commands"]
         for required in expected["body"]:
-            assert required in "\n".join(steps)
+            assert required in "\n".join(line for step in steps for line in step)
 
-    assert _named_step(_job_steps(jobs["hygiene"]), "Reject tracked generated files") == [
+    assert _named_step(
+        _step_blocks(_job_steps(jobs["hygiene"])), "Reject tracked generated files"
+    ) == [
         "      - name: Reject tracked generated files",
         "        shell: bash",
         "        run: |",
@@ -197,6 +212,11 @@ def test_ci_workflow_contract_rejects_semantic_mutations():
     swapped_commands = swapped_commands.replace(
         "__test_command__", "python scripts/check_release_consistency.py", 1
     )
+    dependency_in_env = text.replace(
+        "          cache-dependency-path: requirements-dev.txt\n      - run: python -m pip install -r requirements-dev.txt",
+        "          cache-dependency-path: requirements-dev.txt\n        env:\n          run: python -m pip install -r requirements-dev.txt",
+        1,
+    )
     mutations = {
         "a non-main push trigger": text.replace("branches: [main]", "branches: [release]", 1),
         "a write permission": text.replace("contents: read", "contents: write", 1),
@@ -205,6 +225,13 @@ def test_ci_workflow_contract_rejects_semantic_mutations():
         "a Windows runner": text.replace("runs-on: ubuntu-latest", "runs-on: windows-latest", 1),
         "a renamed steps container": text.replace("    steps:", "    x-steps:", 1),
         "a weakened hygiene regex": text.replace(r"\.py[co]$", r"\.py$", 1),
+        "a dependency install nested in setup-python env": dependency_in_env,
+        "a disabling job condition": text.replace("name: Tests\n", "name: Tests\n    if: false\n", 1),
+        "a disabling step condition": text.replace(
+            "      - run: python -m pytest -q",
+            "      - if: false\n        run: python -m pytest -q",
+            1,
+        ),
     }
 
     for mutation in mutations.values():
