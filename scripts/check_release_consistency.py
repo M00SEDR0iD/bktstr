@@ -12,6 +12,7 @@ ROOT = Path(__file__).parents[1]
 LINK_PATTERN = re.compile(r"(?<!!)\[[^\]]+\]\((<[^>]+>|[^)\s]+)")
 README_VERSION_PATTERN = re.compile(r"\*\*Current release: v([^*]+)\*\*")
 IGNORED_PREFIXES = ("http:", "https:", "mailto:", "app:", "#")
+MARKDOWN_TAB_SIZE = 4
 BLOCKQUOTE_PREFIX_PATTERN = re.compile(r" {0,3}>[ \t]?")
 LIST_ITEM_PREFIX_PATTERN = re.compile(r" {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+")
 
@@ -104,7 +105,8 @@ def markdown_without_fenced_code(text: str) -> str:
     fence_character = None
     fence_length = 0
     fence_containers = ()
-    for line in text.splitlines(keepends=True):
+    for source_line in text.splitlines(keepends=True):
+        line = source_line.expandtabs(MARKDOWN_TAB_SIZE)
         content = line.rstrip("\r\n")
         if fence_character is not None:
             container_content = _continued_container(

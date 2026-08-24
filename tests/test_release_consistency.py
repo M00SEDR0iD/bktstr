@@ -51,6 +51,19 @@ def test_broken_link_check_ignores_list_container_fenced_code(tmp_path):
     assert module.find_broken_local_links(tmp_path) == []
 
 
+def test_tab_indented_list_fence_uses_markdown_columns(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "- ```markdown\n"
+        "\t[inside](inside-missing.md)\n"
+        "\t```\n"
+        "[outside](outside-missing.md)\n",
+        encoding="utf-8",
+    )
+    errors = module.find_broken_local_links(tmp_path)
+    assert len(errors) == 1
+    assert "outside-missing.md" in errors[0]
+
+
 def test_unclosed_nested_blockquote_fence_stops_at_container_end(tmp_path):
     (tmp_path / "README.md").write_text(
         "> > ```markdown\n> > [inside](inside-missing.md)\n[top](top-missing.md)\n",
