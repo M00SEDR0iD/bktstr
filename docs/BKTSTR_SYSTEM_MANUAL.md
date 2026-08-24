@@ -1,9 +1,32 @@
 # BKTSTR System Manual
 
-**Release:** v0.3.3  
+**Behavioral release:** v0.3.3  
+**Performance candidate:** v0.3.4 derived-cache layer (merge package; deploy only after equality verification)  
 **Purpose:** architecture reference, research-methodology white paper, API/user manual, and future GUI implementation guide.
 
 BKTSTR is a read-only historical market-research service. It separates slow background context from intermediate market regime and fast technical entries so that each layer can be tested independently and combined without hiding assumptions. It never places brokerage orders.
+
+## Operational research doctrine — bearish-regime scalp discovery
+
+BKTSTR's primary research use is to identify **short-duration scalp opportunities inside a broader bearish or deteriorating market regime**. The system should not promote an isolated intraday pattern merely because it backtests well on one subject or one period. Context is evaluated hierarchically:
+
+```text
+QQQ broad technology/risk environment
+        ↓
+SOXX semiconductor sector environment
+        ↓
+subject-specific state (NVDA/MU/AVGO/AMD/...)
+        ↓
+background sentiment + structural disagreement + volatility state
+        ↓
+intraday VWAP/RSI/volume trigger
+        ↓
+explicit execution simulation
+```
+
+For semiconductor research, QQQ and SOXX should be treated as permanent controls. The broad/sector layers answer whether the market is in a state where the short scalp tends to work; subject-level context answers which security may be the best expression of that state.
+
+**Current research warning:** high `sentiment_fragility` is not a validated standalone bearish signal. Validation showed it can mix useful structural disagreement with execution-hostile volatility stress. Inspect `sentiment_component_spread` and `sentiment_volatility_stress` separately and validate across symbols/time periods.
 
 ## System schematic
 
@@ -42,6 +65,49 @@ The intended hierarchy is:
 5. **Execution model** — What would have happened under explicit fills, slippage, stops, targets, and time limits?
 
 No layer should silently substitute for another. A strong technical setup can exist inside a hostile sentiment background; the system should expose that disagreement rather than erase it.
+
+## Persistent cache architecture
+
+The existing raw OHLCV cache is Layer 0. The v0.3.4 performance candidate adds reusable deterministic layers **without caching trading decisions**:
+
+```text
+L0 raw OHLCV cache
+      ↓
+L1 deterministic feature cache
+      ↓
+L2 daily context/regime/sentiment cache
+      ↓
+live strategy thresholds + live execution simulation
+      ↓
+L3 optional exact-result memoization
+```
+
+### L1 — deterministic features
+
+Cache values that do not change when a researcher adjusts thresholds or execution settings: session VWAP, RSI14, volume ratio, moving averages/slopes, returns, EMA, ATR, realized volatility, 52-week-high distance, and persistence primitives.
+
+### L2 — context
+
+Cache deterministic subject/sector/market context keyed by the subject, sector benchmark, market benchmark, clean-data profile/source set, formula version, look-ahead rule, and digests of all input DataFrames. This includes relative returns and sentiment component/output columns.
+
+### Never cache strategy decisions
+
+Do not persist Boolean "bearish regime passed", entry-rule pass/fail, tuned threshold pass/fail, side, stop/target choices, or "take short" decisions. Thresholds and execution stay live so research hypotheses remain easy to change.
+
+### Invalidation
+
+Derived cache entries are content-addressed by deterministic DataFrame digests plus explicit semantic dimensions (`formula_version`, timeframe/session model, benchmark mapping, profile/sources). Changing input data or a formula version creates a new key rather than mutating old cached research state. Atomic writes prevent partial entries; unreadable entries degrade to cache misses.
+
+### Railway storage
+
+The merge package's default path resolution is:
+
+1. `BKTSTR_DERIVED_CACHE_DIR`
+2. `BKTSTR_CACHE_DIR/derived`
+3. `RAILWAY_VOLUME_MOUNT_PATH/bktstr-cache/derived`
+4. `/tmp/bktstr-cache/derived`
+
+The persistent Railway volume should therefore carry both the raw cache and the new derived cache in production.
 
 ## Core execution model
 
@@ -94,25 +160,9 @@ benchmark=SOXX
 
 Regime rules are hard filters: if the regime condition is false, the technical setup cannot open a trade.
 
-### Native sentiment filters — v0.3.3
-
-Sentiment outputs may also be referenced directly in the same `regime=` rule string when `sentiment=true`. This keeps sentiment as a separate calculated layer while allowing it to gate a technical setup without external SQL post-processing.
-
-Example:
-
-```text
-regime=day_sma20_slope5.lt:0,relative_return20.lt:0,sentiment_fragility.gte:0.35
-benchmark=SOXX
-sentiment=true
-sentiment_sector_benchmark=SOXX
-sentiment_market_benchmark=QQQ
-```
-
-Filterable sentiment fields are `sentiment_direction`, `sentiment_confidence`, `sentiment_momentum20`, `sentiment_momentum60`, `sentiment_momentum`, `sentiment_component_spread`, `sentiment_volatility_stress`, and `sentiment_fragility`. Cross operators remain disallowed for regime filters.
-
 ## Sentiment layer definitions
 
-The sentiment layer is **price-implied background investor sentiment**, not a direct survey of investor opinions. In v0.3.2 the only active source is clean historical market price data. The layer uses daily OHLCV from the subject, a sector benchmark, and a broad-market benchmark.
+The sentiment layer is **price-implied background investor sentiment**, not a direct survey of investor opinions. In v0.3.3 the only active source is clean historical market price data. The layer uses daily OHLCV from the subject, a sector benchmark, and a broad-market benchmark.
 
 For an NVDA study the normal mapping is:
 
@@ -268,7 +318,7 @@ sentiment_multiplier_long  = clip(1 + adjustment, 0.5, 1.5)
 sentiment_multiplier_short = clip(1 - adjustment, 0.5, 1.5)
 ```
 
-**These do not change position size in v0.3.2.** They are metadata only. Position sizing should not be altered until the layer proves predictive out of sample.
+**These do not change position size in v0.3.3.** They are metadata only. Position sizing should not be altered until the layer proves predictive out of sample.
 
 ## Sentiment momentum
 
@@ -346,7 +396,7 @@ Fragility must never be interpreted as automatically bearish. High fragility plu
 
 The provenance system is designed to prevent lower-confidence data from entering a backtest invisibly.
 
-| Tier | Label | Definition | v0.3.2 status |
+| Tier | Label | Definition | v0.3.3 status |
 | --- | --- | --- | --- |
 | A | Clean | Objective point-in-time market data with deterministic transforms | **Enabled** |
 | B | Structured | Reliable structured data requiring interpretation/revision discipline | Not yet enabled |
@@ -364,7 +414,7 @@ The source registry already reserves future source IDs:
 
 ### Profiles and toggles
 
-The v0.3.2 sentiment request accepts:
+The v0.3.3 sentiment request accepts:
 
 ```text
 sentiment_data_profile=clean
@@ -394,23 +444,6 @@ Every sentiment-enabled response includes provenance metadata such as:
 
 A future GUI should surface `non_clean_data_used` prominently whenever it becomes true.
 
-
-## Sentiment history coverage
-
-v0.3.3 treats pre-period sentiment history as **optional warm-up** while keeping the requested backtest period strict. BKTSTR first requests the full 460-calendar-day sentiment warm-up. If the provider rejects only that older prefix, BKTSTR fetches the requested backtest period normally, preserves any older daily history already present in the persistent cache, and continues with reduced sentiment completeness rather than failing the whole backtest.
-
-A failure while fetching required-period daily data is still fatal. The system does not silently reinterpret a required-data outage as missing warm-up.
-
-Every sentiment response reports:
-
-- `requested_warmup_start`: desired historical start for full sentiment context.
-- `coverage_start`: latest first available date across subject, sector benchmark, and market benchmark; this is the common usable start.
-- `coverage_end`: earliest last available date across those three series.
-- `warmup_degraded`: true when optional history had to fall back or common coverage could not be established.
-- `coverage.subject`, `coverage.sector`, `coverage.market`: per-source requested start, required start, actual coverage dates, fallback flag, daily bar count, and cache stats.
-
-The GUI should visibly warn when `warmup_degraded=true`, display the actual coverage range, and continue to show `sentiment_completeness` on individual trades.
-
 ## Look-ahead safety
 
 Look-ahead safety is a hard requirement, not an optional display property.
@@ -420,6 +453,31 @@ For an intraday trading session on date D, BKTSTR attaches the latest completed 
 Momentum, persistence, volatility, and fragility are all computed within the historical daily series before this strict prior-day attachment occurs.
 
 Non-price sources added in the future must also be point-in-time reconstructable. For revision-prone macro or analyst data, the system should use the value actually published and known on the historical date, not a later revised value.
+
+## v0.3.3 coverage behavior
+
+v0.3.3 distinguishes optional historical warm-up from required backtest-period data. Missing optional warm-up must not convert an otherwise valid request into a 502. Instead BKTSTR uses available history, reduces completeness where appropriate, and reports:
+
+```text
+requested_warmup_start
+coverage_start
+coverage_end
+warmup_degraded
+subject / sector / market coverage
+fallback_used
+```
+
+Missing required-period data remains a hard failure. Cache hits must preserve exactly the same coverage/provenance semantics as uncached computation.
+
+## Agent/API control path
+
+Some execution environments cannot reliably reach the Railway hostname directly. The proven agent path is:
+
+```text
+ChatGPT → Supabase.execute_sql → pg_net net.http_get → Railway BKTSTR → net._http_response → ChatGPT
+```
+
+See `AGENT_BACKTEST_RUNBOOK.md` for exact SQL, timeout/polling discipline, frozen NVDA parameters, percentage semantics, and standard QQQ/SOXX controls.
 
 ## API examples
 
@@ -507,7 +565,7 @@ GUI labels must distinguish:
 - informational multiplier
 - actual configured `position_size`
 
-In v0.3.2 the multiplier must never be displayed as though it changed P/L sizing.
+In v0.3.3 the multiplier must never be displayed as though it changed P/L sizing.
 
 ### Suggested semantic labels
 
@@ -568,9 +626,23 @@ The sentiment system is designed to create hypotheses, not certify them. Recomme
 6. Never infer that a better in-sample P/L automatically justifies larger live position sizing.
 7. Preserve all provenance metadata with research outputs.
 
+
+### Current validation status (August 2026 research pass)
+
+The following findings guide future experiments but are not production trade rules:
+
+- NVDA Mar-Dec 2025 bearish-regime control: 30 trades, 40% wins, approximately -$2.27 EV/trade.
+- NVDA Jun-Aug 2026 bearish-regime control: 7 trades, 85.7% wins, approximately +$6.09 EV/trade.
+- Fragility threshold sweeps did not show reliable monotonicity.
+- High-fragility NVDA and MU samples were strong but tiny; AVGO remained negative and AMD produced no qualifying high-fragility trades.
+- AVGO's high-fragility state carried much greater volatility stress and multiple stop-outs, supporting separation of structural disagreement from volatility chaos.
+- SOXX and QQQ both improved materially from 2025 to Jun-Aug 2026 under the same frozen scalp trigger, supporting the QQQ → SOXX → subject hierarchy.
+
+Treat the heavily explored NVDA 2025 and Jun-Aug 2026 samples as discovery data. New claims require untouched periods and cross-symbol validation.
+
 ## Known limitations
 
-- v0.3.2 sentiment is price-implied, not literal investor-opinion measurement.
+- v0.3.3 sentiment is price-implied, not literal investor-opinion measurement.
 - Provider history limits can reduce completeness for long-lookback fields.
 - The current sentiment weights are research priors, not statistically fitted production coefficients.
 - The multiplier is informational only.

@@ -1,0 +1,3 @@
+# No new dependency is required if the existing BKTSTR repo already uses pandas.
+pandas
+pytest  # development/test only

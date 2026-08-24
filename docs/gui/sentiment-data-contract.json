@@ -164,43 +164,7 @@
       "persistence_pressure_raw": {
         "unit": "ATR20_EWMA"
       }
-    },
-    "filterable_fields": [
-      "sentiment_direction",
-      "sentiment_confidence",
-      "sentiment_momentum20",
-      "sentiment_momentum60",
-      "sentiment_momentum",
-      "sentiment_component_spread",
-      "sentiment_volatility_stress",
-      "sentiment_fragility"
-    ],
-    "coverage_fields": {
-      "requested_warmup_start": {
-        "type": "date",
-        "label": "Requested sentiment warm-up start"
-      },
-      "coverage_start": {
-        "type": [
-          "date",
-          "null"
-        ],
-        "label": "Common actual sentiment coverage start"
-      },
-      "coverage_end": {
-        "type": [
-          "date",
-          "null"
-        ],
-        "label": "Common actual sentiment coverage end"
-      },
-      "warmup_degraded": {
-        "type": "boolean",
-        "label": "Optional warm-up degraded"
-      }
-    },
-    "native_filter_example": "sentiment_fragility.gte:0.35",
-    "optional_warmup_behavior": "degrade completeness and report coverage; required-period data remains strict"
+    }
   },
   "provenance": {
     "default_profile": "clean",
@@ -272,5 +236,35 @@
   },
   "lookahead": {
     "daily_attachment_rule": "strictly_prior_completed_session"
+  },
+  "coverage": {
+    "requested_warmup_start": {
+      "type": "date"
+    },
+    "coverage_start": {
+      "type": "date"
+    },
+    "coverage_end": {
+      "type": "date"
+    },
+    "warmup_degraded": {
+      "type": "boolean"
+    },
+    "optional_warmup_behavior": "use available point-in-time-safe history, reduce completeness, report degradation; required-period data remains strict",
+    "per_asset_fields": [
+      "requested_start",
+      "required_start",
+      "coverage_start",
+      "coverage_end",
+      "fallback_used",
+      "daily_bars"
+    ]
+  },
+  "cache_contract": {
+    "strategy_behavior_must_not_change": true,
+    "cache_strategy_decisions": false,
+    "cache_deterministic_features": true,
+    "cache_context": true,
+    "exact_result_cache_optional": true
   }
 }
