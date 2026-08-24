@@ -1,0 +1,48 @@
+name: Feature
+description: Propose a new user or developer capability.
+title: "[Feature] "
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: Describe one independently testable outcome.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What becomes possible when this is complete?
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What adjacent work is explicitly excluded?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: "- [ ] Observable criterion"
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Name the automated and manual evidence required.
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Primary impact
+      options:
+        - Trading semantics
+        - Market data
+        - API or schema
+        - Deployment or operations
+        - None
+    validations:
+      required: true

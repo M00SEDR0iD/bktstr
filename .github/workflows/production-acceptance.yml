@@ -1,0 +1,56 @@
+name: BKTSTR Production Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Version expected from production health and capabilities
+        required: true
+        default: '0.3.5'
+        type: string
+      expected_commit:
+        description: Full Git SHA expected from Railway health
+        required: true
+        type: string
+      base_url:
+        description: BKTSTR production base URL
+        required: true
+        default: https://bktstr-production.up.railway.app
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  production_acceptance:
+    name: Production acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out expected commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.expected_commit }}
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run production acceptance
+        run: >-
+          python scripts/production_acceptance.py
+          --base-url "${{ inputs.base_url }}"
+          --expected-version "${{ inputs.expected_version }}"
+          --expected-commit "${{ inputs.expected_commit }}"
+          --deployment-wait-seconds 600
+          --deployment-poll-seconds 10
+          --output production-acceptance.json
+      - name: Retain acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-acceptance-report
+          path: production-acceptance.json
+          if-no-files-found: error

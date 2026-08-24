@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from bktstr import __version__
 from bktstr.server import CAPABILITIES
 
 ROOT=Path(__file__).parents[1]
@@ -7,7 +8,7 @@ ROOT=Path(__file__).parents[1]
 
 def test_gui_contract_matches_runtime_version_and_outputs():
     c=json.loads((ROOT/"docs/gui/sentiment-data-contract.json").read_text())
-    assert c["version"]==CAPABILITIES["version"]=="0.3.5"
+    assert c["version"] == CAPABILITIES["version"] == __version__
     assert set(CAPABILITIES["sentiment"]["outputs"]).issubset(c["sentiment"]["outputs"])
 
 
@@ -23,10 +24,10 @@ def test_manual_and_runbook_publish_v035_cache_pg_net_and_release_identity():
 def test_readme_and_status_describe_v035_release_workflow():
     readme=(ROOT/"README.md").read_text()
     status=(ROOT/"BUILD_STATUS.md").read_text()
-    checklist=(ROOT/"MERGE_CHECKLIST.md").read_text()
-    assert "Current release: v0.3.5" in readme
+    archive=(ROOT/"docs/archive/releases/v0.3.5.md").read_text()
+    assert f"Current release: v{__version__}" in readme
     assert "RAILWAY_GIT_COMMIT_SHA" in readme
     assert "GitHub Actions" in readme
     assert "v0.3.5" in status and "49/49" in status
-    assert "production_acceptance.py" in checklist
-    assert "git ls-files" in checklist
+    assert "production_acceptance.py" in archive
+    assert "git ls-files" in archive

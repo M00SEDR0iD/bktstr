@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contribution workflow
+    url: https://github.com/M00SEDR0iD/bktstr/blob/main/CONTRIBUTING.md
+    about: Read the Issue, branch, pull-request, and verification workflow.

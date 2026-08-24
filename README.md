@@ -96,6 +96,14 @@ python benchmarks/benchmark_cache.py
 PORT=8000 python -m bktstr.server
 ```
 
+## Project and contribution
+
+- [Contributor guide](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Standalone web application roadmap](docs/roadmap/standalone-web-app.md)
+- [v1 release plan](docs/roadmap/v1-release-plan.md)
+- [Release procedure](docs/development/releases.md)
+
 ## v0.3.5 development and release workflow
 
 GitHub Actions now runs the complete test suite, compile checks, repository-hygiene guard, and derived-cache benchmark on pushes to `main` and on pull requests. The standard release path is:
