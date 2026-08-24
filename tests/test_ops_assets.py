@@ -291,6 +291,91 @@ def test_ci_is_read_only_by_default():
     assert "secrets." not in text
 
 
+def test_production_acceptance_workflow_is_manual_and_sha_bound():
+    path = ROOT / ".github" / "workflows" / "production-acceptance.yml"
+    assert path.exists(), "production acceptance workflow is missing"
+    text = path.read_text(encoding="utf-8")
+
+    triggers = _mapping_blocks(_top_level_block(text, "on"), 2)
+    assert set(triggers) == {"workflow_dispatch"}
+    dispatch = _mapping_blocks(triggers["workflow_dispatch"], 4)
+    assert set(dispatch) == {"inputs"}
+    inputs = _mapping_blocks(dispatch["inputs"], 6)
+    assert set(inputs) == {"expected_version", "expected_commit", "base_url"}
+    assert _scalar_mapping(inputs["expected_version"], 8) == {
+        "description": "Version expected from production health and capabilities",
+        "required": "true",
+        "default": "'0.3.5'",
+        "type": "string",
+    }
+    assert _scalar_mapping(inputs["expected_commit"], 8) == {
+        "description": "Full Git SHA expected from Railway health",
+        "required": "true",
+        "type": "string",
+    }
+    assert _scalar_mapping(inputs["base_url"], 8) == {
+        "description": "BKTSTR production base URL",
+        "required": "true",
+        "default": "https://bktstr-production.up.railway.app",
+        "type": "string",
+    }
+
+    assert _scalar_mapping(_top_level_block(text, "permissions"), 2) == {"contents": "read"}
+    assert "secrets." not in text
+
+    jobs = _mapping_blocks(_top_level_block(text, "jobs"), 2)
+    assert set(jobs) == {"production_acceptance"}
+    job = jobs["production_acceptance"]
+    assert _job_name(job) == "Production acceptance"
+    assert _job_scalar(job, "runs-on") == "ubuntu-latest"
+    _assert_exact_keys(_direct_mapping_keys(job, 4), {"name", "runs-on", "steps"})
+
+    steps = _step_blocks(_job_steps(job))
+    assert len(steps) == 5
+    for step, expected_keys in zip(
+        steps,
+        [
+            {"name", "uses", "with"},
+            {"name", "uses", "with"},
+            {"name", "run"},
+            {"name", "run"},
+            {"name", "if", "uses", "with"},
+        ],
+        strict=True,
+    ):
+        _assert_exact_keys(_direct_step_keys(step), expected_keys)
+
+    assert _named_step(steps, "Check out expected commit") == [
+        "      - name: Check out expected commit",
+        "        uses: actions/checkout@v7",
+        "        with:",
+        "          ref: ${{ inputs.expected_commit }}",
+    ]
+    assert _named_step(steps, "Run production acceptance") == [
+        "      - name: Run production acceptance",
+        "        run: >-",
+        "          python scripts/production_acceptance.py",
+        '          --base-url "${{ inputs.base_url }}"',
+        '          --expected-version "${{ inputs.expected_version }}"',
+        '          --expected-commit "${{ inputs.expected_commit }}"',
+        "          --deployment-wait-seconds 600",
+        "          --deployment-poll-seconds 10",
+        "          --output production-acceptance.json",
+    ]
+    assert _named_step(steps, "Retain acceptance report") == [
+        "      - name: Retain acceptance report",
+        "        if: always()",
+        "        uses: actions/upload-artifact@v4",
+        "        with:",
+        "          name: production-acceptance-report",
+        "          path: production-acceptance.json",
+        "          if-no-files-found: error",
+    ]
+    assert "python -m pip install -r requirements-dev.txt" in text
+    assert "python-version: '3.12'" in text
+    assert "cache-dependency-path: requirements-dev.txt" in text
+
+
 def test_supabase_github_bridge_assets_are_present_and_safe():
     sql_path = ROOT / "ops" / "supabase" / "github_bridge.sql"
     runbook_path = ROOT / "ops" / "supabase" / "GITHUB_BRIDGE.md"

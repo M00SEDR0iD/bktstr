@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -101,10 +103,54 @@ def _second_run_hits(result: dict) -> dict[str, bool]:
     return hits
 
 
+def _wait_for_deployment(
+    client: httpx.Client,
+    expected_version: str,
+    expected_commit: str | None,
+    deployment_attempts: int,
+    deployment_poll_seconds: float,
+    sleeper,
+) -> dict:
+    last_version = None
+    last_commit = None
+    last_http_error = None
+
+    for attempt in range(deployment_attempts):
+        try:
+            health = _get_json(client, "/health")
+        except httpx.HTTPError as exc:
+            last_http_error = str(exc)
+        else:
+            last_version = health.get("version")
+            last_commit = health.get("git_commit")
+            if last_version == expected_version and (
+                expected_commit is None or last_commit == expected_commit
+            ):
+                return health
+
+        if attempt + 1 < deployment_attempts:
+            sleeper(deployment_poll_seconds)
+
+    expected_identity = f"expected version {expected_version}"
+    if expected_commit is not None:
+        expected_identity += f" and expected commit {expected_commit}"
+    message = (
+        f"{expected_identity}; observed version {last_version}, "
+        f"observed commit {last_commit}"
+    )
+    if last_http_error is not None:
+        message += f"; last HTTP error: {last_http_error}"
+    raise AcceptanceError(message)
+
+
 def run_acceptance(
     base_url: str,
     expected_version: str = "0.3.5",
     *,
+    expected_commit: str | None = None,
+    deployment_attempts: int = 1,
+    deployment_poll_seconds: float = 10.0,
+    sleeper=time.sleep,
     transport: httpx.BaseTransport | None = None,
     timeout_seconds: float = 300.0,
 ) -> dict[str, Any]:
@@ -114,10 +160,14 @@ def run_acceptance(
         follow_redirects=True,
         transport=transport,
     ) as client:
-        health = _get_json(client, "/health")
-        version = health.get("version")
-        if version != expected_version:
-            raise AcceptanceError(f"expected version {expected_version}, got {version}")
+        health = _wait_for_deployment(
+            client,
+            expected_version,
+            expected_commit,
+            deployment_attempts,
+            deployment_poll_seconds,
+            sleeper,
+        )
 
         capabilities = _get_json(client, "/api/v1/capabilities")
         if capabilities.get("version") != expected_version:
@@ -151,18 +201,37 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a deployed BKTSTR release against the locked NVDA anchor.")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--expected-version", default="0.3.5")
+    parser.add_argument("--expected-commit")
+    parser.add_argument("--deployment-wait-seconds", type=float, default=0)
+    parser.add_argument("--deployment-poll-seconds", type=float, default=10)
+    parser.add_argument("--output")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     args = parser.parse_args()
+    deployment_attempts = (
+        1
+        if args.deployment_wait_seconds == 0
+        else math.ceil(args.deployment_wait_seconds / args.deployment_poll_seconds) + 1
+    )
     try:
         report = run_acceptance(
             args.base_url,
             expected_version=args.expected_version,
+            expected_commit=args.expected_commit,
+            deployment_attempts=deployment_attempts,
+            deployment_poll_seconds=args.deployment_poll_seconds,
             timeout_seconds=args.timeout_seconds,
         )
     except (AcceptanceError, httpx.HTTPError) as exc:
-        print(json.dumps({"status": "fail", "error": str(exc)}, sort_keys=True))
+        report = {"status": "fail", "error": str(exc)}
+        rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        print(rendered, end="")
+        if args.output:
+            Path(args.output).write_text(rendered, encoding="utf-8")
         return 1
-    print(json.dumps(report, indent=2, sort_keys=True))
+    rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    print(rendered, end="")
+    if args.output:
+        Path(args.output).write_text(rendered, encoding="utf-8")
     return 0
 
 
