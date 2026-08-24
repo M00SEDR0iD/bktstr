@@ -32,3 +32,48 @@ def test_changelog_has_unreleased_and_immutable_v035_history():
     assert "## [0.3.5] - 2026-08-24" in text
     assert "[Unreleased]: https://github.com/M00SEDR0iD/bktstr/compare/v0.3.5...HEAD" in text
     assert "[0.3.5]: https://github.com/M00SEDR0iD/bktstr/releases/tag/v0.3.5" in text
+
+
+def test_contributor_entry_point_links_detailed_workflows():
+    text = _read("CONTRIBUTING.md")
+    for required in [
+        "Closes #",
+        "short-lived branch",
+        "squash",
+        "docs/development/git-workflow.md",
+        "docs/development/releases.md",
+    ]:
+        assert required in text
+
+
+def test_git_workflow_documents_normal_and_emergency_paths():
+    text = _read("docs/development/git-workflow.md")
+    for required in [
+        "main",
+        "feat/<issue>-<slug>",
+        "zero external approvals",
+        "force push",
+        "Emergency changes",
+        "incident Issue",
+    ]:
+        assert required in text
+
+
+def test_release_workflow_gates_tags_on_production_acceptance():
+    text = _read("docs/development/releases.md")
+    for required in [
+        "release: prepare",
+        "annotated tag",
+        "expected Git SHA",
+        "production-acceptance.yml",
+        "Rollback",
+    ]:
+        assert required in text
+
+
+def test_v035_archive_records_tag_and_post_release_doc_commit():
+    text = _read("docs/archive/releases/v0.3.5.md")
+    assert "add435d" in text
+    assert "219dc71" in text
+    assert "roadmap-only" in text
+    assert "tag was not moved" in text

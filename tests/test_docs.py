@@ -23,10 +23,10 @@ def test_manual_and_runbook_publish_v035_cache_pg_net_and_release_identity():
 def test_readme_and_status_describe_v035_release_workflow():
     readme=(ROOT/"README.md").read_text()
     status=(ROOT/"BUILD_STATUS.md").read_text()
-    checklist=(ROOT/"MERGE_CHECKLIST.md").read_text()
+    archive=(ROOT/"docs/archive/releases/v0.3.5.md").read_text()
     assert "Current release: v0.3.5" in readme
     assert "RAILWAY_GIT_COMMIT_SHA" in readme
     assert "GitHub Actions" in readme
     assert "v0.3.5" in status and "49/49" in status
-    assert "production_acceptance.py" in checklist
-    assert "git ls-files" in checklist
+    assert "production_acceptance.py" in archive
+    assert "git ls-files" in archive
