@@ -60,6 +60,39 @@ def _job_name(lines: list[str]) -> str:
     return names[0]
 
 
+def _job_scalar(lines: list[str], key: str) -> str:
+    prefix = f"    {key}: "
+    values = [line.removeprefix(prefix) for line in lines if line.startswith(prefix)]
+    assert len(values) == 1, f"each job must define exactly one {key!r} value"
+    return values[0]
+
+
+def _job_steps(lines: list[str]) -> list[str]:
+    indices = [index for index, line in enumerate(lines) if line == "    steps:"]
+    assert len(indices) == 1, "each job must define exactly one steps container"
+
+    steps: list[str] = []
+    for line in lines[indices[0] + 1 :]:
+        if line.startswith("    ") and not line.startswith("      "):
+            break
+        steps.append(line)
+    assert any(line.startswith("      - ") for line in steps), "steps must contain workflow steps"
+    return steps
+
+
+def _named_step(lines: list[str], name: str) -> list[str]:
+    step_header = f"      - name: {name}"
+    indices = [index for index, line in enumerate(lines) if line == step_header]
+    assert len(indices) == 1, f"expected one {name!r} step"
+
+    step: list[str] = []
+    for line in lines[indices[0] :]:
+        if step and line.startswith("      - "):
+            break
+        step.append(line)
+    return step
+
+
 def _step_values(lines: list[str], key: str) -> list[str]:
     values: list[str] = []
     for line in lines:
@@ -128,11 +161,25 @@ def _assert_ci_workflow_contract(text: str) -> None:
     for key, expected in expected_jobs.items():
         job = jobs[key]
         assert _job_name(job) == expected["name"]
+        assert _job_scalar(job, "runs-on") == "ubuntu-latest"
         assert not any(line.startswith("    needs:") for line in job)
-        assert _step_values(job, "uses") == expected["actions"]
-        assert _step_values(job, "run") == expected["commands"]
+        steps = _job_steps(job)
+        assert _step_values(steps, "uses") == expected["actions"]
+        assert _step_values(steps, "run") == expected["commands"]
         for required in expected["body"]:
-            assert required in "\n".join(job)
+            assert required in "\n".join(steps)
+
+    assert _named_step(_job_steps(jobs["hygiene"]), "Reject tracked generated files") == [
+        "      - name: Reject tracked generated files",
+        "        shell: bash",
+        "        run: |",
+        "          bad=\"$(git ls-files | grep -E '(^|/)(__pycache__|\\.pytest_cache)(/|$)|\\.py[co]$' || true)\"",
+        "          if [ -n \"$bad\" ]; then",
+        "            echo \"Generated files are tracked and must be removed:\"",
+        "            echo \"$bad\"",
+        "            exit 1",
+        "          fi",
+    ]
 
 
 def test_ci_workflow_runs_full_release_checks():
@@ -155,6 +202,9 @@ def test_ci_workflow_contract_rejects_semantic_mutations():
         "a write permission": text.replace("contents: read", "contents: write", 1),
         "commands assigned to the wrong jobs": swapped_commands,
         "a job dependency": text.replace("name: Tests\n", "name: Tests\n    needs: hygiene\n", 1),
+        "a Windows runner": text.replace("runs-on: ubuntu-latest", "runs-on: windows-latest", 1),
+        "a renamed steps container": text.replace("    steps:", "    x-steps:", 1),
+        "a weakened hygiene regex": text.replace(r"\.py[co]$", r"\.py$", 1),
     }
 
     for mutation in mutations.values():
