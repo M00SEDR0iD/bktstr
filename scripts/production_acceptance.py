@@ -51,6 +51,16 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+def _deployment_attempts(wait_seconds: float, poll_seconds: float) -> int:
+    if not math.isfinite(wait_seconds) or wait_seconds < 0:
+        raise AcceptanceError("--deployment-wait-seconds must be finite and >= 0")
+    if not math.isfinite(poll_seconds) or poll_seconds <= 0:
+        raise AcceptanceError("--deployment-poll-seconds must be finite and > 0")
+    if wait_seconds == 0:
+        return 1
+    return math.ceil(wait_seconds / poll_seconds) + 1
+
+
 def _get_json(client: httpx.Client, path: str, *, params: dict[str, str] | None = None) -> dict:
     response = client.get(path, params=params)
     response.raise_for_status()
@@ -154,6 +164,20 @@ def run_acceptance(
     transport: httpx.BaseTransport | None = None,
     timeout_seconds: float = 300.0,
 ) -> dict[str, Any]:
+    if (
+        isinstance(deployment_attempts, bool)
+        or not isinstance(deployment_attempts, int)
+        or deployment_attempts < 1
+    ):
+        raise AcceptanceError("deployment_attempts must be an integer >= 1")
+    if (
+        isinstance(deployment_poll_seconds, bool)
+        or not isinstance(deployment_poll_seconds, (int, float))
+        or not math.isfinite(deployment_poll_seconds)
+        or deployment_poll_seconds < 0
+    ):
+        raise AcceptanceError("deployment_poll_seconds must be finite and >= 0")
+
     with httpx.Client(
         base_url=base_url.rstrip("/"),
         timeout=timeout_seconds,
@@ -207,12 +231,11 @@ def main() -> int:
     parser.add_argument("--output")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     args = parser.parse_args()
-    deployment_attempts = (
-        1
-        if args.deployment_wait_seconds == 0
-        else math.ceil(args.deployment_wait_seconds / args.deployment_poll_seconds) + 1
-    )
     try:
+        deployment_attempts = _deployment_attempts(
+            args.deployment_wait_seconds,
+            args.deployment_poll_seconds,
+        )
         report = run_acceptance(
             args.base_url,
             expected_version=args.expected_version,

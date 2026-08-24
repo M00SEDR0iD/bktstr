@@ -291,11 +291,7 @@ def test_ci_is_read_only_by_default():
     assert "secrets." not in text
 
 
-def test_production_acceptance_workflow_is_manual_and_sha_bound():
-    path = ROOT / ".github" / "workflows" / "production-acceptance.yml"
-    assert path.exists(), "production acceptance workflow is missing"
-    text = path.read_text(encoding="utf-8")
-
+def _assert_production_acceptance_workflow_contract(text: str) -> None:
     triggers = _mapping_blocks(_top_level_block(text, "on"), 2)
     assert set(triggers) == {"workflow_dispatch"}
     dispatch = _mapping_blocks(triggers["workflow_dispatch"], 4)
@@ -351,6 +347,18 @@ def test_production_acceptance_workflow_is_manual_and_sha_bound():
         "        with:",
         "          ref: ${{ inputs.expected_commit }}",
     ]
+    assert _named_step(steps, "Set up Python") == [
+        "      - name: Set up Python",
+        "        uses: actions/setup-python@v7",
+        "        with:",
+        "          python-version: '3.12'",
+        "          cache: pip",
+        "          cache-dependency-path: requirements-dev.txt",
+    ]
+    assert _named_step(steps, "Install pinned dependencies") == [
+        "      - name: Install pinned dependencies",
+        "        run: python -m pip install -r requirements-dev.txt",
+    ]
     assert _named_step(steps, "Run production acceptance") == [
         "      - name: Run production acceptance",
         "        run: >-",
@@ -371,9 +379,32 @@ def test_production_acceptance_workflow_is_manual_and_sha_bound():
         "          path: production-acceptance.json",
         "          if-no-files-found: error",
     ]
-    assert "python -m pip install -r requirements-dev.txt" in text
-    assert "python-version: '3.12'" in text
-    assert "cache-dependency-path: requirements-dev.txt" in text
+
+
+def test_production_acceptance_workflow_is_manual_and_sha_bound():
+    path = ROOT / ".github" / "workflows" / "production-acceptance.yml"
+    assert path.exists(), "production acceptance workflow is missing"
+    _assert_production_acceptance_workflow_contract(path.read_text(encoding="utf-8"))
+
+
+def test_production_acceptance_workflow_rejects_semantic_mutations():
+    text = (ROOT / ".github" / "workflows" / "production-acceptance.yml").read_text(
+        encoding="utf-8"
+    )
+    mutations = {
+        "an unpinned setup action": text.replace(
+            "actions/setup-python@v7", "actions/setup-python@main", 1
+        ),
+        "a failure-suppressed dependency install": text.replace(
+            "run: python -m pip install -r requirements-dev.txt",
+            "run: python -m pip install -r requirements-dev.txt || true",
+            1,
+        ),
+    }
+
+    for mutation in mutations.values():
+        with pytest.raises(AssertionError):
+            _assert_production_acceptance_workflow_contract(mutation)
 
 
 def test_supabase_github_bridge_assets_are_present_and_safe():

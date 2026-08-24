@@ -1,5 +1,6 @@
 from importlib import import_module
 import json
+import math
 import sys
 
 import httpx
@@ -208,6 +209,29 @@ def test_run_acceptance_exhaustion_reports_last_identity_and_http_error():
     assert "503 Service Unavailable" in message
 
 
+@pytest.mark.parametrize(
+    ("options", "field"),
+    [
+        ({"deployment_attempts": 0}, "deployment_attempts"),
+        ({"deployment_attempts": -1}, "deployment_attempts"),
+        ({"deployment_attempts": 1.5}, "deployment_attempts"),
+        ({"deployment_poll_seconds": -1}, "deployment_poll_seconds"),
+        ({"deployment_poll_seconds": math.nan}, "deployment_poll_seconds"),
+        ({"deployment_poll_seconds": math.inf}, "deployment_poll_seconds"),
+        ({"deployment_poll_seconds": -math.inf}, "deployment_poll_seconds"),
+    ],
+)
+def test_run_acceptance_rejects_invalid_deployment_timing(options, field):
+    module = _module()
+
+    with pytest.raises(module.AcceptanceError, match=field):
+        module.run_acceptance(
+            "https://bktstr.example",
+            transport=_transport(),
+            **options,
+        )
+
+
 def test_main_writes_success_report_for_expected_commit(monkeypatch, tmp_path, capsys):
     module = _module()
     output_path = tmp_path / "acceptance.json"
@@ -274,3 +298,79 @@ def test_main_writes_failure_report(monkeypatch, tmp_path, capsys):
         "status": "fail",
         "error": "expected commit new-commit, got old-commit",
     }
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "expected_error"),
+    [
+        (
+            "--deployment-wait-seconds",
+            "-1",
+            "--deployment-wait-seconds must be finite and >= 0",
+        ),
+        (
+            "--deployment-wait-seconds",
+            "nan",
+            "--deployment-wait-seconds must be finite and >= 0",
+        ),
+        (
+            "--deployment-wait-seconds",
+            "inf",
+            "--deployment-wait-seconds must be finite and >= 0",
+        ),
+        (
+            "--deployment-poll-seconds",
+            "0",
+            "--deployment-poll-seconds must be finite and > 0",
+        ),
+        (
+            "--deployment-poll-seconds",
+            "-1",
+            "--deployment-poll-seconds must be finite and > 0",
+        ),
+        (
+            "--deployment-poll-seconds",
+            "nan",
+            "--deployment-poll-seconds must be finite and > 0",
+        ),
+        (
+            "--deployment-poll-seconds",
+            "inf",
+            "--deployment-poll-seconds must be finite and > 0",
+        ),
+    ],
+)
+def test_main_reports_invalid_deployment_timing(
+    monkeypatch,
+    tmp_path,
+    capsys,
+    flag,
+    value,
+    expected_error,
+):
+    module = _module()
+    output_path = tmp_path / "acceptance.json"
+
+    def unexpected_acceptance(*args, **kwargs):
+        pytest.fail("invalid CLI timing must be rejected before acceptance runs")
+
+    monkeypatch.setattr(module, "run_acceptance", unexpected_acceptance)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "production_acceptance.py",
+            "--base-url",
+            "https://bktstr.example",
+            flag,
+            value,
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert module.main() == 1
+    written = output_path.read_text(encoding="utf-8")
+    assert written == capsys.readouterr().out
+    assert written.endswith("\n")
+    assert json.loads(written) == {"status": "fail", "error": expected_error}
