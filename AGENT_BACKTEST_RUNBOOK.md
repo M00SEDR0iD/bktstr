@@ -1,7 +1,7 @@
 # BKTSTR Agent Backtest Runbook
 
-**Current release:** v0.3.4  
-**Behavioral baseline:** v0.3.3 trading semantics, with deterministic derived caching integrated  
+**Current release:** v0.3.5  
+**Behavioral baseline:** v0.3.3 trading semantics, with v0.3.4 deterministic derived caching and v0.3.5 release infrastructure  
 **Research purpose:** identify short-duration scalp opportunities that occur inside a broader bearish or deteriorating market/sector regime.  
 **Production API:** `https://bktstr-production.up.railway.app`
 
@@ -187,7 +187,7 @@ Do not compare win rate alone. EV, MFE/MAE, stop-out rate, trade count, and prov
 5. Extract only needed JSON fields from `content` when polling to reduce Supabase response size.
 6. Avoid launching many full-year 1-minute jobs concurrently; Railway/pg_net timeouts can reflect contention rather than a backtest error.
 
-## 9. Derived-cache expectations (v0.3.4 candidate)
+## 9. Derived-cache expectations (v0.3.4+)
 
 When the cache patch is integrated, repeated runs should reuse deterministic features/context. A threshold change such as:
 
@@ -204,6 +204,37 @@ sentiment_component_spread.gte:0.50,sentiment_volatility_stress.lt:0.50
 must **not** recompute unchanged VWAP/RSI/daily EMA/ATR/sentiment primitives. Threshold evaluation and execution simulation still run live.
 
 
-## v0.3.4 derived cache verification
+## v0.3.4+ derived cache verification
 
-Production `/api/v1/capabilities` must report version `0.3.4` and the derived namespaces `intraday_features`, `daily_regime`, and `daily_sentiment`. Backtest responses expose `data.derived_cache`. For correctness controls, set `BKTSTR_DERIVED_CACHE_ENABLED=false` and verify trade records are exactly equal to the cache-enabled run; this toggle changes computation reuse only, never strategy semantics.
+Production `/api/v1/capabilities` must report the expected deployed version and the derived namespaces `intraday_features`, `daily_regime`, and `daily_sentiment`. Backtest responses expose `data.derived_cache`. For correctness controls, set `BKTSTR_DERIVED_CACHE_ENABLED=false` and verify trade records are exactly equal to the cache-enabled run; this toggle changes computation reuse only, never strategy semantics.
+
+
+## 10. v0.3.5 development and deployment workflow
+
+Normal source development is:
+
+```text
+feature branch → GitHub CI → merge main → Railway auto-deploy → production acceptance → tag
+```
+
+Do not develop directly on `main`. GitHub CI must be green before merge. CI rejects tracked generated Python artifacts in addition to running tests, compile checks, and the cache benchmark.
+
+After Railway deploys, verify `/health` first. Record `version` and `git_commit`; Railway GitHub deployments populate the latter from `RAILWAY_GIT_COMMIT_SHA`. Then run:
+
+```bash
+python scripts/production_acceptance.py \
+  --base-url https://bktstr-production.up.railway.app
+```
+
+This is the canonical v0.3.5 production gate. It runs the frozen NVDA Jun-Aug 2026 anchor twice and requires the known summary, identical trading output, and warm hits for intraday/regime/sentiment derived caches.
+
+### GitHub-through-Supabase emergency recovery
+
+If direct GitHub access is unavailable, do **not** reconstruct source from memory. Use `ops/supabase/GITHUB_BRIDGE.md`. The fixed flow is:
+
+1. enqueue commit;
+2. enqueue tree;
+3. enqueue blobs/source bodies;
+4. collect blobs into the snapshot tables.
+
+Commit/tree discovery uses the GitHub REST API. File bodies use `raw.githubusercontent.com`, avoiding the unauthenticated REST quota that otherwise becomes a bottleneck on repositories with more than roughly one API request per file. Recovered bodies are stored as `content_base64` alongside the Git blob SHA.

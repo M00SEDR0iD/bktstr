@@ -1,17 +1,30 @@
-# Merge / Deployment Checklist
+# v0.3.5 Merge / Deployment Checklist
 
-Use this archive as an overlay on the real BKTSTR repository, not as a replacement checkout.
+- [ ] Work on a feature branch created from current production `main`; do not edit production `main` directly.
+- [ ] Replace/merge the v0.3.5 repository files.
+- [ ] Remove any generated Python artifacts currently tracked by Git. Check with:
 
-- [ ] Create a feature branch from the current GitHub v0.3.3 code.
-- [ ] Copy `bktstr_cache/`, new tests, runbook, and updated docs into their matching paths.
-- [ ] Follow `integration/INTEGRATION_GUIDE.md` at the current intraday/daily/context computation call sites.
-- [ ] Keep the existing formula functions unchanged; wrap them as callbacks.
-- [ ] Run the original v0.3.3 suite (prior bundle baseline: 64/64).
-- [ ] Run `python -m pytest -q` including this package's cache tests.
-- [ ] Run cache-disabled vs cache-enabled copies of the same backtest and compare every trade field.
-- [ ] Reproduce the known NVDA Jun-Aug 2026 control: 7 trades / 6 wins / ~+$6.086 EV per trade.
-- [ ] Reproduce the known NVDA Mar-Dec 2025 bearish-regime control: 30 trades / 12 wins / ~-$2.266 EV per trade.
-- [ ] Confirm coverage/provenance values are identical with cache enabled and disabled.
-- [ ] Confirm a repeated warm run reports derived cache hits.
-- [ ] Run QQQ and SOXX controls as documented in `AGENT_BACKTEST_RUNBOOK.md`.
-- [ ] Only after behavioral equality, bump service/health version to v0.3.4 and deploy Railway.
+```bash
+git ls-files | grep -E '(^|/)(__pycache__|\.pytest_cache)(/|$)|\.py[co]$' || true
+```
+
+If this prints files, remove them from Git before the v0.3.5 commit.
+- [ ] Run `python -m pytest -q` locally.
+- [ ] Run `python -m compileall -q bktstr bktstr_cache integration scripts benchmarks tests`.
+- [ ] Run `python benchmarks/benchmark_cache.py` and verify cold miss → warm hit with one compute call.
+- [ ] Commit the feature branch and push it to GitHub.
+- [ ] Require the **BKTSTR CI** GitHub Actions workflow to pass.
+- [ ] Merge the feature branch to `main` only after CI is green.
+- [ ] Confirm Railway deploys the new `main` commit.
+- [ ] Check `/health`: require `version=0.3.5` and record `git_commit`.
+- [ ] Check `/api/v1/capabilities`: require v0.3.5 release/formula/cache metadata.
+- [ ] Run:
+
+```bash
+python scripts/production_acceptance.py --base-url https://bktstr-production.up.railway.app
+```
+
+- [ ] Require the frozen anchor: 7 trades / 6 wins / 1 loss / +$42.604714 / +$6.086388 EV.
+- [ ] Require exact trading-output equality across the two acceptance runs.
+- [ ] Require second-run derived cache hits for intraday, regime, and sentiment.
+- [ ] Tag the accepted commit as `v0.3.5`.
