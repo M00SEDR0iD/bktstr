@@ -67,6 +67,17 @@ def _job_scalar(lines: list[str], key: str) -> str:
     return values[0]
 
 
+def _direct_mapping_keys(lines: list[str], indentation: int) -> list[str]:
+    keys: list[str] = []
+    prefix = " " * indentation
+    for line in lines:
+        if line.startswith(prefix) and not line.startswith(prefix + " "):
+            key, separator, _ = line.strip().partition(":")
+            assert separator, f"expected mapping key, got {line!r}"
+            keys.append(key)
+    return keys
+
+
 def _job_steps(lines: list[str]) -> list[str]:
     indices = [index for index, line in enumerate(lines) if line == "    steps:"]
     assert len(indices) == 1, "each job must define exactly one steps container"
@@ -102,6 +113,26 @@ def _direct_step_values(lines: list[str], key: str) -> list[str]:
     return values
 
 
+def _direct_step_keys(lines: list[str]) -> list[str]:
+    keys: list[str] = []
+    for line in lines:
+        if line.startswith("      - "):
+            definition = line.removeprefix("      - ")
+        elif line.startswith("        ") and not line.startswith("          "):
+            definition = line.removeprefix("        ")
+        else:
+            continue
+        key, separator, _ = definition.partition(":")
+        assert separator, f"expected step mapping key, got {line!r}"
+        keys.append(key)
+    return keys
+
+
+def _assert_exact_keys(actual: list[str], expected: set[str]) -> None:
+    assert set(actual) == expected
+    assert len(actual) == len(expected), f"duplicate or unexpected keys: {actual!r}"
+
+
 def _step_values(blocks: list[list[str]], key: str) -> list[str]:
     return [
         value
@@ -134,36 +165,42 @@ def _assert_ci_workflow_contract(text: str) -> None:
             "actions": ["actions/checkout@v7"],
             "commands": [],
             "body": ["git ls-files", "__pycache__"],
+            "step_keys": [{"name", "uses"}, {"name", "shell", "run"}],
         },
         "tests": {
             "name": "Tests",
             "actions": ["actions/checkout@v7", "actions/setup-python@v7"],
             "commands": ["python -m pip install -r requirements-dev.txt", "python -m pytest -q"],
             "body": ["python-version: '3.12'", "cache: pip", "cache-dependency-path: requirements-dev.txt"],
+            "step_keys": [{"uses"}, {"uses", "with"}, {"run"}, {"run"}],
         },
         "compile": {
             "name": "Compile",
             "actions": ["actions/checkout@v7", "actions/setup-python@v7"],
             "commands": ["python -m compileall -q bktstr bktstr_cache integration scripts benchmarks tests"],
             "body": ["python-version: '3.12'"],
+            "step_keys": [{"uses"}, {"uses", "with"}, {"run"}],
         },
         "production_image": {
             "name": "Production image",
             "actions": ["actions/checkout@v7"],
             "commands": ["docker build --tag bktstr:${{ github.sha }} ."],
             "body": [],
+            "step_keys": [{"uses"}, {"run"}],
         },
         "documentation": {
             "name": "Documentation",
             "actions": ["actions/checkout@v7", "actions/setup-python@v7"],
             "commands": ["python -m pip install -r requirements-dev.txt", "python scripts/check_release_consistency.py"],
             "body": ["python-version: '3.12'", "cache: pip", "cache-dependency-path: requirements-dev.txt"],
+            "step_keys": [{"uses"}, {"uses", "with"}, {"run"}, {"run"}],
         },
         "cache_benchmark": {
             "name": "Cache benchmark",
             "actions": ["actions/checkout@v7", "actions/setup-python@v7"],
             "commands": ["python -m pip install -r requirements-dev.txt", "python benchmarks/benchmark_cache.py"],
             "body": ["python-version: '3.12'", "cache: pip", "cache-dependency-path: requirements-dev.txt"],
+            "step_keys": [{"uses"}, {"uses", "with"}, {"run"}, {"run"}],
         },
     }
     jobs = _mapping_blocks(_top_level_block(text, "jobs"), 2)
@@ -173,10 +210,11 @@ def _assert_ci_workflow_contract(text: str) -> None:
         job = jobs[key]
         assert _job_name(job) == expected["name"]
         assert _job_scalar(job, "runs-on") == "ubuntu-latest"
-        assert not any(line.startswith("    needs:") for line in job)
-        assert not any(line.startswith("    if:") for line in job)
+        _assert_exact_keys(_direct_mapping_keys(job, 4), {"name", "runs-on", "steps"})
         steps = _step_blocks(_job_steps(job))
-        assert not any(_direct_step_values(step, "if") for step in steps)
+        assert len(steps) == len(expected["step_keys"])
+        for step, step_keys in zip(steps, expected["step_keys"], strict=True):
+            _assert_exact_keys(_direct_step_keys(step), step_keys)
         assert _step_values(steps, "uses") == expected["actions"]
         assert _step_values(steps, "run") == expected["commands"]
         for required in expected["body"]:
@@ -230,6 +268,14 @@ def test_ci_workflow_contract_rejects_semantic_mutations():
         "a disabling step condition": text.replace(
             "      - run: python -m pytest -q",
             "      - if: false\n        run: python -m pytest -q",
+            1,
+        ),
+        "a job that continues on error": text.replace(
+            "name: Tests\n", "name: Tests\n    continue-on-error: true\n", 1
+        ),
+        "a step that continues on error": text.replace(
+            "      - run: python -m pytest -q",
+            "      - continue-on-error: true\n        run: python -m pytest -q",
             1,
         ),
     }
