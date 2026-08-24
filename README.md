@@ -1,6 +1,6 @@
 # BKTSTR
 
-**Current release: v0.3.4**
+**Current release: v0.3.5**
 
 BKTSTR is a read-only equity/ETF research backtester built to identify short-duration scalp opportunities inside a broader bearish or deteriorating market regime. It never places brokerage orders.
 
@@ -22,7 +22,7 @@ next-bar-open execution with explicit stop/target/hold/slippage
 
 QQQ and SOXX are permanent controls for semiconductor research. High sentiment fragility is diagnostic, not automatically bearish.
 
-## v0.3.4 performance architecture
+## v0.3.4+ performance architecture
 
 BKTSTR now has two persistent cache layers:
 
@@ -95,6 +95,26 @@ python -m pytest -q
 python benchmarks/benchmark_cache.py
 PORT=8000 python -m bktstr.server
 ```
+
+## v0.3.5 development and release workflow
+
+GitHub Actions now runs the complete test suite, compile checks, repository-hygiene guard, and derived-cache benchmark on pushes to `main` and on pull requests. The standard release path is:
+
+```text
+feature branch → GitHub CI → merge main → Railway auto-deploy → production acceptance → tag release
+```
+
+Railway GitHub deployments provide `RAILWAY_GIT_COMMIT_SHA` and related repository/deployment variables. `/health` exposes the running `git_commit`, branch/repository, and deployment ID when available. `/api/v1/capabilities` publishes the same build identity plus feature-formula and cache-format versions.
+
+After Railway deploys, run the locked production regression:
+
+```bash
+python scripts/production_acceptance.py --base-url https://bktstr-production.up.railway.app
+```
+
+The acceptance command checks v0.3.5, the derived-cache contract, the frozen NVDA Jun-Aug 2026 anchor, exact trading-output equality across two identical runs, and second-run derived-cache hits.
+
+If an agent cannot reach GitHub directly, use the GitHub-through-Supabase recovery bridge in `ops/supabase/GITHUB_BRIDGE.md`. It is an emergency source-recovery path, not the normal development workflow.
 
 ## Deployment
 

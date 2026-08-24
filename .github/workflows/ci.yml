@@ -1,0 +1,47 @@
+name: BKTSTR CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+
+      - name: Reject tracked generated files
+        shell: bash
+        run: |
+          bad="$(git ls-files | grep -E '(^|/)(__pycache__|\.pytest_cache)(/|$)|\.py[co]$' || true)"
+          if [ -n "$bad" ]; then
+            echo "Generated files are tracked and must be removed:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Compile Python sources
+        run: python -m compileall -q bktstr bktstr_cache integration scripts benchmarks tests
+
+      - name: Smoke-test derived cache benchmark
+        run: python benchmarks/benchmark_cache.py

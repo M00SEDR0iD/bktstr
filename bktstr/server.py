@@ -9,7 +9,15 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from . import __version__
-from .service import BacktestRequest, execute_backtest
+from .build_info import runtime_build_info
+from .service import (
+    BacktestRequest,
+    INTRADAY_FEATURE_FORMULA_VERSION,
+    REGIME_FORMULA_VERSION,
+    SENTIMENT_FORMULA_VERSION,
+    execute_backtest,
+)
+from bktstr_cache.derived import CACHE_FORMAT_VERSION
 from .provenance import capability_provenance
 
 
@@ -143,6 +151,15 @@ CAPABILITIES = {
         "massive": "full-range pagination with 429/5xx retry; used when MASSIVE_API_KEY is configured",
         "yahoo": "fallback for recent intraday data only",
     },
+    "release": {
+        "build": runtime_build_info(),
+        "feature_formula_versions": {
+            "intraday": INTRADAY_FEATURE_FORMULA_VERSION,
+            "regime": REGIME_FORMULA_VERSION,
+            "sentiment": SENTIMENT_FORMULA_VERSION,
+        },
+        "derived_cache_format_version": CACHE_FORMAT_VERSION,
+    },
     "cache": {
         "type": "daily compressed OHLCV files",
         "persistent_when": "Railway Volume is attached or BKTSTR_CACHE_DIR is set",
@@ -162,6 +179,15 @@ CAPABILITIES = {
         },
     },
 }
+
+
+def health_payload() -> dict:
+    return {
+        "status": "ok",
+        "service": "bktstr",
+        "version": __version__,
+        **runtime_build_info(),
+    }
 
 
 def _first(params: dict[str, list[str]], name: str, default: str | None = None) -> str:
@@ -244,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path in {"/", "/health"}:
-            self._json(200, {"status": "ok", "service": "bktstr", "version": __version__})
+            self._json(200, health_payload())
             return
         if parsed.path == "/api/v1/capabilities":
             self._json(200, CAPABILITIES)

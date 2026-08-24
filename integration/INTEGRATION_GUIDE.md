@@ -1,101 +1,38 @@
-# Integrating `bktstr_cache` into the live v0.3.3 repo
+# Derived Cache Integration Reference
 
-This package was produced without access to the current GitHub checkout. The cache library is therefore intentionally merge-safe and formula-agnostic: wire it around the existing functions instead of replacing their internals.
+The derived cache is already integrated into the live BKTSTR application as of v0.3.4. This document is retained as a reference for the integration boundary and for future refactors; it is **not** a pending merge guide.
 
-## Expected existing modules
+## Current principle
 
-Prior BKTSTR builds used `data.py`, `indicators.py`, `regime.py`, `sentiment.py`, `backtest.py`, `models.py`, and a FastAPI service/main module. Adjust paths to the current repo if they moved.
+**Cache deterministic features, not strategy decisions.**
 
-## 1. Instantiate one cache
+The active service owns formula execution. `bktstr_cache` stores the resulting deterministic DataFrames using raw-data digests plus semantic/version dimensions. Changing a strategy threshold must reuse features without reusing a stale trading decision.
 
-Near service startup or backtest orchestration:
+## Active cached namespaces
 
-```python
-from bktstr_cache import DerivedFrameCache
+The runtime `/api/v1/capabilities` contract exposes these derived namespaces:
 
-derived_cache = DerivedFrameCache()
-```
+- `intraday_features` — session VWAP, RSI14, volume ratio and other deterministic intraday measurements.
+- `daily_regime` — deterministic completed-daily regime measurements.
+- `daily_sentiment` — deterministic subject/sector/market sentiment/context measurements.
 
-Default location order:
+The current semantic versions are published in `capabilities.release.feature_formula_versions`; the on-disk cache schema is published as `capabilities.release.derived_cache_format_version`.
+
+## Storage selection
+
+`DerivedFrameCache` resolves its persistent location in this order:
 
 1. `BKTSTR_DERIVED_CACHE_DIR`
 2. `BKTSTR_CACHE_DIR/derived`
 3. `RAILWAY_VOLUME_MOUNT_PATH/bktstr-cache/derived`
 4. `/tmp/bktstr-cache/derived`
 
-On Railway the persistent volume path should therefore be selected automatically when the same environment used by the raw cache is present.
+## What remains live on every request
 
-## 2. Wrap intraday feature construction
+Do **not** cache any of the following as feature/context values:
 
-Do not copy formulas into the cache module. If current code resembles:
-
-```python
-featured = add_indicators(raw_bars)
-```
-
-change the orchestration to the equivalent of:
-
-```python
-from integration.example_wrappers import cached_intraday_features
-
-cached = cached_intraday_features(
-    derived_cache,
-    raw_bars,
-    symbol,
-    timeframe,
-    add_indicators,
-    formula_version="intraday-v0.3.3",
-)
-featured = cached.frame
-```
-
-Bump `formula_version` whenever indicator semantics change.
-
-## 3. Wrap deterministic daily subject features
-
-Wrap the function that builds SMA/EMA/returns/ATR/volatility/persistence primitives:
-
-```python
-cached = cached_daily_features(
-    derived_cache,
-    raw_daily,
-    symbol,
-    build_daily_features,
-    formula_version="daily-features-v0.3.3",
-)
-daily_features = cached.frame
-```
-
-## 4. Wrap context/sentiment construction
-
-Once subject, sector, and market daily feature frames exist:
-
-```python
-cached = cached_daily_context(
-    derived_cache,
-    subject_daily_features,
-    sector_daily_features,
-    market_daily_features,
-    subject_symbol=symbol,
-    sector_symbol=sentiment_sector_benchmark,
-    market_symbol=sentiment_market_benchmark,
-    compute_fn=build_context,
-    formula_version="context-sentiment-v0.3.3",
-    data_profile=sentiment_data_profile,
-    sources=sentiment_sources,
-)
-context = cached.frame
-```
-
-The key includes all three input frames plus benchmark mapping/profile/source/formula dimensions.
-
-## 5. Do not cache these
-
-Keep live per request:
-
-- regime Boolean rules (`lt`, `gte`, etc.)
-- sentiment thresholds
-- entry rules
+- entry-rule Boolean decisions
+- regime/sentiment threshold decisions
 - entry windows
 - side
 - stop/target
@@ -103,36 +40,29 @@ Keep live per request:
 - slippage
 - position size
 - same-day/EOD configuration
-- trade simulation and MFE/MAE
+- trade simulation
+- MFE/MAE
 
-The cache stores deterministic measurements, not decisions.
+These are evaluated from the cached continuous measurements on every backtest.
 
-## 6. API diagnostics (optional)
+## Formula-version invalidation
 
-A future compatible response can expose non-strategy diagnostics such as:
+When deterministic formula semantics change, bump the corresponding version constant rather than deleting old cache files manually. Current constants live in `bktstr/service.py` and the cache format constant lives in `bktstr_cache/derived.py`.
 
-```json
-{
-  "derived_cache": {
-    "intraday": {"hit": true, "key": "..."},
-    "daily": {"hit": true, "key": "..."},
-    "context": {"hit": false, "key": "..."}
-  }
-}
-```
+The cache key also incorporates the source DataFrame digest and relevant context dimensions such as symbol/timeframe and subject/sector/market mapping, so raw-data revisions or mapping changes invalidate the affected derived entry.
 
-Do not make clients depend on this until `/api/v1/capabilities` and tests define it.
+## Reference wrappers
 
-## 7. Deployment gate
+`integration/example_wrappers.py` remains useful as a small, tested example of the intended boundary around existing formula callbacks. The production service may call the cache directly; these wrappers are reference/testing helpers rather than a second strategy implementation.
 
-Before calling this v0.3.4 or deploying:
+## Verification gate
 
-1. Copy `bktstr_cache/` into the real repo.
-2. Add the three wrapper integrations at current computation call sites.
-3. Run the existing v0.3.3 test suite; the prior bundle baseline was 64/64.
-4. Run the new cache tests.
-5. Run one cold and one warm NVDA production-equivalent control locally.
-6. Confirm trade-by-trade equality between cache disabled and cache enabled.
-7. Confirm coverage/provenance metadata equality.
-8. Confirm warm run reports cache hits and is faster.
-9. Only then bump service version/deploy.
+Any future cache refactor must preserve all of the following:
+
+1. Cache-disabled and cache-enabled backtests are trade-for-trade identical.
+2. Repeated requests report warm derived-cache hits.
+3. Coverage and provenance metadata are unchanged.
+4. Strategy thresholds and execution parameters do not enter derived feature semantics.
+5. The full test suite and production acceptance script pass before release promotion.
+
+See `scripts/production_acceptance.py` and `MERGE_CHECKLIST.md` for the current v0.3.5 release gate.

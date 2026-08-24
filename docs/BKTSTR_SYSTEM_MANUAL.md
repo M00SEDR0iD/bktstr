@@ -1,7 +1,7 @@
 # BKTSTR System Manual
 
-**Release:** v0.3.4  
-**Behavioral baseline:** v0.3.3 trading semantics preserved; v0.3.4 adds integrated deterministic derived caching  
+**Release:** v0.3.5  
+**Behavioral baseline:** v0.3.3 trading semantics preserved; v0.3.4 adds integrated deterministic derived caching and v0.3.5 adds development/release reproducibility  
 **Purpose:** architecture reference, research-methodology white paper, API/user manual, and future GUI implementation guide.
 
 BKTSTR is a read-only historical market-research service. It separates slow background context from intermediate market regime and fast technical entries so that each layer can be tested independently and combined without hiding assumptions. It never places brokerage orders.
@@ -639,6 +639,29 @@ The following findings guide future experiments but are not production trade rul
 - SOXX and QQQ both improved materially from 2025 to Jun-Aug 2026 under the same frozen scalp trigger, supporting the QQQ → SOXX → subject hierarchy.
 
 Treat the heavily explored NVDA 2025 and Jun-Aug 2026 samples as discovery data. New claims require untouched periods and cross-symbol validation.
+
+## v0.3.5 release identity and development workflow
+
+v0.3.5 does not change trading formulas. It adds an explicit release identity so a production result can be tied back to the source and deterministic formula/cache contract that produced it. `/health` reports `version` plus `git_commit`, `git_branch`, `git_repo`, `deployment_id`, and optional `build_time`. Railway-sourced identity comes from `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_GIT_BRANCH`, `RAILWAY_GIT_REPO_OWNER`, `RAILWAY_GIT_REPO_NAME`, and `RAILWAY_DEPLOYMENT_ID`; local verification may override commit/build time with `BKTSTR_GIT_COMMIT` and `BKTSTR_BUILD_TIME`.
+
+`/api/v1/capabilities` also publishes:
+
+- intraday feature formula version;
+- daily regime formula version;
+- daily sentiment formula version;
+- derived cache format version.
+
+The development path is intentionally separated from the research/control plane:
+
+```text
+feature branch → GitHub CI → merge main → Railway auto-deploy
+                                      ↓
+                           Supabase pg_net acceptance
+```
+
+GitHub CI runs the full test suite, Python compile checks, a generated-file hygiene check, and the cache benchmark. Generated `__pycache__`, `.pyc/.pyo`, and `.pytest_cache` artifacts must never be tracked. After deployment, `scripts/production_acceptance.py` reruns the frozen NVDA Jun-Aug 2026 control twice and requires identical trading output plus warm derived-cache hits.
+
+When direct GitHub access from an agent is unavailable, the **GitHub-through-Supabase** recovery bridge in `ops/supabase/GITHUB_BRIDGE.md` uses `pg_net` to resolve an exact commit/tree and retrieve source bodies from GitHub's raw-content host. Every recovered source body is retained with its Git blob SHA so integrity can be verified. This bridge is operational tooling only and never enters the backtest execution path.
 
 ## Known limitations
 
