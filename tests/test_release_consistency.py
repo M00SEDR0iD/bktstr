@@ -51,9 +51,49 @@ def test_broken_link_check_ignores_list_container_fenced_code(tmp_path):
     assert module.find_broken_local_links(tmp_path) == []
 
 
+def test_unclosed_nested_blockquote_fence_stops_at_container_end(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "> > ```markdown\n> > [inside](inside-missing.md)\n[top](top-missing.md)\n",
+        encoding="utf-8",
+    )
+    errors = module.find_broken_local_links(tmp_path)
+    assert len(errors) == 1
+    assert "top-missing.md" in errors[0]
+
+
+def test_unclosed_nested_list_fence_stops_at_container_end(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "- item\n  - ```markdown\n    [inside](inside-missing.md)\n[top](top-missing.md)\n",
+        encoding="utf-8",
+    )
+    errors = module.find_broken_local_links(tmp_path)
+    assert len(errors) == 1
+    assert "top-missing.md" in errors[0]
+
+
 def test_broken_link_check_ignores_inline_code(tmp_path):
     (tmp_path / "README.md").write_text(
         "`[single](missing.md)` and ``[double](also-missing.md)``\n",
+        encoding="utf-8",
+    )
+    assert module.find_broken_local_links(tmp_path) == []
+
+
+def test_odd_backslashes_escape_backtick_delimiters_and_leave_links_live(tmp_path):
+    (tmp_path / "README.md").write_text(
+        r"\`[single](single-missing.md)\`" "\n"
+        r"\\\`[triple](triple-missing.md)\\\`" "\n",
+        encoding="utf-8",
+    )
+    errors = module.find_broken_local_links(tmp_path)
+    assert len(errors) == 2
+    assert "single-missing.md" in errors[0]
+    assert "triple-missing.md" in errors[1]
+
+
+def test_even_backslashes_do_not_escape_inline_code_delimiters(tmp_path):
+    (tmp_path / "README.md").write_text(
+        r"\\`[example](missing.md)\\`" "\n",
         encoding="utf-8",
     )
     assert module.find_broken_local_links(tmp_path) == []

@@ -12,14 +12,61 @@ ROOT = Path(__file__).parents[1]
 LINK_PATTERN = re.compile(r"(?<!!)\[[^\]]+\]\((<[^>]+>|[^)\s]+)")
 README_VERSION_PATTERN = re.compile(r"\*\*Current release: v([^*]+)\*\*")
 IGNORED_PREFIXES = ("http:", "https:", "mailto:", "app:", "#")
-CONTAINER_PREFIX_PATTERN = re.compile(
-    r"^(?:(?: {0,3}>[ \t]?)|(?: {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+))*"
-)
+BLOCKQUOTE_PREFIX_PATTERN = re.compile(r" {0,3}>[ \t]?")
+LIST_ITEM_PREFIX_PATTERN = re.compile(r" {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+")
 
 
-def _container_content(line: str) -> str:
-    match = CONTAINER_PREFIX_PATTERN.match(line)
-    return line[match.end() :] if match else line
+def _strip_blockquote_prefixes(line: str, limit: int | None = None) -> tuple[str, int]:
+    position = 0
+    depth = 0
+    while limit is None or depth < limit:
+        match = BLOCKQUOTE_PREFIX_PATTERN.match(line, position)
+        if not match:
+            break
+        position = match.end()
+        depth += 1
+    return line[position:], depth
+
+
+def _opening_container(line: str) -> tuple[str, int, int]:
+    content, blockquote_depth = _strip_blockquote_prefixes(line)
+    list_indent = 0
+    while True:
+        match = LIST_ITEM_PREFIX_PATTERN.match(content)
+        if not match:
+            break
+        list_indent += match.end()
+        content = content[match.end() :]
+    return content, blockquote_depth, list_indent
+
+
+def _continued_container(
+    line: str,
+    blockquote_depth: int,
+    list_indent: int,
+) -> str | None:
+    if blockquote_depth == 0 and list_indent == 0:
+        return line
+    content, observed_depth = _strip_blockquote_prefixes(line, blockquote_depth)
+    if observed_depth < blockquote_depth:
+        return None
+    if list_indent == 0:
+        return content
+    if not content.strip():
+        return ""
+    leading_spaces = len(content) - len(content.lstrip(" "))
+    if leading_spaces < list_indent:
+        return None
+    return content[list_indent:]
+
+
+def _backtick_run_is_escaped(text: str, start: int) -> bool:
+    backslashes = 0
+    position = start - 1
+    while position >= 0 and text[position] == "\\":
+        backslashes += 1
+        position -= 1
+    return backslashes % 2 == 1
 
 
 def _mask_inline_code(text: str) -> str:
@@ -32,6 +79,8 @@ def _mask_inline_code(text: str) -> str:
         opener_start = index
         while index < len(text) and text[index] == "`":
             index += 1
+        if _backtick_run_is_escaped(text, opener_start):
+            continue
         opener_length = index - opener_start
         search_from = index
         closer_end = None
@@ -42,6 +91,9 @@ def _mask_inline_code(text: str) -> str:
             candidate_end = closer_start
             while candidate_end < len(text) and text[candidate_end] == "`":
                 candidate_end += 1
+            if _backtick_run_is_escaped(text, closer_start):
+                search_from = candidate_end
+                continue
             if candidate_end - closer_start == opener_length:
                 closer_end = candidate_end
                 break
@@ -60,33 +112,52 @@ def markdown_without_fenced_code(text: str) -> str:
     lines = []
     fence_character = None
     fence_length = 0
+    fence_blockquote_depth = 0
+    fence_list_indent = 0
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
-        container_content = _container_content(content)
+        if fence_character is not None:
+            container_content = _continued_container(
+                content,
+                fence_blockquote_depth,
+                fence_list_indent,
+            )
+            if container_content is None:
+                fence_character = None
+                fence_length = 0
+                fence_blockquote_depth = 0
+                fence_list_indent = 0
+            else:
+                stripped = container_content.lstrip(" ")
+                indent = len(container_content) - len(stripped)
+                closing = stripped.rstrip(" \t")
+                if (
+                    indent <= 3
+                    and closing
+                    and set(closing) == {fence_character}
+                    and len(closing) >= fence_length
+                ):
+                    fence_character = None
+                    fence_length = 0
+                    fence_blockquote_depth = 0
+                    fence_list_indent = 0
+                continue
+        container_content, blockquote_depth, list_indent = _opening_container(content)
         stripped = container_content.lstrip(" ")
         indent = len(container_content) - len(stripped)
         marker = re.match(r"(`{3,}|~{3,})", stripped) if indent <= 3 else None
-        if fence_character is None:
-            invalid_backtick_info = (
-                marker
-                and marker.group(1)[0] == "`"
-                and "`" in stripped[marker.end() :]
-            )
-            if marker and not invalid_backtick_info:
-                fence_character = marker.group(1)[0]
-                fence_length = len(marker.group(1))
-            else:
-                lines.append(line)
-            continue
-        closing = stripped.rstrip(" \t")
-        if (
-            indent <= 3
-            and closing
-            and set(closing) == {fence_character}
-            and len(closing) >= fence_length
-        ):
-            fence_character = None
-            fence_length = 0
+        invalid_backtick_info = (
+            marker
+            and marker.group(1)[0] == "`"
+            and "`" in stripped[marker.end() :]
+        )
+        if marker and not invalid_backtick_info:
+            fence_character = marker.group(1)[0]
+            fence_length = len(marker.group(1))
+            fence_blockquote_depth = blockquote_depth
+            fence_list_indent = list_indent
+        else:
+            lines.append(line)
     return _mask_inline_code("".join(lines))
 
 
