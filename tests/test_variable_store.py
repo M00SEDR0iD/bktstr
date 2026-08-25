@@ -10,7 +10,9 @@ from bktstr.variables import (
     DataTier,
     ResearchVariableDefinition,
     ResearchVariableSnapshot,
+    VariableContractError,
     VariableKind,
+    VariableRef,
 )
 from bktstr_cache.derived import DerivedFrameCache
 
@@ -22,6 +24,7 @@ def definition(
     column: str = "alpha",
     plugin_version: str = "1.0.0",
     formula_version: str = "alpha-v1",
+    inputs: tuple[VariableRef, ...] = (),
 ) -> ResearchVariableDefinition:
     return ResearchVariableDefinition(
         id=variable_id,
@@ -34,6 +37,7 @@ def definition(
         plugin_id="technical",
         plugin_version=plugin_version,
         formula_version=formula_version,
+        inputs=inputs,
     )
 
 
@@ -41,6 +45,13 @@ def input_frame(last_value: float = 3.0) -> pd.DataFrame:
     return pd.DataFrame(
         {"close": [1.0, 2.0, last_value]},
         index=pd.date_range("2026-08-20", periods=3, freq="min", tz="UTC"),
+    )
+
+
+def alpha_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {"alpha": [10.0, 20.0, 30.0]},
+        index=input_frame().index,
     )
 
 
@@ -95,7 +106,7 @@ def test_mutating_returned_series_does_not_change_later_reads(tmp_path: Path):
         dimensions={"symbol": "NVDA"},
         inputs={"raw": input_frame()},
         provenance={},
-        compute=lambda: input_frame().assign(alpha=[10.0, 20.0, 30.0]),
+        compute=alpha_frame,
     )
 
     returned = result.variables["technical.alpha"].series
@@ -106,7 +117,6 @@ def test_mutating_returned_series_does_not_change_later_reads(tmp_path: Path):
 
 def test_changed_dataframe_and_snapshot_inputs_change_content_addresses(tmp_path: Path):
     store = VariableSnapshotStore(DerivedFrameCache(tmp_path))
-    alpha = definition()
     source_definition = ResearchVariableDefinition.source(
         id="market.subject.close",
         version="1.0.0",
@@ -115,6 +125,7 @@ def test_changed_dataframe_and_snapshot_inputs_change_content_addresses(tmp_path
         value_dtype="float64",
         frequency="1m",
     )
+    alpha = definition(inputs=(source_definition.ref,))
 
     def source_snapshot(last_value: float) -> ResearchVariableSnapshot:
         return ResearchVariableSnapshot.create(
@@ -131,7 +142,7 @@ def test_changed_dataframe_and_snapshot_inputs_change_content_addresses(tmp_path
             dimensions={"symbol": "NVDA"},
             inputs={"raw": input_frame(raw_last), "source": source_snapshot(snapshot_last)},
             provenance={},
-            compute=lambda: input_frame().assign(alpha=[10.0, 20.0, 30.0]),
+            compute=alpha_frame,
         )
 
     baseline = resolve(3.0, 3.0)
@@ -141,6 +152,74 @@ def test_changed_dataframe_and_snapshot_inputs_change_content_addresses(tmp_path
     assert len({baseline.status.key, changed_frame.status.key, changed_snapshot.status.key}) == 3
     assert baseline.variables["technical.alpha"].digest != changed_frame.variables["technical.alpha"].digest
     assert baseline.variables["technical.alpha"].digest != changed_snapshot.variables["technical.alpha"].digest
+
+
+def test_undeclared_lower_tier_snapshot_is_rejected_before_compute(tmp_path: Path):
+    store = VariableSnapshotStore(DerivedFrameCache(tmp_path))
+    tier_c_definition = ResearchVariableDefinition.source(
+        id="evidence.news.score",
+        version="1.0.0",
+        tier=DataTier.C,
+        column="news_score",
+        value_dtype="float64",
+        frequency="1m",
+    )
+    tier_c_snapshot = ResearchVariableSnapshot.create(
+        tier_c_definition,
+        pd.Series([0.1, 0.2, 0.3], index=input_frame().index),
+        input_digests=(),
+        provenance={"provider": "fixture"},
+    )
+    calls = 0
+
+    def compute() -> pd.DataFrame:
+        nonlocal calls
+        calls += 1
+        return alpha_frame()
+
+    with pytest.raises(VariableContractError, match="not declared"):
+        store.resolve(
+            namespace="technical",
+            definitions=(definition(),),
+            dimensions={},
+            inputs={"evidence": tier_c_snapshot},
+            provenance={},
+            compute=compute,
+        )
+
+    assert calls == 0
+
+
+def test_forged_tier_b_definition_cannot_consume_tier_c_snapshot(tmp_path: Path):
+    store = VariableSnapshotStore(DerivedFrameCache(tmp_path))
+    tier_c_definition = ResearchVariableDefinition.source(
+        id="evidence.news.score",
+        version="1.0.0",
+        tier=DataTier.C,
+        column="news_score",
+        value_dtype="float64",
+        frequency="1m",
+    )
+    tier_c_snapshot = ResearchVariableSnapshot.create(
+        tier_c_definition,
+        pd.Series([0.1, 0.2, 0.3], index=input_frame().index),
+        input_digests=(),
+        provenance={},
+    )
+    forged_output = definition()
+    object.__setattr__(forged_output, "inputs", (tier_c_definition.ref,))
+
+    with pytest.raises(VariableContractError) as exc_info:
+        store.resolve(
+            namespace="technical",
+            definitions=(forged_output,),
+            dimensions={},
+            inputs={"evidence": tier_c_snapshot},
+            provenance={},
+            compute=alpha_frame,
+        )
+
+    assert exc_info.value.code == "illegal_tier_dependency"
 
 
 @pytest.mark.parametrize(
@@ -162,7 +241,7 @@ def test_definition_identity_and_formula_versions_change_cache_keys(tmp_path: Pa
         dimensions={"symbol": "NVDA"},
         inputs={"raw": input_frame()},
         provenance={},
-        compute=lambda: input_frame().assign(alpha=[10.0, 20.0, 30.0]),
+        compute=alpha_frame,
     )
     changed = store.resolve(
         namespace="technical",
@@ -170,7 +249,7 @@ def test_definition_identity_and_formula_versions_change_cache_keys(tmp_path: Pa
         dimensions={"symbol": "NVDA"},
         inputs={"raw": input_frame()},
         provenance={},
-        compute=lambda: input_frame().assign(alpha=[10.0, 20.0, 30.0]),
+        compute=alpha_frame,
     )
 
     assert original.status.key != changed.status.key
@@ -207,6 +286,50 @@ def test_missing_or_duplicate_declared_output_columns_are_rejected(tmp_path: Pat
         )
 
 
+def test_undeclared_output_columns_are_rejected_before_persistence(tmp_path: Path):
+    store = VariableSnapshotStore(DerivedFrameCache(tmp_path))
+
+    with pytest.raises(ValueError, match="undeclared output columns: accepted_signal"):
+        store.resolve(
+            namespace="technical",
+            definitions=(definition(),),
+            dimensions={},
+            inputs={"raw": input_frame()},
+            provenance={},
+            compute=lambda: pd.DataFrame(
+                {
+                    "alpha": [10.0, 20.0, 30.0],
+                    "accepted_signal": [False, True, False],
+                },
+                index=input_frame().index,
+            ),
+        )
+
+    assert list(tmp_path.rglob("*.pkl.gz")) == []
+
+
+def test_empty_definition_set_is_rejected_before_compute(tmp_path: Path):
+    store = VariableSnapshotStore(DerivedFrameCache(tmp_path))
+    calls = 0
+
+    def compute() -> pd.DataFrame:
+        nonlocal calls
+        calls += 1
+        return input_frame()
+
+    with pytest.raises(ValueError, match="definitions must not be empty"):
+        store.resolve(
+            namespace="technical",
+            definitions=(),
+            dimensions={},
+            inputs={"raw": input_frame()},
+            provenance={},
+            compute=compute,
+        )
+
+    assert calls == 0
+
+
 def test_corrupt_payload_is_recomputed_and_reported(tmp_path: Path):
     store = VariableSnapshotStore(DerivedFrameCache(tmp_path))
     alpha = definition()
@@ -215,7 +338,7 @@ def test_corrupt_payload_is_recomputed_and_reported(tmp_path: Path):
     def compute() -> pd.DataFrame:
         nonlocal calls
         calls += 1
-        return input_frame().assign(alpha=[10.0, 20.0, 30.0])
+        return alpha_frame()
 
     first = store.resolve(
         namespace="technical",

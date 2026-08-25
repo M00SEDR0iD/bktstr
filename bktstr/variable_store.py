@@ -6,9 +6,12 @@ from typing import Any, Callable, Mapping
 import pandas as pd
 
 from bktstr.variables import (
+    DataTier,
     ResearchVariableDefinition,
     ResearchVariableSnapshot,
+    VariableContractError,
     VariableSet,
+    inherited_tier,
 )
 from bktstr_cache.derived import CacheResult, CacheStatus, DerivedFrameCache
 
@@ -39,6 +42,7 @@ class VariableSnapshotStore:
         compute: Callable[[], pd.DataFrame],
     ) -> VariableStoreResult:
         definitions = _validate_definitions(definitions)
+        _validate_snapshot_inputs(definitions, inputs)
         cache_inputs = _cache_inputs(inputs)
         input_digests = DerivedFrameCache.input_digests(cache_inputs)
         cache_dimensions = {
@@ -112,6 +116,8 @@ def _validate_definitions(
         not isinstance(item, ResearchVariableDefinition) for item in definitions
     ):
         raise TypeError("definitions must be a tuple of ResearchVariableDefinition values")
+    if not definitions:
+        raise ValueError("definitions must not be empty")
 
     ids = [item.id for item in definitions]
     duplicate_ids = sorted({item for item in ids if ids.count(item) > 1})
@@ -122,7 +128,60 @@ def _validate_definitions(
     duplicate_columns = sorted({item for item in columns if columns.count(item) > 1})
     if duplicate_columns:
         raise ValueError(f"duplicate declared output columns: {', '.join(duplicate_columns)}")
+
+    for definition in definitions:
+        input_tiers = tuple(item.tier for item in definition.inputs)
+        if definition.tier is DataTier.B and any(
+            tier in (DataTier.C, DataTier.D) for tier in input_tiers
+        ):
+            raise VariableContractError(
+                "Tier B cannot depend on Tier C or Tier D",
+                code="illegal_tier_dependency",
+                details={"variable_id": definition.id},
+            )
+        calculated_tier = inherited_tier(input_tiers, method_floor=definition.tier)
+        if calculated_tier is not definition.tier:
+            raise VariableContractError(
+                f"tier {definition.tier.value} cannot improve inherited tier {calculated_tier.value}",
+                code="illegal_tier_dependency",
+                details={"variable_id": definition.id},
+            )
     return definitions
+
+
+def _validate_snapshot_inputs(
+    definitions: tuple[ResearchVariableDefinition, ...],
+    inputs: Mapping[str, pd.DataFrame | ResearchVariableSnapshot],
+) -> None:
+    declared_refs = {
+        item
+        for definition in definitions
+        for item in definition.inputs
+    }
+    snapshots = tuple(
+        value for value in inputs.values() if isinstance(value, ResearchVariableSnapshot)
+    )
+    for snapshot in snapshots:
+        if snapshot.ref not in declared_refs:
+            raise VariableContractError(
+                f"snapshot input {snapshot.definition.id!r} is not declared by an output definition",
+                code="undeclared_input",
+                details={
+                    "variable_id": snapshot.definition.id,
+                    "version": snapshot.definition.version,
+                    "tier": snapshot.tier.value,
+                },
+            )
+
+    actual_tiers = tuple(snapshot.tier for snapshot in snapshots)
+    for definition in definitions:
+        calculated_tier = inherited_tier(actual_tiers, method_floor=definition.tier)
+        if calculated_tier is not definition.tier:
+            raise VariableContractError(
+                f"tier {definition.tier.value} cannot improve actual input tier {calculated_tier.value}",
+                code="illegal_tier_dependency",
+                details={"variable_id": definition.id},
+            )
 
 
 def _cache_inputs(
@@ -155,6 +214,11 @@ def _validate_output(
     missing_columns = sorted(item.column for item in definitions if item.column not in frame.columns)
     if missing_columns:
         raise ValueError(f"missing declared output columns: {', '.join(missing_columns)}")
+
+    declared_columns = {item.column for item in definitions}
+    undeclared_columns = sorted(str(item) for item in frame.columns if item not in declared_columns)
+    if undeclared_columns:
+        raise ValueError(f"undeclared output columns: {', '.join(undeclared_columns)}")
     return frame
 
 
