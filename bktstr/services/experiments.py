@@ -6,7 +6,7 @@ import os
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
@@ -16,6 +16,10 @@ from uuid import uuid4
 import httpx
 
 from .validation import SemanticValidationError
+
+
+_WORKER_LEASE_NAME = "experiment-worker"
+_ARTIFACT_RECONCILE_LIMIT = 25
 
 
 class ExperimentStatus(StrEnum):
@@ -212,7 +216,9 @@ class ExperimentStore:
                     provenance_json TEXT,
                     idempotency_key TEXT,
                     parent_experiment_id TEXT,
-                    artifact_generation TEXT
+                    artifact_generation TEXT,
+                    artifact_published_generation TEXT,
+                    worker_owner_id TEXT
                 )
                 """
             )
@@ -228,6 +234,23 @@ class ExperimentStore:
                 connection.execute(
                     "ALTER TABLE experiments ADD COLUMN artifact_generation TEXT"
                 )
+            if "artifact_published_generation" not in columns:
+                connection.execute(
+                    "ALTER TABLE experiments ADD COLUMN artifact_published_generation TEXT"
+                )
+            if "worker_owner_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE experiments ADD COLUMN worker_owner_id TEXT"
+                )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS worker_leases (
+                    lease_name TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+                """
+            )
             connection.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS experiments_operation_idempotency_key
@@ -235,7 +258,106 @@ class ExperimentStore:
                 WHERE idempotency_key IS NOT NULL
                 """
             )
-        self.reconcile_artifacts()
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS experiments_artifact_publication
+                ON experiments(
+                    artifact_published_generation,
+                    artifact_generation,
+                    created_at,
+                    experiment_id
+                )
+                WHERE artifact_generation IS NOT NULL
+                """
+            )
+        self.reconcile_artifacts(limit=_ARTIFACT_RECONCILE_LIMIT)
+
+    def acquire_worker_lease(
+        self,
+        owner_id: str,
+        *,
+        lease_duration_seconds: float,
+        now: datetime | None = None,
+    ) -> bool:
+        if not owner_id:
+            raise ValueError("worker lease owner_id is required")
+        if lease_duration_seconds <= 0:
+            raise ValueError("worker lease duration must be positive")
+        current = now or _timestamp()
+        expires_at = current + timedelta(seconds=lease_duration_seconds)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            lease = connection.execute(
+                "SELECT owner_id, expires_at FROM worker_leases WHERE lease_name = ?",
+                (_WORKER_LEASE_NAME,),
+            ).fetchone()
+            if (
+                lease is not None
+                and lease["owner_id"] != owner_id
+                and _decode_timestamp(lease["expires_at"]) > current
+            ):
+                connection.execute("COMMIT")
+                return False
+            connection.execute(
+                """
+                INSERT INTO worker_leases (lease_name, owner_id, expires_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(lease_name) DO UPDATE SET
+                    owner_id = excluded.owner_id,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    _WORKER_LEASE_NAME,
+                    owner_id,
+                    _encode_timestamp(expires_at),
+                ),
+            )
+            connection.execute("COMMIT")
+        return True
+
+    def renew_worker_lease(
+        self,
+        owner_id: str,
+        *,
+        lease_duration_seconds: float,
+        now: datetime | None = None,
+    ) -> bool:
+        if lease_duration_seconds <= 0:
+            raise ValueError("worker lease duration must be positive")
+        current = now or _timestamp()
+        expires_at = current + timedelta(seconds=lease_duration_seconds)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE worker_leases SET expires_at = ?
+                WHERE lease_name = ? AND owner_id = ?
+                """,
+                (_encode_timestamp(expires_at), _WORKER_LEASE_NAME, owner_id),
+            )
+        return cursor.rowcount == 1
+
+    def owns_worker_lease(
+        self, owner_id: str, *, now: datetime | None = None
+    ) -> bool:
+        current = now or _timestamp()
+        with self._connect() as connection:
+            lease = connection.execute(
+                "SELECT owner_id, expires_at FROM worker_leases WHERE lease_name = ?",
+                (_WORKER_LEASE_NAME,),
+            ).fetchone()
+        return bool(
+            lease is not None
+            and lease["owner_id"] == owner_id
+            and _decode_timestamp(lease["expires_at"]) > current
+        )
+
+    def release_worker_lease(self, owner_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM worker_leases WHERE lease_name = ? AND owner_id = ?",
+                (_WORKER_LEASE_NAME, owner_id),
+            )
+        return cursor.rowcount == 1
 
     @staticmethod
     def _write_json(destination: Path, canonical_json: str) -> None:
@@ -393,6 +515,13 @@ class ExperimentStore:
                     artifact_dir / "manifest.json",
                     _canonical_json(self._manifest_for(row)),
                 )
+                connection.execute(
+                    """
+                    UPDATE experiments SET artifact_published_generation = ?
+                    WHERE experiment_id = ? AND artifact_generation = ?
+                    """,
+                    (generation, experiment_id, generation),
+                )
                 connection.execute("COMMIT")
         finally:
             if staging is not None and staging.exists():
@@ -410,23 +539,44 @@ class ExperimentStore:
             return False
         return True
 
-    def reconcile_artifacts(self, experiment_id: str | None = None) -> int:
+    def reconcile_artifacts(
+        self,
+        experiment_id: str | None = None,
+        *,
+        limit: int = _ARTIFACT_RECONCILE_LIMIT,
+    ) -> int:
         """Repair stale projections from SQLite without re-running experiments."""
+        if limit < 1:
+            raise ValueError("artifact reconciliation limit must be positive")
         with self._connect() as connection:
             if experiment_id is None:
                 rows = connection.execute(
-                    "SELECT * FROM experiments WHERE artifact_generation IS NOT NULL"
+                    """
+                    SELECT * FROM experiments
+                    WHERE artifact_generation IS NOT NULL
+                      AND (
+                        artifact_published_generation IS NULL
+                        OR artifact_published_generation != artifact_generation
+                      )
+                    ORDER BY created_at, experiment_id
+                    LIMIT ?
+                    """,
+                    (limit,),
                 ).fetchall()
             else:
                 rows = [self._load_row(connection, experiment_id)]
         repaired = 0
         for row in rows:
-            if self._validated_manifest(row) is None and self._best_effort_publish(
-                row["experiment_id"]
-            ):
+            dirty = row["artifact_published_generation"] != row["artifact_generation"]
+            invalid = self._validated_manifest(row) is None
+            if (dirty or invalid) and self._best_effort_publish(row["experiment_id"]):
                 with self._connect() as connection:
                     current = self._load_row(connection, row["experiment_id"])
-                if self._validated_manifest(current) is not None:
+                if (
+                    current["artifact_published_generation"]
+                    == current["artifact_generation"]
+                    and self._validated_manifest(current) is not None
+                ):
                     repaired += 1
         return repaired
 
@@ -598,25 +748,62 @@ class ExperimentStore:
         with self._connect() as connection:
             return self._record(self._load_row(connection, experiment_id))
 
-    def claim_next(self) -> ExperimentRecord | None:
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT * FROM experiments WHERE status = ? ORDER BY created_at, experiment_id LIMIT 1",
-                (ExperimentStatus.QUEUED.value,),
-            ).fetchone()
-            if row is None:
+    def claim_next(
+        self,
+        owner_id: str | None = None,
+        *,
+        now: datetime | None = None,
+    ) -> ExperimentRecord | None:
+        current = now or _timestamp()
+        temporary_owner = owner_id is None
+        owner = owner_id or f"one-shot-{uuid4().hex}"
+        if temporary_owner and not self.acquire_worker_lease(
+            owner, lease_duration_seconds=30, now=current
+        ):
+            return None
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                lease = connection.execute(
+                    "SELECT owner_id, expires_at FROM worker_leases WHERE lease_name = ?",
+                    (_WORKER_LEASE_NAME,),
+                ).fetchone()
+                if (
+                    lease is None
+                    or lease["owner_id"] != owner
+                    or _decode_timestamp(lease["expires_at"]) <= current
+                ):
+                    connection.execute("COMMIT")
+                    return None
+                row = connection.execute(
+                    "SELECT * FROM experiments WHERE status = ? ORDER BY created_at, experiment_id LIMIT 1",
+                    (ExperimentStatus.QUEUED.value,),
+                ).fetchone()
+                if row is None:
+                    connection.execute("COMMIT")
+                    return None
+                connection.execute(
+                    """
+                    UPDATE experiments
+                    SET status = ?, started_at = ?, worker_owner_id = ?
+                    WHERE experiment_id = ?
+                    """,
+                    (
+                        ExperimentStatus.RUNNING.value,
+                        _encode_timestamp(current),
+                        owner,
+                        row["experiment_id"],
+                    ),
+                )
+                claimed = self._set_artifact_generation(
+                    connection, row["experiment_id"]
+                )
                 connection.execute("COMMIT")
-                return None
-            now = _timestamp()
-            connection.execute(
-                "UPDATE experiments SET status = ?, started_at = ? WHERE experiment_id = ?",
-                (ExperimentStatus.RUNNING.value, _encode_timestamp(now), row["experiment_id"]),
-            )
-            claimed = self._set_artifact_generation(connection, row["experiment_id"])
-            connection.execute("COMMIT")
-        self._best_effort_publish(claimed["experiment_id"])
-        return self._record(claimed)
+            self._best_effort_publish(claimed["experiment_id"])
+            return self._record(claimed)
+        finally:
+            if temporary_owner:
+                self.release_worker_lease(owner)
 
     def claim(self, experiment_id: str) -> ExperimentRecord:
         """Claim one particular queued row for synchronous execution."""
@@ -635,33 +822,80 @@ class ExperimentStore:
         self._best_effort_publish(experiment_id)
         return self._record(claimed)
 
-    def recover_incomplete(self) -> int:
+    def recover_incomplete(
+        self,
+        owner_id: str | None = None,
+        *,
+        now: datetime | None = None,
+    ) -> int:
         """Return records abandoned by a prior process to the durable queue."""
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            running_ids = [
-                row["experiment_id"]
-                for row in connection.execute(
-                    "SELECT experiment_id FROM experiments WHERE status = ?",
-                    (ExperimentStatus.RUNNING.value,),
+        current = now or _timestamp()
+        temporary_owner = owner_id is None
+        owner = owner_id or f"recovery-{uuid4().hex}"
+        if temporary_owner and not self.acquire_worker_lease(
+            owner, lease_duration_seconds=30, now=current
+        ):
+            return 0
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                lease = connection.execute(
+                    "SELECT owner_id, expires_at FROM worker_leases WHERE lease_name = ?",
+                    (_WORKER_LEASE_NAME,),
+                ).fetchone()
+                if (
+                    lease is None
+                    or lease["owner_id"] != owner
+                    or _decode_timestamp(lease["expires_at"]) <= current
+                ):
+                    connection.execute("COMMIT")
+                    return 0
+                running_ids = [
+                    row["experiment_id"]
+                    for row in connection.execute(
+                        """
+                        SELECT experiment_id FROM experiments
+                        WHERE status = ? AND execution != ?
+                          AND (worker_owner_id IS NULL OR worker_owner_id != ?)
+                        """,
+                        (
+                            ExperimentStatus.RUNNING.value,
+                            ExecutionMode.SYNC.value,
+                            owner,
+                        ),
+                    )
+                ]
+                cursor = connection.execute(
+                    """
+                    UPDATE experiments
+                    SET status = ?, started_at = NULL, worker_owner_id = NULL
+                    WHERE status = ? AND execution != ?
+                      AND (worker_owner_id IS NULL OR worker_owner_id != ?)
+                    """,
+                    (
+                        ExperimentStatus.QUEUED.value,
+                        ExperimentStatus.RUNNING.value,
+                        ExecutionMode.SYNC.value,
+                        owner,
+                    ),
                 )
-            ]
-            cursor = connection.execute(
-                "UPDATE experiments SET status = ?, started_at = NULL WHERE status = ?",
-                (ExperimentStatus.QUEUED.value, ExperimentStatus.RUNNING.value),
-            )
+                for experiment_id in running_ids:
+                    self._set_artifact_generation(connection, experiment_id)
+                connection.execute("COMMIT")
             for experiment_id in running_ids:
-                self._set_artifact_generation(connection, experiment_id)
-            connection.execute("COMMIT")
-        for experiment_id in running_ids:
-            self._best_effort_publish(experiment_id)
-        return cursor.rowcount
+                self._best_effort_publish(experiment_id)
+            return cursor.rowcount
+        finally:
+            if temporary_owner:
+                self.release_worker_lease(owner)
 
     def complete(
         self,
         experiment_id: str,
         result: Mapping[str, Any],
         provenance: Mapping[str, Any],
+        *,
+        owner_id: str | None = None,
     ) -> ExperimentRecord:
         result_json = _canonical_json(result)
         provenance_json = _canonical_json(provenance)
@@ -671,6 +905,10 @@ class ExperimentStore:
             status = ExperimentStatus(row["status"])
             if status in (ExperimentStatus.COMPLETED, ExperimentStatus.FAILED):
                 raise ExperimentStateError(f"Experiment {experiment_id} is terminal and cannot be completed.")
+            if owner_id is not None and row["worker_owner_id"] != owner_id:
+                raise ExperimentStateError(
+                    f"Experiment {experiment_id} is not owned by worker {owner_id}."
+                )
             if status is ExperimentStatus.QUEUED:
                 connection.execute(
                     "UPDATE experiments SET status = ?, started_at = ? WHERE experiment_id = ?",
@@ -680,7 +918,8 @@ class ExperimentStore:
             connection.execute(
                 """
                 UPDATE experiments
-                SET status = ?, completed_at = ?, result_json = ?, provenance_json = ?
+                SET status = ?, completed_at = ?, result_json = ?, provenance_json = ?,
+                    worker_owner_id = NULL
                 WHERE experiment_id = ?
                 """,
                 (
@@ -696,7 +935,13 @@ class ExperimentStore:
         self._best_effort_publish(experiment_id)
         return self._record(completed)
 
-    def fail(self, experiment_id: str, error: Mapping[str, Any]) -> ExperimentRecord:
+    def fail(
+        self,
+        experiment_id: str,
+        error: Mapping[str, Any],
+        *,
+        owner_id: str | None = None,
+    ) -> ExperimentRecord:
         error_json = _canonical_json(error)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -706,11 +951,15 @@ class ExperimentStore:
                 raise ExperimentStateError(
                     f"Experiment {experiment_id} must be running before it can fail."
                 )
+            if owner_id is not None and row["worker_owner_id"] != owner_id:
+                raise ExperimentStateError(
+                    f"Experiment {experiment_id} is not owned by worker {owner_id}."
+                )
             completed_at = _timestamp()
             connection.execute(
                 """
                 UPDATE experiments
-                SET status = ?, completed_at = ?, error_json = ?
+                SET status = ?, completed_at = ?, error_json = ?, worker_owner_id = NULL
                 WHERE experiment_id = ?
                 """,
                 (ExperimentStatus.FAILED.value, _encode_timestamp(completed_at), error_json, experiment_id),
@@ -764,21 +1013,112 @@ class ExperimentWorker:
         operations: Mapping[str, OperationHandler],
         *,
         poll_interval_seconds: float = 0.1,
+        owner_id: str | None = None,
+        lease_duration_seconds: float = 30.0,
+        heartbeat_interval_seconds: float | None = None,
+        clock: Callable[[], datetime] = _timestamp,
     ) -> None:
         if poll_interval_seconds <= 0:
             raise ValueError("poll_interval_seconds must be positive.")
+        if lease_duration_seconds <= 0:
+            raise ValueError("lease_duration_seconds must be positive.")
+        heartbeat_interval = (
+            heartbeat_interval_seconds
+            if heartbeat_interval_seconds is not None
+            else lease_duration_seconds / 3
+        )
+        if heartbeat_interval <= 0 or heartbeat_interval >= lease_duration_seconds:
+            raise ValueError(
+                "heartbeat_interval_seconds must be positive and shorter than the lease."
+            )
         self.store = store
         self.operations = dict(operations)
         self.poll_interval_seconds = poll_interval_seconds
+        self.owner_id = owner_id or f"worker-{uuid4().hex}"
+        self.lease_duration_seconds = lease_duration_seconds
+        self.heartbeat_interval_seconds = heartbeat_interval
+        self.clock = clock
+        self._has_lease = False
+        self._lease_lost = threading.Event()
+
+    def _ensure_lease(self) -> tuple[bool, bool]:
+        current = self.clock()
+        if self._has_lease and self.store.renew_worker_lease(
+            self.owner_id,
+            lease_duration_seconds=self.lease_duration_seconds,
+            now=current,
+        ):
+            return True, False
+        self._has_lease = self.store.acquire_worker_lease(
+            self.owner_id,
+            lease_duration_seconds=self.lease_duration_seconds,
+            now=current,
+        )
+        if self._has_lease:
+            self._lease_lost.clear()
+            return True, True
+        return False, False
+
+    def _heartbeat(self, stop_event: threading.Event) -> None:
+        while not stop_event.wait(self.heartbeat_interval_seconds):
+            try:
+                renewed = self.store.renew_worker_lease(
+                    self.owner_id,
+                    lease_duration_seconds=self.lease_duration_seconds,
+                    now=self.clock(),
+                )
+            except Exception:
+                renewed = False
+            if not renewed:
+                self._has_lease = False
+                self._lease_lost.set()
+                return
+
+    def _start_heartbeat(self) -> tuple[threading.Event, threading.Thread]:
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=self._heartbeat,
+            args=(stop_event,),
+            daemon=True,
+            name=f"bktstr-lease-{self.owner_id}",
+        )
+        thread.start()
+        return stop_event, thread
+
+    def release_lease(self) -> bool:
+        released = self.store.release_worker_lease(self.owner_id)
+        self._has_lease = False
+        return released
 
     def recover_incomplete(self) -> int:
-        return self.store.recover_incomplete()
+        owned, _ = self._ensure_lease()
+        if not owned:
+            return 0
+        return self.store.recover_incomplete(self.owner_id, now=self.clock())
+
+    def _fail_survivably(
+        self, record: ExperimentRecord, error: Mapping[str, Any]
+    ) -> ExperimentRecord:
+        try:
+            return self.store.fail(
+                record.experiment_id,
+                error,
+                owner_id=(
+                    None
+                    if record.execution is ExecutionMode.SYNC
+                    else self.owner_id
+                ),
+            )
+        except ExperimentStateError:
+            # Another owner may have terminalized or recovered this row while a
+            # stale handler was returning. Its authoritative SQLite state wins.
+            return self.store.load_experiment(record.experiment_id)
 
     def _execute(self, record: ExperimentRecord) -> ExperimentRecord:
         operation = self.operations.get(record.operation)
         if operation is None:
-            return self.store.fail(
-                record.experiment_id,
+            return self._fail_survivably(
+                record,
                 {
                     "code": "operation_not_registered",
                     "message": "No handler is registered for this experiment operation.",
@@ -788,13 +1128,13 @@ class ExperimentWorker:
         try:
             result, provenance = operation(record)
         except ExperimentOperationError as exc:
-            return self.store.fail(
-                record.experiment_id,
+            return self._fail_survivably(
+                record,
                 {"code": exc.code, "message": str(exc), "details": exc.details},
             )
         except SemanticValidationError as exc:
-            return self.store.fail(
-                record.experiment_id,
+            return self._fail_survivably(
+                record,
                 {
                     "code": "invalid_request",
                     "message": str(exc),
@@ -802,13 +1142,13 @@ class ExperimentWorker:
                 },
             )
         except ValueError as exc:
-            return self.store.fail(
-                record.experiment_id,
+            return self._fail_survivably(
+                record,
                 {"code": "invalid_request", "message": str(exc), "details": {}},
             )
         except httpx.HTTPError:
-            return self.store.fail(
-                record.experiment_id,
+            return self._fail_survivably(
+                record,
                 {
                     "code": "market_data_http_error",
                     "message": "Market-data provider request failed.",
@@ -816,8 +1156,8 @@ class ExperimentWorker:
                 },
             )
         except Exception:
-            return self.store.fail(
-                record.experiment_id,
+            return self._fail_survivably(
+                record,
                 {
                     "code": "operation_failed",
                     "message": "The experiment operation failed.",
@@ -825,10 +1165,21 @@ class ExperimentWorker:
                 },
             )
         try:
-            return self.store.complete(record.experiment_id, result, provenance)
-        except Exception:
-            return self.store.fail(
+            return self.store.complete(
                 record.experiment_id,
+                result,
+                provenance,
+                owner_id=(
+                    None
+                    if record.execution is ExecutionMode.SYNC
+                    else self.owner_id
+                ),
+            )
+        except ExperimentStateError:
+            return self.store.load_experiment(record.experiment_id)
+        except Exception:
+            return self._fail_survivably(
+                record,
                 {
                     "code": "result_persistence_failed",
                     "message": "Experiment result persistence failed.",
@@ -836,10 +1187,24 @@ class ExperimentWorker:
                 },
             )
 
-    def run_one(self) -> ExperimentRecord | None:
-        self.store.reconcile_artifacts()
-        record = self.store.claim_next()
+    def _run_one_owned(self) -> ExperimentRecord | None:
+        self.store.reconcile_artifacts(limit=_ARTIFACT_RECONCILE_LIMIT)
+        record = self.store.claim_next(self.owner_id, now=self.clock())
         return None if record is None else self._execute(record)
+
+    def run_one(self) -> ExperimentRecord | None:
+        owned, acquired = self._ensure_lease()
+        if not owned:
+            return None
+        if acquired:
+            self.store.recover_incomplete(self.owner_id, now=self.clock())
+        heartbeat_stop, heartbeat_thread = self._start_heartbeat()
+        try:
+            return self._run_one_owned()
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join()
+            self.release_lease()
 
     def run(self, experiment_id: str) -> ExperimentRecord:
         return self._execute(self.store.claim(experiment_id))
@@ -850,9 +1215,35 @@ class ExperimentWorker:
         return self._execute(record)
 
     def run_forever(self, stop_event: threading.Event) -> None:
-        while not stop_event.is_set():
-            if self.run_one() is None:
-                stop_event.wait(self.poll_interval_seconds)
+        try:
+            while not stop_event.is_set():
+                try:
+                    owned, acquired = self._ensure_lease()
+                except Exception:
+                    owned, acquired = False, False
+                if not owned:
+                    stop_event.wait(self.poll_interval_seconds)
+                    continue
+                if acquired:
+                    self.store.recover_incomplete(self.owner_id, now=self.clock())
+                heartbeat_stop, heartbeat_thread = self._start_heartbeat()
+                try:
+                    while not stop_event.is_set() and not self._lease_lost.is_set():
+                        try:
+                            record = self._run_one_owned()
+                        except Exception:
+                            # A lifecycle/storage race must never terminate the
+                            # durable poller; ownership is rechecked next loop.
+                            record = None
+                        if record is None:
+                            stop_event.wait(self.poll_interval_seconds)
+                finally:
+                    heartbeat_stop.set()
+                    heartbeat_thread.join()
+                    self.release_lease()
+        finally:
+            if self._has_lease:
+                self.release_lease()
 
 
 def submit(

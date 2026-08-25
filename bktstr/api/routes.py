@@ -291,7 +291,7 @@ def _experiment_store(request: Request) -> ExperimentStore:
     response_model=BacktestExperimentResponse,
     responses={
         202: {"model": BacktestExperimentResponse},
-        **_error_responses(400, 401, 409, 422, 500),
+        **_error_responses(400, 401, 409, 422, 500, 502),
     },
 )
 def create_backtest(

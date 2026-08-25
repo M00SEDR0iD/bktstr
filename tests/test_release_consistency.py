@@ -24,6 +24,16 @@ def test_v060_release_metadata_requires_fastapi_research_contract():
     assert expected <= set(schema["paths"])
 
 
+def test_v060_docs_describe_the_typed_cache_surface_and_release():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert "`data.derived_cache`" not in readme
+    assert "`result.provenance.market_data.cache`" in readme
+    assert "`result.provenance.governed_dependencies`" in readme
+    assert "## [0.6.0] - 2026-08-25" in changelog
+
+
 def test_extract_python_version_reads_literal_assignment(tmp_path):
     path = tmp_path / "version.py"
     path.write_text('__version__ = "0.4.0"\n', encoding="utf-8")

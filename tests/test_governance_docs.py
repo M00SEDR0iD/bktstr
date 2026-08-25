@@ -26,11 +26,13 @@ def test_release_plan_publishes_complete_v1_ladder():
     assert "GitHub Project owns live status" in text
 
 
-def test_changelog_has_unreleased_and_immutable_v035_history():
+def test_changelog_has_current_release_and_immutable_v035_history():
     text = _read("CHANGELOG.md")
     assert "## [Unreleased]" in text
+    assert "## [0.6.0] - 2026-08-25" in text
     assert "## [0.3.5] - 2026-08-24" in text
-    assert "[Unreleased]: https://github.com/M00SEDR0iD/bktstr/compare/v0.3.5...HEAD" in text
+    assert "[Unreleased]: https://github.com/M00SEDR0iD/bktstr/compare/v0.6.0...HEAD" in text
+    assert "[0.6.0]: https://github.com/M00SEDR0iD/bktstr/releases/tag/v0.6.0" in text
     assert "[0.3.5]: https://github.com/M00SEDR0iD/bktstr/releases/tag/v0.3.5" in text
 
 

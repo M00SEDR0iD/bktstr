@@ -441,6 +441,9 @@ def test_openapi_types_backtest_submissions_and_both_polling_views(monkeypatch, 
     assert post["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/BacktestExperimentResponse"
     )
+    assert post["responses"]["502"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/ErrorResponse"
+    )
 
 
 def test_openapi_polling_discriminates_operations_and_types_reproducibility_fields(

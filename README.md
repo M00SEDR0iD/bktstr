@@ -46,7 +46,10 @@ Optional path override:
 BKTSTR_DERIVED_CACHE_DIR=/data/bktstr-cache/derived
 ```
 
-Every backtest exposes `data.derived_cache` hit/miss metadata.
+Every typed backtest reports provider day-cache counters at
+`result.provenance.market_data.cache`. Governed source and derived
+materializations, including their stable definitions, scopes, coverage, and
+content digests, are exposed at `result.provenance.governed_dependencies`.
 
 ## API
 

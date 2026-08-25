@@ -10,6 +10,7 @@ from bktstr.services.experiments import (
     ExperimentStateError,
     ExperimentStatus,
     ExperimentStore,
+    ExperimentWorker,
     IdempotencyConflictError,
     experiment_root,
 )
@@ -107,6 +108,65 @@ def test_failed_artifact_publish_never_surfaces_an_uncommitted_terminal_generati
     generation = tmp_path / "artifacts" / record.experiment_id / "generations" / manifest["generation"]
     assert json.loads((generation / "result.json").read_text("utf-8")) == {"metrics": {"trade_count": 1}}
     assert store.load_experiment(record.experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_failed_publish_stays_dirty_until_bounded_reconciliation_clears_it(
+    tmp_path, monkeypatch
+):
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment(
+        "backtest", {"symbol": "NVDA"}, "sync", None
+    )
+    publish = store._publish_artifact_generation
+    monkeypatch.setattr(
+        store,
+        "_publish_artifact_generation",
+        lambda _experiment_id: (_ for _ in ()).throw(OSError("interrupted")),
+    )
+    store.complete(record.experiment_id, {"metrics": {}}, {"source": "fixture"})
+
+    with store._connect() as connection:
+        dirty = connection.execute(
+            "SELECT artifact_generation, artifact_published_generation "
+            "FROM experiments WHERE experiment_id = ?",
+            (record.experiment_id,),
+        ).fetchone()
+    assert dirty["artifact_generation"] != dirty["artifact_published_generation"]
+
+    monkeypatch.setattr(store, "_publish_artifact_generation", publish)
+    assert store.reconcile_artifacts(limit=1) == 1
+    with store._connect() as connection:
+        clean = connection.execute(
+            "SELECT artifact_generation, artifact_published_generation "
+            "FROM experiments WHERE experiment_id = ?",
+            (record.experiment_id,),
+        ).fetchone()
+    assert clean["artifact_generation"] == clean["artifact_published_generation"]
+
+
+def test_idle_worker_reconciliation_does_not_validate_every_published_artifact(
+    tmp_path, monkeypatch
+):
+    store = ExperimentStore(tmp_path)
+    for ordinal in range(5):
+        record, _ = store.create_experiment(
+            "backtest", {"ordinal": ordinal}, "sync", None
+        )
+        store.complete(record.experiment_id, {"ordinal": ordinal}, {"source": "fixture"})
+
+    validated: list[str] = []
+    original_validate = store._validated_manifest
+
+    def observe_validation(row):
+        validated.append(row["experiment_id"])
+        return original_validate(row)
+
+    monkeypatch.setattr(store, "_validated_manifest", observe_validation)
+    worker = ExperimentWorker(store, {})
+
+    assert worker.run_one() is None
+    assert worker.run_one() is None
+    assert validated == []
 
 
 def test_manifest_publication_cannot_overwrite_a_later_terminal_generation(

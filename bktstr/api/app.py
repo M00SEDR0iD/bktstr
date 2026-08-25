@@ -48,16 +48,36 @@ def _error_response(
 
 
 def _validation_error_fields(exc: RequestValidationError) -> list[str]:
-    fields: list[str] = []
+    union_branch_types = {
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "list",
+        "dict",
+        "tuple",
+        "none",
+    }
+    candidates: list[str] = []
     for error in exc.errors():
         location = tuple(
             str(part)
             for part in error.get("loc", ())
             if part not in {"body", "query", "path", "header"}
+            and str(part) not in union_branch_types
+            and not (isinstance(part, str) and part[:1].isupper())
         )
         path = ".".join(location)
-        if path and path not in fields:
-            fields.append(path)
+        if path and path not in candidates:
+            candidates.append(path)
+    fields = [
+        path
+        for path in candidates
+        if not any(
+            other != path and other.startswith(f"{path}.") for other in candidates
+        )
+    ]
     return fields or ["request"]
 
 

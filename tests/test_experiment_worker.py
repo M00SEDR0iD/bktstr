@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import threading
 
 import pytest
@@ -54,15 +55,124 @@ def test_worker_completes_a_queued_record_after_restart(tmp_path):
 
 
 def test_recover_incomplete_returns_stale_running_work_to_the_queue(tmp_path):
-    """A process crash must not strand its claimed experiment in the running state."""
+    """Only an expired prior lease may return claimed work to the queue."""
+    current = [datetime(2026, 8, 25, tzinfo=timezone.utc)]
+    first_store = ExperimentStore(tmp_path)
+    second_store = ExperimentStore(tmp_path)
+    record, _ = first_store.create_experiment(
+        "compare", {"ids": []}, "async", None
+    )
+    first = ExperimentWorker(
+        first_store,
+        {},
+        owner_id="worker-one",
+        lease_duration_seconds=10,
+        clock=lambda: current[0],
+    )
+    second = ExperimentWorker(
+        second_store,
+        {},
+        owner_id="worker-two",
+        lease_duration_seconds=10,
+        clock=lambda: current[0],
+    )
+
+    assert first.recover_incomplete() == 0
+    claimed = first_store.claim_next(first.owner_id, now=current[0])
+    assert claimed is not None
+    assert second.recover_incomplete() == 0
+    assert second_store.load_experiment(record.experiment_id).status is ExperimentStatus.RUNNING
+
+    current[0] += timedelta(seconds=11)
+    assert second.recover_incomplete() == 1
+    assert second_store.load_experiment(record.experiment_id).status is ExperimentStatus.QUEUED
+
+
+def test_active_worker_lease_excludes_an_overlapping_instance_and_heartbeats(
+    tmp_path, monkeypatch
+):
+    first_store = ExperimentStore(tmp_path)
+    second_store = ExperimentStore(tmp_path)
+    record, _ = first_store.create_experiment(
+        "backtest", {"symbol": "NVDA"}, "async", None
+    )
+    entered = threading.Event()
+    renewed = threading.Event()
+    release = threading.Event()
+    stop = threading.Event()
+    original_renew = first_store.renew_worker_lease
+
+    def observe_renewal(*args, **kwargs):
+        renewed.set()
+        return original_renew(*args, **kwargs)
+
+    monkeypatch.setattr(first_store, "renew_worker_lease", observe_renewal)
+
+    def execute(_record):
+        entered.set()
+        assert release.wait(2)
+        stop.set()
+        return {"ok": True}, {"source": "fixture"}
+
+    first = ExperimentWorker(
+        first_store,
+        {"backtest": execute},
+        poll_interval_seconds=0.01,
+        lease_duration_seconds=0.3,
+        heartbeat_interval_seconds=0.03,
+    )
+    second = ExperimentWorker(
+        second_store,
+        {"backtest": execute},
+        lease_duration_seconds=0.3,
+        heartbeat_interval_seconds=0.03,
+    )
+    thread = threading.Thread(target=first.run_forever, args=(stop,))
+    thread.start()
+
+    assert entered.wait(2)
+    assert renewed.wait(2)
+    assert second.run_one() is None
+    assert second_store.load_experiment(record.experiment_id).status is ExperimentStatus.RUNNING
+    release.set()
+    thread.join(3)
+
+    assert not thread.is_alive()
+    assert second_store.load_experiment(record.experiment_id).status is ExperimentStatus.COMPLETED
+    assert second_store.acquire_worker_lease(
+        second.owner_id, lease_duration_seconds=0.3
+    )
+
+
+def test_terminal_completion_race_does_not_stop_the_worker_loop(tmp_path):
     store = ExperimentStore(tmp_path)
-    record, _ = store.create_experiment("compare", {"ids": []}, "async", None)
-    assert store.claim_next() is not None
+    first, _ = store.create_experiment("backtest", {"ordinal": 1}, "async", None)
+    second, _ = store.create_experiment("backtest", {"ordinal": 2}, "async", None)
+    stop = threading.Event()
 
-    recovered = ExperimentWorker(store, {}).recover_incomplete()
+    def execute(record):
+        if record.experiment_id == first.experiment_id:
+            store.complete(
+                record.experiment_id,
+                {"ordinal": 1, "winner": "other instance"},
+                {"source": "fixture"},
+            )
+        else:
+            stop.set()
+        return {"ordinal": record.request["ordinal"]}, {"source": "fixture"}
 
-    assert recovered == 1
-    assert store.load_experiment(record.experiment_id).status is ExperimentStatus.QUEUED
+    thread = threading.Thread(
+        target=ExperimentWorker(
+            store, {"backtest": execute}, poll_interval_seconds=0.01
+        ).run_forever,
+        args=(stop,),
+    )
+    thread.start()
+    thread.join(3)
+
+    assert not thread.is_alive()
+    assert store.load_experiment(first.experiment_id).status is ExperimentStatus.COMPLETED
+    assert store.load_experiment(second.experiment_id).status is ExperimentStatus.COMPLETED
 
 
 def test_submit_runs_an_auto_bounded_backtest_inline(tmp_path):

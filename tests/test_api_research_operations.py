@@ -198,6 +198,25 @@ def test_compare_experiment_id_error_keeps_candidate_index(monkeypatch, tmp_path
     assert response.json()["error"]["details"]["fields"] == ["candidates.0"]
 
 
+def test_compare_422_removes_framework_union_branch_names(monkeypatch, tmp_path):
+    invalid_backtest = deepcopy(BACKTEST_BODY)
+    del invalid_backtest["strategy"]["id"]
+    body = {
+        "candidates": [
+            {"name": "missing strategy id", "backtest": invalid_backtest},
+            "exp_valid",
+        ],
+        "execution": "auto",
+    }
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post("/api/v1/compare", json=body, headers=AUTH)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["details"]["fields"] == [
+        "candidates.0.backtest.strategy.id"
+    ]
+
+
 @pytest.mark.parametrize(
     ("first_label", "fields"),
     [
