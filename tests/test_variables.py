@@ -9,6 +9,7 @@ from bktstr.variables import (
     VariableKind,
     VariableRef,
     inherited_tier,
+    snapshot_digest,
 )
 
 
@@ -82,6 +83,98 @@ def test_neutral_suggestion_is_deterministic_and_never_applied():
     assert diagnostic.suggested_value == 0.0
     assert diagnostic.suggested_reference is None
     assert diagnostic.applied is False
+
+
+def test_suggestion_policy_freezes_nested_values_at_construction():
+    # Break caught: a caller could mutate a list or mapping after registration
+    # and silently change the policy's future replication suggestions.
+    supplied = {
+        "weights": [1.0, {"fallbacks": ["historical_median"]}],
+    }
+    policy = ReplicationSuggestionPolicy.neutral(supplied, "Review only")
+
+    supplied["weights"].append(2.0)
+    supplied["weights"][1]["fallbacks"].append("last_valid")
+    diagnostic = policy.suggest(variable_id="sentiment.direction")
+
+    assert diagnostic.suggested_value["weights"] == (
+        1.0,
+        {"fallbacks": ("historical_median",)},
+    )
+    with pytest.raises(TypeError):
+        diagnostic.suggested_value["weights"] = ()
+
+
+def test_snapshot_freezes_nested_provenance_and_preserves_digest():
+    # Break caught: mutating caller-owned nested provenance could change the
+    # material represented by an already issued immutable snapshot digest.
+    definition = ResearchVariableDefinition.source(
+        id="market.subject.close",
+        version="1.0.0",
+        tier=DataTier.A,
+        column="close",
+        value_dtype="float64",
+        frequency="1m",
+    )
+    supplied = {
+        "provider": {
+            "name": "fixture",
+            "sources": ["primary"],
+        }
+    }
+    snapshot = ResearchVariableSnapshot.create(
+        definition,
+        pd.Series(
+            [100.0, 101.0],
+            index=pd.date_range("2026-08-17", periods=2, freq="min", tz="UTC"),
+        ),
+        input_digests=("source-digest",),
+        provenance=supplied,
+    )
+    original_digest = snapshot.digest
+
+    supplied["provider"]["name"] = "mutated"
+    supplied["provider"]["sources"].append("secondary")
+
+    assert snapshot.provenance["provider"] == {
+        "name": "fixture",
+        "sources": ("primary",),
+    }
+    assert snapshot.digest == original_digest
+    assert snapshot_digest(
+        definition,
+        snapshot.series,
+        snapshot.input_digests,
+        snapshot.provenance,
+    ) == original_digest
+    with pytest.raises(TypeError):
+        snapshot.provenance["provider"]["name"] = "mutated again"
+
+
+def test_immutable_contracts_reject_unsupported_mutable_values():
+    # Break caught: an unsupported mutable object could bypass recursive
+    # freezing and mutate policy or provenance content after construction.
+    with pytest.raises(TypeError, match="unsupported mutable value type: bytearray"):
+        ReplicationSuggestionPolicy.neutral(bytearray(b"mutable"), "Review only")
+
+    definition = ResearchVariableDefinition.source(
+        id="market.subject.close",
+        version="1.0.0",
+        tier=DataTier.A,
+        column="close",
+        value_dtype="float64",
+        frequency="1m",
+    )
+    with pytest.raises(TypeError, match="unsupported mutable value type: bytearray"):
+        ResearchVariableSnapshot.create(
+            definition,
+            pd.Series(
+                [100.0],
+                index=pd.date_range("2026-08-17", periods=1, freq="min", tz="UTC"),
+            ),
+            input_digests=(),
+            provenance={"payload": bytearray(b"mutable")},
+        )
 
 
 @pytest.mark.parametrize(

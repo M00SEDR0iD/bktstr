@@ -3,10 +3,14 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields as dataclass_fields, is_dataclass
+from datetime import date, time, timedelta
 from enum import Enum
+from numbers import Number
+from pathlib import PurePath
 from types import MappingProxyType
 from typing import Any
+from uuid import UUID
 
 import pandas as pd
 
@@ -67,7 +71,28 @@ def _immutable_value(value: Any) -> Any:
         return tuple(_immutable_value(item) for item in value)
     if isinstance(value, set | frozenset):
         return tuple(sorted((_immutable_value(item) for item in value), key=canonical_json))
-    return value
+    if _is_deeply_immutable(value):
+        return value
+    raise TypeError(f"unsupported mutable value type: {type(value).__name__}")
+
+
+def _is_deeply_immutable(value: Any) -> bool:
+    if value is None or isinstance(
+        value,
+        (str, bytes, Number, Enum, date, time, timedelta, PurePath, UUID),
+    ):
+        return True
+    if isinstance(value, MappingProxyType):
+        return all(_is_deeply_immutable(item) for item in value.values())
+    if isinstance(value, tuple | frozenset):
+        return all(_is_deeply_immutable(item) for item in value)
+    if is_dataclass(value):
+        parameters = getattr(type(value), "__dataclass_params__", None)
+        return bool(parameters and parameters.frozen) and all(
+            _is_deeply_immutable(getattr(value, item.name))
+            for item in dataclass_fields(value)
+        )
+    return False
 
 
 def _immutable_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -162,6 +187,9 @@ class ReplicationSuggestionPolicy:
     value: Any | None = None
     reference: str | None = None
     rationale: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "value", _immutable_value(self.value))
 
     @classmethod
     def neutral(cls, value: Any, rationale: str) -> "ReplicationSuggestionPolicy":
