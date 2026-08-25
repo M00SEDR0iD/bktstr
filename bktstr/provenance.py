@@ -22,6 +22,17 @@ QUALITY_TIERS = {
     },
 }
 
+ARTIFACT_TIERS = {
+    "source_arrays": {
+        "tier": "A",
+        "description": "immutable point-in-time source arrays before derived calculation",
+    },
+    "deterministic_measurements": {
+        "tier": "B",
+        "description": "immutable validated measurements calculated deterministically from Tier A arrays",
+    },
+}
+
 SOURCE_REGISTRY = {
     "price": {
         "id": "price",
@@ -147,5 +158,6 @@ def capability_provenance() -> dict:
             for name, spec in DATA_PROFILES.items()
         },
         "tiers": QUALITY_TIERS,
+        "artifact_tiers": {key: dict(value) for key, value in ARTIFACT_TIERS.items()},
         "sources": {key: dict(value) for key, value in SOURCE_REGISTRY.items()},
     }
