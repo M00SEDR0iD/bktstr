@@ -189,22 +189,106 @@ def test_filter_tier_inherits_weakest_input_and_method_floor():
         )
 
 
-def test_tier_c_d_variables_require_explicit_strategy_opt_in():
-    # Break caught: lower-trust evidence could enter a strategy without visible consent.
+@pytest.mark.parametrize(
+    ("variable_id", "tier"),
+    (("evidence.news", DataTier.C), ("evidence.social", DataTier.D)),
+)
+def test_tier_c_d_evidence_cannot_be_a_direct_variable_use_even_with_opt_in(
+    variable_id: str, tier: DataTier
+):
+    # Break caught: opt-in could authorize raw C/D evidence without filter lineage.
     evidence = StrategyVariableUse(
-        variable=VariableRef("evidence.news", "1.0.0", DataTier.C),
+        variable=VariableRef(variable_id, "1.0.0", tier),
         role=FilterRole.ANNOTATE,
         rule=None,
+        forceable=False,
+    )
+
+    with pytest.raises(
+        ValueError, match="Tier C/D evidence must use a strategy-owned filter"
+    ):
+        _definition(
+            variable_uses=(evidence,), evidence_tier_opt_ins=(tier,)
+        )
+
+
+@pytest.mark.parametrize(
+    ("role", "rule"),
+    (
+        (FilterRole.GATE, "value.gte:0.5"),
+        (FilterRole.RANK, None),
+        (FilterRole.ANNOTATE, None),
+    ),
+)
+def test_direct_variable_uses_are_never_forceable(role: FilterRole, rule: str | None):
+    # Break caught: a required entry/rank/annotation input could be omitted by force.
+    with pytest.raises(ValueError, match="direct variable uses cannot be forceable"):
+        StrategyVariableUse(
+            variable=VariableRef("technical.rsi14", "1.0.0", DataTier.B),
+            role=role,
+            rule=rule,
+            forceable=True,
+        )
+
+
+def test_forceable_filter_must_be_explicitly_optional():
+    # Break caught: a required filter could be omitted by setting only forceable=True.
+    with pytest.raises(ValueError, match="forceable filter must be optional"):
+        StrategyFilterDefinition(
+            id="test.context-filter",
+            version="1.0.0",
+            output=VariableRef(
+                "strategy.test.strategy.filter.context", "1.0.0", DataTier.C
+            ),
+            inputs=(VariableRef("evidence.news", "1.0.0", DataTier.C),),
+            role=FilterRole.ANNOTATE,
+            rule=None,
+            tier=DataTier.C,
+            forceable=True,
+        )
+
+
+def test_owned_optional_tier_c_filter_requires_and_accepts_explicit_opt_in():
+    # Break caught: a valid lower-trust filter could bypass opt-in or lack optionality.
+    evidence_filter = StrategyFilterDefinition(
+        id="test.context-filter",
+        version="1.0.0",
+        output=VariableRef(
+            "strategy.test.strategy.filter.context", "1.0.0", DataTier.C
+        ),
+        inputs=(VariableRef("evidence.news", "1.0.0", DataTier.C),),
+        role=FilterRole.ANNOTATE,
+        rule=None,
+        tier=DataTier.C,
         forceable=True,
+        optional=True,
     )
 
     with pytest.raises(ValueError, match="requires explicit Tier C opt-in"):
-        _definition(variable_uses=(evidence,))
+        _definition(filters=(evidence_filter,))
 
     opted_in = _definition(
-        variable_uses=(evidence,), evidence_tier_opt_ins=(DataTier.C,)
+        filters=(evidence_filter,), evidence_tier_opt_ins=(DataTier.C,)
     )
-    assert opted_in.evidence_tier_opt_ins == (DataTier.C,)
+    assert opted_in.filters == (evidence_filter,)
+    assert evidence_filter.optional is True
+
+
+def test_strategy_rejects_filter_output_owned_by_another_strategy():
+    # Break caught: one strategy could attach and relabel another strategy's output.
+    foreign_filter = StrategyFilterDefinition(
+        id="foreign.context-filter",
+        version="1.0.0",
+        output=VariableRef("strategy.foreign.filter.context", "1.0.0", DataTier.B),
+        inputs=(VariableRef("sentiment.fragility", "1.0.0", DataTier.B),),
+        role=FilterRole.ANNOTATE,
+        rule=None,
+        tier=DataTier.B,
+        forceable=False,
+    )
+
+    with pytest.raises(ValueError, match="filter output must use namespace"):
+        _definition(filters=(foreign_filter,))
 
 
 def test_strategy_registry_is_append_only_and_looks_up_exact_versions():

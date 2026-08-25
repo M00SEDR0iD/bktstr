@@ -148,6 +148,8 @@ class StrategyVariableUse:
             raise ValueError("gate variable use requires a rule")
         if not isinstance(self.forceable, bool):
             raise TypeError("forceable must be bool")
+        if self.forceable:
+            raise ValueError("direct variable uses cannot be forceable")
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,7 @@ class StrategyFilterDefinition:
     rule: str | None
     tier: DataTier
     forceable: bool
+    optional: bool = False
 
     def __post_init__(self) -> None:
         _require_identifier(self.id, label="filter id")
@@ -187,6 +190,10 @@ class StrategyFilterDefinition:
             raise ValueError("filter tier cannot improve inherited trust")
         if not isinstance(self.forceable, bool):
             raise TypeError("filter forceable must be bool")
+        if not isinstance(self.optional, bool):
+            raise TypeError("filter optional must be bool")
+        if self.forceable and not self.optional:
+            raise ValueError("forceable filter must be optional")
 
 
 @dataclass(frozen=True)
@@ -274,14 +281,27 @@ class StrategyDefinition:
             tier not in _LOWER_TRUST_TIERS for tier in opt_ins
         ):
             raise ValueError("evidence tier opt-ins may contain Tier C and Tier D once each")
-        referenced = [item.variable for item in self.variable_uses]
-        for item in self.filters:
-            referenced.extend((*item.inputs, item.output))
-        for reference in referenced:
-            if reference.tier in _LOWER_TRUST_TIERS and reference.tier not in opt_ins:
+        for item in self.variable_uses:
+            if item.variable.tier in _LOWER_TRUST_TIERS:
                 raise ValueError(
-                    f"{reference.id} requires explicit Tier {reference.tier.value} opt-in"
+                    "Tier C/D evidence must use a strategy-owned filter"
                 )
+        # Owned outputs use strategy.<full strategy id>.filter.<output name>.
+        output_namespace = f"strategy.{self.id}.filter."
+        for item in self.filters:
+            if not item.output.id.startswith(output_namespace):
+                raise ValueError(
+                    f"filter output must use namespace {output_namespace}"
+                )
+            for reference in (*item.inputs, item.output):
+                if (
+                    reference.tier in _LOWER_TRUST_TIERS
+                    and reference.tier not in opt_ins
+                ):
+                    raise ValueError(
+                        f"{reference.id} requires explicit Tier "
+                        f"{reference.tier.value} opt-in"
+                    )
 
     @property
     def parameter_definitions(self) -> Mapping[str, StrategyParameter]:
