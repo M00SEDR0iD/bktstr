@@ -669,7 +669,7 @@ v0.5 publishes domain contracts for research-variable metadata and the existing 
 
 ### Research variables and evidence tiers
 
-Every variable has a stable ID and semantic version. Tier A is immutable point-in-time source data; Tier B is immutable deterministic measurement data; Tier C is lower-trust model-derived evidence; and Tier D is experimental or difficult-to-reconstruct evidence. Current technical measurements, regime, sentiment, and fragility are Tier B variables that depend only on Tier A source variables.
+Every variable has a stable ID and semantic version. Tier A is immutable point-in-time source data; Tier B is trusted structured point-in-time data or validated deterministic measurement data; Tier C is lower-trust model-derived evidence; and Tier D is experimental or difficult-to-reconstruct evidence. Current technical measurements, regime, sentiment, and fragility are Tier B variables that depend only on Tier A source variables.
 
 Definitions and snapshots are immutable variables: consumers receive read-only values, lineage, digests, coverage, deterministic suggestion policy, and optional GUI metadata. Monotonic inheritance means a derived variable cannot claim a higher trust tier than any of its inputs. Consequently Tier C or Tier D evidence cannot influence a Tier A or Tier B variable.
 
@@ -685,7 +685,7 @@ Strategy filters declare one of gate, rank, or annotate behavior and cannot muta
 
 Missing required evidence fails with an explanation and a deterministic suggestion. Suggestions are diagnostics only: they never modify source data or variable snapshots, and there is no automatic backfill. Optional missing evidence may be omitted only when its registered filter is both optional and forceable and the caller explicitly confirms a forced run. Such a forced run is degraded and non-canonical; it cannot be presented as a canonical result.
 
-The capability response exposes this behavior for GUI clients so they can show missing-data diagnostics, suggestion rationale, confirmation requirements, and non-canonical status without changing the underlying research data.
+The capability response publishes registered metadata only; it does not promise confirmation requirements or forced-run status. A GUI reads those run-specific details from diagnostics only when a registered optional, forceable filter is used; the current baseline has no registered filters.
 
 ## Known limitations
 

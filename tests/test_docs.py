@@ -49,3 +49,15 @@ def test_manual_publishes_strategy_neutral_evidence_contracts():
         "non-canonical",
     ]:
         assert phrase in manual
+
+
+def test_manual_limits_capability_metadata_to_registered_contracts():
+    manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text().lower()
+    assert (
+        "tier b is trusted structured point-in-time data or validated deterministic "
+        "measurement data" in manual
+    )
+    assert (
+        "the capability response publishes registered metadata only; it does not "
+        "promise confirmation requirements or forced-run status" in manual
+    )
