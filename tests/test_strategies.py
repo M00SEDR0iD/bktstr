@@ -256,7 +256,11 @@ def test_owned_optional_tier_c_filter_requires_and_accepts_explicit_opt_in():
         output=VariableRef(
             "strategy.test.strategy.filter.context", "1.0.0", DataTier.C
         ),
-        inputs=(VariableRef("evidence.news", "1.0.0", DataTier.C),),
+        inputs=(
+            VariableRef(
+                "strategy.test.strategy.filter.upstream", "1.0.0", DataTier.C
+            ),
+        ),
         role=FilterRole.ANNOTATE,
         rule=None,
         tier=DataTier.C,
@@ -272,6 +276,62 @@ def test_owned_optional_tier_c_filter_requires_and_accepts_explicit_opt_in():
     )
     assert opted_in.filters == (evidence_filter,)
     assert evidence_filter.optional is True
+
+
+@pytest.mark.parametrize(
+    "input_id",
+    (
+        "strategy.other.filter.upstream",
+        "evidence.news",
+    ),
+)
+def test_strategy_rejects_foreign_or_unowned_lower_tier_filter_input(
+    input_id: str,
+):
+    # Break caught: opt-in could authorize C/D input lineage outside filter ownership.
+    evidence_filter = StrategyFilterDefinition(
+        id="test.context-filter",
+        version="1.0.0",
+        output=VariableRef(
+            "strategy.test.strategy.filter.context", "1.0.0", DataTier.C
+        ),
+        inputs=(VariableRef(input_id, "1.0.0", DataTier.C),),
+        role=FilterRole.ANNOTATE,
+        rule=None,
+        tier=DataTier.C,
+        forceable=False,
+    )
+
+    with pytest.raises(ValueError, match="lower-trust filter input must use namespace"):
+        _definition(
+            filters=(evidence_filter,), evidence_tier_opt_ins=(DataTier.C,)
+        )
+
+
+def test_canonical_baseline_strategy_owns_hyphenated_filter_namespace():
+    # Break caught: the baseline's raw strategy ID could not address its owned filter.
+    evidence_filter = StrategyFilterDefinition(
+        id="bktstr.context-confirmation",
+        version="1.0.0",
+        output=VariableRef(
+            "strategy.bktstr.bearish-regime-scalp.filter.context-confirmation",
+            "1.0.0",
+            DataTier.C,
+        ),
+        inputs=(VariableRef("sentiment.fragility", "1.0.0", DataTier.B),),
+        role=FilterRole.ANNOTATE,
+        rule=None,
+        tier=DataTier.C,
+        forceable=True,
+        optional=True,
+    )
+
+    definition = replace(
+        baseline_strategy_definition(),
+        filters=(evidence_filter,),
+        evidence_tier_opt_ins=(DataTier.C,),
+    )
+    assert definition.filters == (evidence_filter,)
 
 
 def test_strategy_rejects_filter_output_owned_by_another_strategy():

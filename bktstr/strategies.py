@@ -293,6 +293,15 @@ class StrategyDefinition:
                 raise ValueError(
                     f"filter output must use namespace {output_namespace}"
                 )
+            for reference in item.inputs:
+                if (
+                    reference.tier in _LOWER_TRUST_TIERS
+                    and not reference.id.startswith(output_namespace)
+                ):
+                    raise ValueError(
+                        "lower-trust filter input must use namespace "
+                        f"{output_namespace}"
+                    )
             for reference in (*item.inputs, item.output):
                 if (
                     reference.tier in _LOWER_TRUST_TIERS

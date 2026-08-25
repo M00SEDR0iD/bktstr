@@ -12,6 +12,27 @@ from bktstr.variables import (
 )
 
 
+def test_hyphenated_strategy_filter_id_is_valid_for_refs_and_definitions():
+    # Break caught: canonical strategy-owned filter IDs could fail variable registration.
+    variable_id = "strategy.bearish-regime-scalp.filter.context-confirmation"
+    reference = VariableRef(variable_id, "1.0.0", DataTier.C)
+    definition = ResearchVariableDefinition(
+        id=variable_id,
+        version="1.0.0",
+        kind=VariableKind.FILTER,
+        tier=DataTier.C,
+        column="context_confirmation",
+        value_dtype="bool",
+        frequency="1d",
+        inputs=(VariableRef("sentiment.fragility", "1.0.0", DataTier.B),),
+        plugin_id="test.context-filter",
+        plugin_version="1.0.0",
+        formula_version="test-v1",
+    )
+
+    assert definition.ref == reference
+
+
 def test_tier_inheritance_never_improves_trust():
     assert inherited_tier((DataTier.A,), method_floor=DataTier.B) is DataTier.B
     assert inherited_tier((DataTier.B, DataTier.C), method_floor=DataTier.B) is DataTier.C

@@ -13,7 +13,9 @@ import pandas as pd
 from bktstr_cache.derived import canonical_json, dataframe_digest
 
 
-_VARIABLE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
+_VARIABLE_ID_RE = re.compile(
+    r"^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+$"
+)
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
