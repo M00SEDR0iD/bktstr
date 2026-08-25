@@ -51,14 +51,10 @@ def _validation_error_fields(exc: RequestValidationError) -> list[str]:
     union_branch_types = {
         branch.__name__
         for branch in (
-            str,
-            int,
             float,
+            int,
+            str,
             bool,
-            bytes,
-            list,
-            dict,
-            tuple,
             type(None),
             NamedVariantCreate,
         )

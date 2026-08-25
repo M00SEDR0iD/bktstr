@@ -4,13 +4,27 @@ from contextlib import contextmanager
 from copy import deepcopy
 
 import pytest
+from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
-from bktstr.api.app import create_app
+from bktstr.api.app import _validation_error_fields, create_app
 from bktstr.services.experiments import ExperimentWorker
 
 
 AUTH = {"Authorization": "Bearer test-key"}
+
+
+def test_validation_normalizer_preserves_lowercase_public_aliases():
+    error = RequestValidationError(
+        [
+            {"type": "value_error", "loc": ("body", "dict"), "msg": "invalid", "input": None},
+            {"type": "value_error", "loc": ("body", "tuple"), "msg": "invalid", "input": None},
+        ]
+    )
+
+    assert _validation_error_fields(error) == ["dict", "tuple"]
+
+
 BACKTEST_BODY = {
     "strategy": {
         "id": "bktstr.bearish-regime-scalp",
