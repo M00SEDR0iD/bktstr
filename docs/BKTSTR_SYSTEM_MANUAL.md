@@ -685,7 +685,7 @@ Strategy filters declare one of gate, rank, or annotate behavior and cannot muta
 
 Missing required evidence fails with an explanation and a deterministic suggestion. Suggestions are diagnostics only: they never modify source data or variable snapshots, and there is no automatic backfill. Optional missing evidence may be omitted only when its registered filter is both optional and forceable and the caller explicitly confirms a forced run. Such a forced run is degraded and non-canonical; it cannot be presented as a canonical result.
 
-The capability response publishes registered metadata only; it does not promise confirmation requirements or forced-run status. A GUI reads those run-specific details from diagnostics only when a registered optional, forceable filter is used; the current baseline has no registered filters.
+The capability response publishes registered metadata only; it does not promise confirmation requirements or forced-run status. Run-specific information is split across run diagnostics, filter decisions and provenance, and the top-level StrategyRunResult degraded/canonical status when a registered optional, forceable filter is used; the current baseline has no registered filters.
 
 ## Known limitations
 

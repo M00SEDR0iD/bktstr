@@ -61,3 +61,10 @@ def test_manual_limits_capability_metadata_to_registered_contracts():
         "the capability response publishes registered metadata only; it does not "
         "promise confirmation requirements or forced-run status" in manual
     )
+    assert "from diagnostics only" not in manual
+    for phrase in [
+        "run diagnostics",
+        "filter decisions and provenance",
+        "top-level strategyrunresult degraded/canonical status",
+    ]:
+        assert phrase in manual
