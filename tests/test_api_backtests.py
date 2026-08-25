@@ -78,6 +78,8 @@ def _research_result(value) -> BacktestResearchResult:
                     "model_id": "bktstr.next-bar-open",
                     "model_version": "1.0.0",
                     "slippage_bps": 2.0,
+                    "position_size": 1000.0,
+                    "starting_capital": 10000.0,
                 }
             ),
         ),
@@ -243,7 +245,10 @@ def test_legacy_backtest_is_explicitly_removed_without_a_second_engine(monkeypat
         response = client.get("/api/v1/backtest", headers=AUTH)
 
     assert response.status_code == 410
-    assert response.json()["error"]["code"] == "legacy_endpoint_removed"
+    error = response.json()["error"]
+    assert error["code"] == "legacy_endpoint_removed"
+    assert error["details"]["replacement"] == "/api/v1/backtests"
+    assert "POST /api/v1/backtests" in error["message"]
     assert response.headers["link"] == '</openapi.json>; rel="alternate"'
 
 
@@ -264,3 +269,46 @@ def test_openapi_types_backtest_submissions_and_both_polling_views(monkeypatch, 
     assert post["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/BacktestExperimentResponse"
     )
+
+
+def test_openapi_polling_discriminates_operations_and_types_reproducibility_fields(
+    monkeypatch, tmp_path
+):
+    # Break caught: canonical polling could regress to opaque request/result/provenance objects.
+    with _client(monkeypatch, tmp_path) as client:
+        document = client.get("/openapi.json").json()
+
+    schemas = document["components"]["schemas"]
+    canonical = document["paths"]["/api/v1/experiments/{experiment_id}"]["get"][
+        "responses"
+    ]["200"]["content"]["application/json"]["schema"]
+    assert canonical["discriminator"] == {
+        "propertyName": "operation",
+        "mapping": {"backtest": "#/components/schemas/BacktestExperimentResponse"},
+    }
+    assert canonical["oneOf"] == [
+        {"$ref": "#/components/schemas/BacktestExperimentResponse"}
+    ]
+
+    configuration = schemas["BacktestConfigurationResponse"]["properties"]
+    assert configuration["strategy"]["$ref"].endswith("/StrategyConfigurationResponse")
+    assert configuration["market"]["$ref"].endswith("/MarketConfigurationResponse")
+    assert configuration["execution"]["$ref"].endswith("/ExecutionConfigurationResponse")
+    provenance = schemas["ResearchProvenanceResponse"]["properties"]
+    assert provenance["market_data"]["$ref"].endswith("/MarketDataProvenanceResponse")
+    assert provenance["software"]["$ref"].endswith("/SoftwareProvenanceResponse")
+    envelope = schemas["BacktestExperimentResponse"]["properties"]
+    assert envelope["provenance"]["anyOf"][0]["$ref"].endswith(
+        "/ResearchProvenanceResponse"
+    )
+
+
+def test_openapi_documents_legacy_migration_header(monkeypatch, tmp_path):
+    # Break caught: generated clients could miss the machine-readable migration link.
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.get("/openapi.json").json()["paths"]["/api/v1/backtest"][
+            "get"
+        ]["responses"]["410"]
+
+    assert response["headers"]["Link"]["schema"] == {"type": "string"}
+    assert "OpenAPI" in response["headers"]["Link"]["description"]

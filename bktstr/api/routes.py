@@ -23,7 +23,7 @@ from .schemas import (
     BacktestResult,
     CapabilityResponse,
     ErrorResponse,
-    ExperimentEnvelope,
+    ExperimentResponse,
     HealthResponse,
 )
 
@@ -164,22 +164,37 @@ def get_backtest(
 
 @api_router.get(
     "/experiments/{experiment_id}",
-    response_model=ExperimentEnvelope,
+    response_model=ExperimentResponse,
     responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
 )
 def get_experiment(
     experiment_id: str,
     request: Request,
     _: Annotated[None, Depends(require_api_key)],
-) -> ExperimentEnvelope:
-    return ExperimentEnvelope.from_record(_load_experiment(request, experiment_id))
+) -> ExperimentResponse:
+    record = _load_experiment(request, experiment_id)
+    if record.operation != "backtest":
+        raise ExperimentNotFoundError(experiment_id)
+    return BacktestExperimentResponse.from_record(record)
 
 
 @api_router.get(
     "/backtest",
     response_model=ErrorResponse,
     status_code=410,
-    responses={401: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        410: {
+            "model": ErrorResponse,
+            "description": "The legacy endpoint was removed; use the typed replacement.",
+            "headers": {
+                "Link": {
+                    "description": "OpenAPI documentation for the replacement endpoint.",
+                    "schema": {"type": "string"},
+                }
+            },
+        },
+    },
 )
 def removed_legacy_backtest(
     _: Annotated[None, Depends(require_api_key)],

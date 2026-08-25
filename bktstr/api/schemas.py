@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -9,6 +9,7 @@ from bktstr.services.experiments import ExecutionMode, ExperimentRecord, Experim
 
 
 ParameterValue = float | int | str | bool | None
+StrategyParameterValue = ParameterValue | list[str]
 
 
 class ApiError(BaseModel):
@@ -120,22 +121,110 @@ class ResearchTradeResponse(BaseModel):
     regime_variables: dict[str, Any]
 
 
+class StrategyConfigurationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    version: str
+    schema_version: str
+    parameters: dict[str, StrategyParameterValue]
+
+
+class MarketConfigurationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    start: date
+    end: date
+    timeframe: str
+    source: str
+
+
+class RegimeConfigurationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    rules: str | None = None
+    benchmark: str | None = None
+    sentiment_enabled: bool = False
+    sentiment_sector_benchmark: str | None = None
+    sentiment_market_benchmark: str | None = None
+    sentiment_data_profile: str | None = None
+    sentiment_sources: list[str] | None = None
+
+
+class ExecutionConfigurationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: ExecutionMode
+    model_id: str
+    model_version: str
+    slippage_bps: float
+    position_size: float
+    starting_capital: float
+
+
 class BacktestConfigurationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    strategy: dict[str, Any]
-    market: dict[str, Any]
-    regime: dict[str, Any]
-    execution: dict[str, Any]
+    strategy: StrategyConfigurationResponse
+    market: MarketConfigurationResponse
+    regime: RegimeConfigurationResponse
+    execution: ExecutionConfigurationResponse
+
+
+class MarketDataCoverageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requested_start: date
+    requested_end: date
+    bars: int | None
+
+
+class CacheUsageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hit_days: int
+    miss_days: int
+    fetched_ranges: int
+
+
+class MarketDataProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: str | None
+    requested_source: str
+    version: str | int | None
+    coverage: MarketDataCoverageResponse
+    cache: CacheUsageResponse | None = None
+
+
+class ExecutionModelProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    version: str
+    slippage_bps: float
+
+
+class SoftwareProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bktstr_version: str
+    git_commit: str | None = None
+    git_branch: str | None = None
+    git_repo: str | None = None
+    deployment_id: str | None = None
+    build_time: str | None = None
 
 
 class ResearchProvenanceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    strategy: dict[str, Any]
-    market_data: dict[str, Any]
-    execution_model: dict[str, Any]
-    software: dict[str, Any]
+    strategy: StrategyConfigurationResponse
+    market_data: MarketDataProvenanceResponse
+    execution_model: ExecutionModelProvenanceResponse
+    software: SoftwareProvenanceResponse
 
 
 class BacktestResult(BaseModel):
@@ -189,6 +278,15 @@ class BacktestExperimentResponse(ExperimentEnvelope):
     operation: Literal["backtest"]
     request: BacktestCreate
     result: BacktestResult | None = None
+    provenance: ResearchProvenanceResponse | None = None
+
+
+# Keep the canonical polling contract explicitly discriminated even while v0.6
+# exposes only backtests. Task 6 extends this Union with its typed operations.
+ExperimentResponse = Annotated[
+    Union[BacktestExperimentResponse],
+    Field(discriminator="operation"),
+]
 
 
 def _thaw(value: Any) -> Any:
