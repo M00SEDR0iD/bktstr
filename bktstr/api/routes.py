@@ -25,6 +25,7 @@ from .schemas import (
     ErrorResponse,
     ExperimentResponse,
     HealthResponse,
+    PendingExperimentResponse,
 )
 
 
@@ -173,9 +174,9 @@ def get_experiment(
     _: Annotated[None, Depends(require_api_key)],
 ) -> ExperimentResponse:
     record = _load_experiment(request, experiment_id)
-    if record.operation != "backtest":
-        raise ExperimentNotFoundError(experiment_id)
-    return BacktestExperimentResponse.from_record(record)
+    if record.operation == "backtest":
+        return BacktestExperimentResponse.from_record(record)
+    return PendingExperimentResponse.from_record(record)
 
 
 @api_router.get(

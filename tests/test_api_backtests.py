@@ -220,10 +220,11 @@ def test_oversized_sync_backtest_is_refused_with_stable_error(monkeypatch, tmp_p
     assert response.json()["error"]["code"] == "execution_not_available"
 
 
-def test_polling_unknown_and_non_backtest_experiments_returns_typed_not_found(
+def test_canonical_polling_retains_non_backtest_lifecycle_while_typed_route_rejects_it(
     monkeypatch, tmp_path
 ):
     # Break caught: typed backtest polling could expose another operation or leak a KeyError.
+    monkeypatch.setattr(ExperimentWorker, "run_forever", lambda self, stop_event: None)
     with _client(monkeypatch, tmp_path) as client:
         unknown = client.get("/api/v1/experiments/exp_missing", headers=AUTH)
         other, _ = client.app.state.experiment_store.create_experiment(
@@ -232,11 +233,29 @@ def test_polling_unknown_and_non_backtest_experiments_returns_typed_not_found(
         wrong_operation = client.get(
             f"/api/v1/backtests/{other.experiment_id}", headers=AUTH
         )
+        shared_poll = client.get(
+            f"/api/v1/experiments/{other.experiment_id}", headers=AUTH
+        )
 
     assert unknown.status_code == 404
     assert unknown.json()["error"]["code"] == "experiment_not_found"
     assert wrong_operation.status_code == 404
     assert wrong_operation.json()["error"]["code"] == "experiment_not_found"
+    assert shared_poll.status_code == 200
+    assert shared_poll.json() == {
+        "experiment_id": other.experiment_id,
+        "operation": "pending",
+        "stored_operation": "compare",
+        "status": "queued",
+        "created_at": other.created_at.isoformat().replace("+00:00", "Z"),
+        "started_at": None,
+        "completed_at": None,
+        "execution": "async",
+        "request": {"experiment_ids": ["exp_a", "exp_b"]},
+        "result": None,
+        "error": None,
+        "provenance": None,
+    }
 
 
 def test_legacy_backtest_is_explicitly_removed_without_a_second_engine(monkeypatch, tmp_path):
@@ -284,10 +303,14 @@ def test_openapi_polling_discriminates_operations_and_types_reproducibility_fiel
     ]["200"]["content"]["application/json"]["schema"]
     assert canonical["discriminator"] == {
         "propertyName": "operation",
-        "mapping": {"backtest": "#/components/schemas/BacktestExperimentResponse"},
+        "mapping": {
+            "backtest": "#/components/schemas/BacktestExperimentResponse",
+            "pending": "#/components/schemas/PendingExperimentResponse",
+        },
     }
     assert canonical["oneOf"] == [
-        {"$ref": "#/components/schemas/BacktestExperimentResponse"}
+        {"$ref": "#/components/schemas/BacktestExperimentResponse"},
+        {"$ref": "#/components/schemas/PendingExperimentResponse"},
     ]
 
     configuration = schemas["BacktestConfigurationResponse"]["properties"]

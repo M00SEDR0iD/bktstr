@@ -281,10 +281,24 @@ class BacktestExperimentResponse(ExperimentEnvelope):
     provenance: ResearchProvenanceResponse | None = None
 
 
+class PendingExperimentResponse(ExperimentEnvelope):
+    """Stable shared envelope for stored operations awaiting their public schema."""
+
+    operation: Literal["pending"]
+    stored_operation: str
+
+    @classmethod
+    def from_record(cls, record: ExperimentRecord) -> "PendingExperimentResponse":
+        payload = ExperimentEnvelope.from_record(record).model_dump()
+        payload["stored_operation"] = payload["operation"]
+        payload["operation"] = "pending"
+        return cls.model_validate(payload)
+
+
 # Keep the canonical polling contract explicitly discriminated even while v0.6
-# exposes only backtests. Task 6 extends this Union with its typed operations.
+# exposes only backtests. Task 6 replaces pending records with typed variants.
 ExperimentResponse = Annotated[
-    Union[BacktestExperimentResponse],
+    Union[BacktestExperimentResponse, PendingExperimentResponse],
     Field(discriminator="operation"),
 ]
 
