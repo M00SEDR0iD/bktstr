@@ -357,6 +357,7 @@ def test_idempotency_key_requires_visible_bounded_ascii(monkeypatch, tmp_path, k
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
+    assert response.json()["error"]["details"]["fields"] == ["Idempotency-Key"]
 
 
 def test_oversized_sync_backtest_is_refused_with_stable_error(monkeypatch, tmp_path):

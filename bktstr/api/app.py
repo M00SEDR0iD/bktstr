@@ -23,7 +23,7 @@ from bktstr.services.experiments import (
 from bktstr.services.validation import SemanticValidationError
 
 from .routes import api_router, experiment_operations
-from .schemas import ApiError, ErrorResponse, HealthResponse
+from .schemas import ApiError, ErrorResponse, HealthResponse, NamedVariantCreate
 
 
 def _request_id(request: Request) -> str:
@@ -49,15 +49,19 @@ def _error_response(
 
 def _validation_error_fields(exc: RequestValidationError) -> list[str]:
     union_branch_types = {
-        "str",
-        "int",
-        "float",
-        "bool",
-        "bytes",
-        "list",
-        "dict",
-        "tuple",
-        "none",
+        branch.__name__
+        for branch in (
+            str,
+            int,
+            float,
+            bool,
+            bytes,
+            list,
+            dict,
+            tuple,
+            type(None),
+            NamedVariantCreate,
+        )
     }
     candidates: list[str] = []
     for error in exc.errors():
@@ -66,7 +70,6 @@ def _validation_error_fields(exc: RequestValidationError) -> list[str]:
             for part in error.get("loc", ())
             if part not in {"body", "query", "path", "header"}
             and str(part) not in union_branch_types
-            and not (isinstance(part, str) and part[:1].isupper())
         )
         path = ".".join(location)
         if path and path not in candidates:
