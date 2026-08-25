@@ -13,6 +13,7 @@ from bktstr.services.backtest import (
     BacktestMetrics,
     BacktestResearchResult,
     CompareInput,
+    NamedVariantInput,
     ParameterSweepInput,
     RegimeComparisonInput,
     RegimeLabelInput,
@@ -22,6 +23,7 @@ from bktstr.services.backtest import (
     run_regime_comparison,
 )
 from bktstr.services.experiments import ExperimentStatus, ExperimentStore
+from bktstr.services.validation import SemanticValidationError
 
 
 BASE = BacktestInput(
@@ -252,6 +254,20 @@ def test_compare_requires_completed_backtest_experiments(tmp_path):
         compare_experiments((queued.experiment_id, completed), store=store)
 
 
+def test_compare_input_reports_the_invalid_experiment_candidate_index():
+    with pytest.raises(SemanticValidationError) as raised:
+        CompareInput(("exp_valid", "not-an-experiment"))
+
+    assert raised.value.fields == ("candidates.1",)
+
+
+def test_named_variant_reports_structured_local_fields():
+    with pytest.raises(SemanticValidationError) as raised:
+        NamedVariantInput("", BASE)
+
+    assert raised.value.fields == ("name",)
+
+
 def test_regime_comparison_allows_overlap_by_default_but_can_require_disjoint_periods():
     # Break caught: the service could silently reject intentional overlap or ignore disjoint mode.
     labels = (
@@ -261,6 +277,66 @@ def test_regime_comparison_allows_overlap_by_default_but_can_require_disjoint_pe
     assert RegimeComparisonInput(base=BASE, labels=labels).labels == labels
     with pytest.raises(ValueError, match="overlap"):
         RegimeComparisonInput(base=BASE, labels=labels, disjoint_periods=True)
+
+
+@pytest.mark.parametrize(
+    ("labels", "fields"),
+    [
+        (
+            (
+                RegimeLabelInput(
+                    "bad rule",
+                    date(2026, 1, 1),
+                    date(2026, 1, 2),
+                    "day_close.cross_below:day_sma20",
+                ),
+                RegimeLabelInput("valid", date(2026, 2, 1), date(2026, 2, 2)),
+            ),
+            ("labels.0.rule",),
+        ),
+        (
+            (
+                RegimeLabelInput("same", date(2026, 1, 1), date(2026, 1, 2)),
+                RegimeLabelInput("same", date(2026, 2, 1), date(2026, 2, 2)),
+            ),
+            ("labels.0.label", "labels.1.label"),
+        ),
+    ],
+)
+def test_regime_comparison_reports_indexed_label_fields(labels, fields):
+    with pytest.raises(SemanticValidationError) as raised:
+        RegimeComparisonInput(base=BASE, labels=labels)
+
+    assert raised.value.fields == fields
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "fields"),
+    [
+        (
+            {"label": "", "start": date(2026, 1, 1), "end": date(2026, 1, 2)},
+            ("label",),
+        ),
+        (
+            {"label": "dates", "start": date(2026, 1, 2), "end": date(2026, 1, 1)},
+            ("start", "end"),
+        ),
+        (
+            {
+                "label": "rule",
+                "start": date(2026, 1, 1),
+                "end": date(2026, 1, 2),
+                "rule": "",
+            },
+            ("rule",),
+        ),
+    ],
+)
+def test_regime_label_reports_structured_local_fields(kwargs, fields):
+    with pytest.raises(SemanticValidationError) as raised:
+        RegimeLabelInput(**kwargs)
+
+    assert raised.value.fields == fields
 
 
 def test_regime_comparison_persists_every_caller_label_and_child(

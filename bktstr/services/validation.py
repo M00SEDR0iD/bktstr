@@ -13,5 +13,19 @@ class SemanticValidationError(ValueError):
         super().__init__(message)
         self.fields = normalized
 
+    def prefixed(self, prefix: str) -> SemanticValidationError:
+        """Return the same semantic failure scoped below a compound field."""
+        normalized_prefix = str(prefix).strip(".")
+        if not normalized_prefix:
+            raise ValueError("semantic validation prefix cannot be empty")
+        return SemanticValidationError(
+            str(self),
+            (f"{normalized_prefix}.{field}" for field in self.fields),
+        )
+
+    def replace_fields(self, fields: Iterable[str]) -> SemanticValidationError:
+        """Return the same semantic failure attributed to adapter-owned fields."""
+        return SemanticValidationError(str(self), fields)
+
 
 __all__ = ["SemanticValidationError"]

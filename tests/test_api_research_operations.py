@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 
+import pytest
 from fastapi.testclient import TestClient
 
 from bktstr.api.app import create_app
@@ -126,6 +128,110 @@ def test_invalid_sweep_is_rejected_before_it_creates_a_durable_experiment(monkey
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_request"
     assert response.json()["error"]["details"]["fields"] == ["grid"]
+
+
+def _body_with_backtest_error(operation, path, value, inner_path):
+    bodies = {
+        "sweep": ("/api/v1/parameter-sweeps", deepcopy(SWEEP_BODY), "base"),
+        "compare": (
+            "/api/v1/compare",
+            {
+                "candidates": [
+                    {"name": "invalid", "backtest": deepcopy(BACKTEST_BODY)},
+                    "exp_valid",
+                ],
+                "execution": "auto",
+            },
+            "candidates.0.backtest",
+        ),
+        "regime": (
+            "/api/v1/regime-comparison",
+            deepcopy(REGIME_BODY),
+            "base",
+        ),
+    }
+    endpoint, body, prefix = bodies[operation]
+    target = body["candidates"][0]["backtest"] if operation == "compare" else body["base"]
+    cursor = target
+    for part in path[:-1]:
+        cursor = cursor[part]
+    cursor[path[-1]] = value
+    return endpoint, body, f"{prefix}.{inner_path}"
+
+
+@pytest.mark.parametrize("operation", ["sweep", "compare", "regime"])
+@pytest.mark.parametrize(
+    ("path", "value", "inner_path"),
+    [
+        (("market", "source"), "manual", "market.source"),
+        (
+            ("regime",),
+            {"rules": "relative_return20.lt:0", "benchmark": "bad symbol"},
+            "regime.benchmark",
+        ),
+        (("strategy", "parameters", "foo"), 1, "strategy.parameters.foo"),
+    ],
+)
+def test_compound_backtests_prefix_exact_inner_semantic_paths(
+    monkeypatch, tmp_path, operation, path, value, inner_path
+):
+    # Break caught: compound adapters could leak an unscoped inner backtest path.
+    endpoint, body, expected = _body_with_backtest_error(
+        operation, path, value, inner_path
+    )
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post(endpoint, json=body, headers=AUTH)
+
+    assert response.status_code == 400
+    assert response.json()["error"]["details"]["fields"] == [expected]
+
+
+def test_compare_experiment_id_error_keeps_candidate_index(monkeypatch, tmp_path):
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/v1/compare",
+            json={**COMPARE_BODY, "candidates": ["not-an-experiment", "exp_valid"]},
+            headers=AUTH,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["details"]["fields"] == ["candidates.0"]
+
+
+@pytest.mark.parametrize(
+    ("first_label", "fields"),
+    [
+        (
+            {"label": "bad dates", "start": "2026-01-02", "end": "2026-01-01"},
+            ["labels.0.start", "labels.0.end"],
+        ),
+        (
+            {
+                "label": "bad rule",
+                "start": "2026-01-01",
+                "end": "2026-01-02",
+                "rule": "day_close.cross_below:day_sma20",
+            },
+            ["labels.0.rule"],
+        ),
+        (
+            {"label": "2026", "start": "2025-01-01", "end": "2025-01-02"},
+            ["labels.0.label", "labels.1.label"],
+        ),
+    ],
+)
+def test_regime_comparison_label_errors_keep_indexed_paths(
+    monkeypatch, tmp_path, first_label, fields
+):
+    body = deepcopy(REGIME_BODY)
+    body["labels"][0] = first_label
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/v1/regime-comparison", json=body, headers=AUTH
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["details"]["fields"] == fields
 
 
 def test_research_routes_are_typed_in_openapi_and_polling_discriminator(

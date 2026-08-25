@@ -746,9 +746,11 @@ class NamedVariantInput:
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
-            raise ValueError("variant name cannot be empty")
+            raise SemanticValidationError("variant name cannot be empty", ("name",))
         if not isinstance(self.backtest, BacktestInput):
-            raise TypeError("variant backtest must be a BacktestInput")
+            raise SemanticValidationError(
+                "variant backtest must be a BacktestInput", ("backtest",)
+            )
         object.__setattr__(self, "name", self.name.strip())
 
 
@@ -761,25 +763,45 @@ class CompareInput:
     execution: str = "auto"
 
     def __post_init__(self) -> None:
-        candidates = tuple(self.candidates)
+        try:
+            candidates = tuple(self.candidates)
+        except TypeError as exc:
+            raise SemanticValidationError(
+                "comparison candidates must be a sequence", ("candidates",)
+            ) from exc
         if not 2 <= len(candidates) <= 20:
-            raise ValueError("compare requires two through twenty candidates")
+            raise SemanticValidationError(
+                "compare requires two through twenty candidates", ("candidates",)
+            )
         if self.execution not in {"auto", "sync", "async"}:
-            raise ValueError("execution must be auto, sync, or async")
+            raise SemanticValidationError(
+                "execution must be auto, sync, or async", ("execution",)
+            )
         identities: list[str] = []
-        for candidate in candidates:
+        for index, candidate in enumerate(candidates):
             if isinstance(candidate, str):
                 if not candidate.startswith("exp_"):
-                    raise ValueError("comparison experiment IDs must start with exp_")
+                    raise SemanticValidationError(
+                        "comparison experiment IDs must start with exp_",
+                        (f"candidates.{index}",),
+                    )
                 identities.append(candidate)
             elif isinstance(candidate, NamedVariantInput):
                 identities.append(f"name:{candidate.name}")
             else:
-                raise TypeError(
-                    "comparison candidates must be experiment IDs or named variants"
+                raise SemanticValidationError(
+                    "comparison candidates must be experiment IDs or named variants",
+                    (f"candidates.{index}",),
                 )
         if len(set(identities)) != len(identities):
-            raise ValueError("comparison candidates must be unique")
+            duplicate_fields = tuple(
+                f"candidates.{index}"
+                for index, identity in enumerate(identities)
+                if identities.count(identity) > 1
+            )
+            raise SemanticValidationError(
+                "comparison candidates must be unique", duplicate_fields
+            )
         object.__setattr__(self, "candidates", candidates)
 
 
@@ -815,15 +837,28 @@ class RegimeLabelInput:
 
     def __post_init__(self) -> None:
         if not isinstance(self.label, str) or not self.label.strip():
-            raise ValueError("regime comparison label cannot be empty")
-        if not isinstance(self.start, date) or not isinstance(self.end, date):
-            raise TypeError("regime label dates must be date values")
+            raise SemanticValidationError(
+                "regime comparison label cannot be empty", ("label",)
+            )
+        invalid_dates = tuple(
+            field_name
+            for field_name, value in (("start", self.start), ("end", self.end))
+            if not isinstance(value, date)
+        )
+        if invalid_dates:
+            raise SemanticValidationError(
+                "regime label dates must be date values", invalid_dates
+            )
         if self.start > self.end:
-            raise ValueError("regime label start cannot be after end")
+            raise SemanticValidationError(
+                "regime label start cannot be after end", ("start", "end")
+            )
         if self.rule is not None and (
             not isinstance(self.rule, str) or not self.rule.strip()
         ):
-            raise ValueError("regime label rule must be a non-empty string or None")
+            raise SemanticValidationError(
+                "regime label rule must be a non-empty string or None", ("rule",)
+            )
         object.__setattr__(self, "label", self.label.strip())
         object.__setattr__(self, "rule", self.rule.strip() if self.rule else None)
 
@@ -837,29 +872,74 @@ class RegimeComparisonInput:
 
     def __post_init__(self) -> None:
         if not isinstance(self.base, BacktestInput):
-            raise TypeError("base must be a BacktestInput")
-        labels = tuple(self.labels)
+            raise SemanticValidationError(
+                "base must be a BacktestInput", ("base",)
+            )
+        try:
+            labels = tuple(self.labels)
+        except TypeError as exc:
+            raise SemanticValidationError(
+                "labels must be a sequence", ("labels",)
+            ) from exc
         if not 2 <= len(labels) <= 12:
-            raise ValueError("regime comparison requires two through twelve labels")
-        if not all(isinstance(item, RegimeLabelInput) for item in labels):
-            raise TypeError("labels must contain RegimeLabelInput values")
+            raise SemanticValidationError(
+                "regime comparison requires two through twelve labels", ("labels",)
+            )
+        invalid_labels = tuple(
+            f"labels.{index}"
+            for index, item in enumerate(labels)
+            if not isinstance(item, RegimeLabelInput)
+        )
+        if invalid_labels:
+            raise SemanticValidationError(
+                "labels must contain RegimeLabelInput values", invalid_labels
+            )
         if len({item.label for item in labels}) != len(labels):
-            raise ValueError("regime comparison labels must be unique")
+            duplicate_fields = tuple(
+                f"labels.{index}.label"
+                for index, item in enumerate(labels)
+                if sum(other.label == item.label for other in labels) > 1
+            )
+            raise SemanticValidationError(
+                "regime comparison labels must be unique", duplicate_fields
+            )
         if type(self.disjoint_periods) is not bool:
-            raise TypeError("disjoint_periods must be bool")
+            raise SemanticValidationError(
+                "disjoint_periods must be bool", ("disjoint_periods",)
+            )
         if self.execution not in {"auto", "sync", "async"}:
-            raise ValueError("execution must be auto, sync, or async")
+            raise SemanticValidationError(
+                "execution must be auto, sync, or async", ("execution",)
+            )
         if self.disjoint_periods:
-            by_start = sorted(labels, key=lambda item: (item.start, item.end, item.label))
-            if any(
-                current.start <= previous.end
-                for previous, current in zip(by_start, by_start[1:])
+            by_start = sorted(
+                enumerate(labels),
+                key=lambda pair: (pair[1].start, pair[1].end, pair[1].label),
+            )
+            for (previous_index, previous), (current_index, current) in zip(
+                by_start, by_start[1:]
             ):
-                raise ValueError("regime comparison periods cannot overlap")
-        for item in labels:
+                if current.start <= previous.end:
+                    raise SemanticValidationError(
+                        "regime comparison periods cannot overlap",
+                        (
+                            f"labels.{previous_index}.end",
+                            f"labels.{current_index}.start",
+                        ),
+                    )
+        for index, item in enumerate(labels):
             if item.rule is not None:
                 base_regime = self.base.regime or RegimeInput(enabled=True)
-                normalize_regime_request(replace(base_regime, enabled=True, rules=item.rule))
+                try:
+                    normalize_regime_request(
+                        replace(base_regime, enabled=True, rules=item.rule)
+                    )
+                except SemanticValidationError as exc:
+                    raise exc.replace_fields((f"labels.{index}.rule",)) from exc
+                except (TypeError, ValueError) as exc:
+                    raise SemanticValidationError(
+                        str(exc), (f"labels.{index}.rule",)
+                    ) from exc
         object.__setattr__(self, "labels", labels)
 
 

@@ -149,8 +149,12 @@ def _execute_backtest_experiment(
 
 def _parameter_sweep_input(request: ParameterSweepCreate) -> ParameterSweepInput:
     try:
+        base = _backtest_input(request.base)
+    except SemanticValidationError as exc:
+        raise exc.prefixed("base") from exc
+    try:
         return ParameterSweepInput(
-            base=_backtest_input(request.base),
+            base=base,
             grid=request.grid,
             objective=request.objective,
             execution=request.execution.value,
@@ -162,14 +166,22 @@ def _parameter_sweep_input(request: ParameterSweepCreate) -> ParameterSweepInput
 
 
 def _compare_input(request: CompareCreate) -> CompareInput:
+    candidates: list[str | NamedVariantInput] = []
+    for index, candidate in enumerate(request.candidates):
+        if not isinstance(candidate, NamedVariantCreate):
+            candidates.append(candidate)
+            continue
+        try:
+            backtest = _backtest_input(candidate.backtest)
+        except SemanticValidationError as exc:
+            raise exc.prefixed(f"candidates.{index}.backtest") from exc
+        try:
+            candidates.append(NamedVariantInput(candidate.name, backtest))
+        except SemanticValidationError as exc:
+            raise exc.prefixed(f"candidates.{index}") from exc
     try:
         return CompareInput(
-            candidates=tuple(
-                NamedVariantInput(candidate.name, _backtest_input(candidate.backtest))
-                if isinstance(candidate, NamedVariantCreate)
-                else candidate
-                for candidate in request.candidates
-            ),
+            candidates=tuple(candidates),
             execution=request.execution.value,
         )
     except SemanticValidationError:
@@ -182,12 +194,19 @@ def _regime_comparison_input(
     request: RegimeComparisonCreate,
 ) -> RegimeComparisonInput:
     try:
+        base = _backtest_input(request.base)
+    except SemanticValidationError as exc:
+        raise exc.prefixed("base") from exc
+    labels: list[RegimeLabelInput] = []
+    for index, item in enumerate(request.labels):
+        try:
+            labels.append(RegimeLabelInput(item.label, item.start, item.end, item.rule))
+        except SemanticValidationError as exc:
+            raise exc.prefixed(f"labels.{index}") from exc
+    try:
         return RegimeComparisonInput(
-            base=_backtest_input(request.base),
-            labels=tuple(
-                RegimeLabelInput(item.label, item.start, item.end, item.rule)
-                for item in request.labels
-            ),
+            base=base,
+            labels=tuple(labels),
             disjoint_periods=request.disjoint_periods,
             execution=request.execution.value,
         )
