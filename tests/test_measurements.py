@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import bktstr.measurements as measurements
 from bktstr.engine import prepare_bars_for_backtest
 from bktstr.measurements import (
     attach_regime_variables,
@@ -107,6 +108,46 @@ def test_intraday_adapter_preserves_additional_source_columns(tmp_path: Path):
     ).legacy_frame
 
     pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_intraday_adapter_does_not_recompute_formulas_on_warm_hit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Break caught: eagerly preparing the compatibility frame could recompute
+    # VWAP, RSI, and volume ratio even when every governed column is cached.
+    raw_bars = intraday_fixture().assign(source_sequence=[10, 11, 12])
+    expected = prepare_bars_for_backtest(raw_bars, regular_hours_only=True)
+    actual_prepare = measurements.prepare_bars_for_backtest
+    call_count = 0
+
+    def count_prepare(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return actual_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(measurements, "prepare_bars_for_backtest", count_prepare)
+    store = _store(tmp_path)
+
+    cold = compute_intraday_variables(
+        store=store,
+        raw_bars=raw_bars,
+        symbol="NVDA",
+        timeframe="1m",
+        regular_hours_only=True,
+    )
+    warm = compute_intraday_variables(
+        store=store,
+        raw_bars=raw_bars,
+        symbol="NVDA",
+        timeframe="1m",
+        regular_hours_only=True,
+    )
+
+    assert cold.status.hit is False
+    assert warm.status.hit is True
+    assert call_count == 1
+    pd.testing.assert_frame_equal(cold.legacy_frame, expected)
+    pd.testing.assert_frame_equal(warm.legacy_frame, expected)
 
 
 def test_regime_adapter_preserves_existing_formula(tmp_path: Path):
@@ -218,6 +259,90 @@ def test_attachment_adapters_preserve_strictly_prior_day_timing(tmp_path: Path):
     pd.testing.assert_frame_equal(actual_sentiment, expected_sentiment)
     assert actual_regime.iloc[0]["day_close"] == daily_regime.loc[pd.Timestamp("2026-08-17")]["day_close"]
     assert actual_sentiment.iloc[0]["sentiment_direction"] == daily_sentiment.loc[pd.Timestamp("2026-08-17")]["sentiment_direction"]
+
+
+def test_regime_attachment_does_not_recompute_formula_on_warm_hit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Break caught: a cached prior-day regime attachment could still rerun the
+    # causal attachment formula before consulting the variable store.
+    subject, sector, _ = _daily_inputs()
+    intraday = intraday_fixture()
+    daily_regime = build_daily_regime(subject, sector)
+    expected = attach_regime_to_intraday(intraday, daily_regime)
+    actual_attach = measurements.attach_regime_to_intraday
+    call_count = 0
+
+    def count_attach(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return actual_attach(*args, **kwargs)
+
+    monkeypatch.setattr(measurements, "attach_regime_to_intraday", count_attach)
+    store = _store(tmp_path)
+
+    cold = attach_regime_variables(
+        store=store,
+        intraday=intraday,
+        daily_regime=daily_regime,
+        symbol="NVDA",
+        timeframe="1m",
+    )
+    warm = attach_regime_variables(
+        store=store,
+        intraday=intraday,
+        daily_regime=daily_regime,
+        symbol="NVDA",
+        timeframe="1m",
+    )
+
+    assert cold.status.hit is False
+    assert warm.status.hit is True
+    assert call_count == 1
+    pd.testing.assert_frame_equal(cold.legacy_frame, expected)
+    pd.testing.assert_frame_equal(warm.legacy_frame, expected)
+
+
+def test_sentiment_attachment_does_not_recompute_formula_on_warm_hit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Break caught: a cached prior-day sentiment attachment could still rerun
+    # the causal attachment formula before consulting the variable store.
+    subject, sector, market = _daily_inputs()
+    intraday = intraday_fixture()
+    daily_sentiment = build_daily_sentiment(subject, sector, market)
+    expected = attach_sentiment_to_intraday(intraday, daily_sentiment)
+    actual_attach = measurements.attach_sentiment_to_intraday
+    call_count = 0
+
+    def count_attach(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return actual_attach(*args, **kwargs)
+
+    monkeypatch.setattr(measurements, "attach_sentiment_to_intraday", count_attach)
+    store = _store(tmp_path)
+
+    cold = attach_sentiment_variables(
+        store=store,
+        intraday=intraday,
+        daily_sentiment=daily_sentiment,
+        symbol="NVDA",
+        timeframe="1m",
+    )
+    warm = attach_sentiment_variables(
+        store=store,
+        intraday=intraday,
+        daily_sentiment=daily_sentiment,
+        symbol="NVDA",
+        timeframe="1m",
+    )
+
+    assert cold.status.hit is False
+    assert warm.status.hit is True
+    assert call_count == 1
+    pd.testing.assert_frame_equal(cold.legacy_frame, expected)
+    pd.testing.assert_frame_equal(warm.legacy_frame, expected)
 
 
 def test_definitions_reuse_existing_formula_versions():

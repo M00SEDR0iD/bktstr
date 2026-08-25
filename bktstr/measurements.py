@@ -201,6 +201,39 @@ def _provenance(*source_ids: str) -> dict[str, object]:
     }
 
 
+def _merge_cached_columns(
+    passthrough_source: pd.DataFrame, governed: pd.DataFrame
+) -> pd.DataFrame:
+    """Rebuild a legacy frame without recalculating governed columns."""
+
+    source_columns = list(passthrough_source.columns)
+    passthrough_columns = [
+        column for column in source_columns if column not in governed.columns
+    ]
+    passthrough = passthrough_source.loc[:, passthrough_columns].copy().sort_index()
+    if isinstance(passthrough.index, pd.DatetimeIndex) and isinstance(
+        governed.index, pd.DatetimeIndex
+    ):
+        if passthrough.index.tz is None and governed.index.tz is not None:
+            passthrough.index = passthrough.index.tz_localize("UTC").tz_convert(
+                governed.index.tz
+            )
+        elif passthrough.index.tz is not None and governed.index.tz is not None:
+            passthrough.index = passthrough.index.tz_convert(governed.index.tz)
+    passthrough = passthrough.reindex(governed.index)
+
+    ordered_columns = [
+        *source_columns,
+        *(column for column in governed.columns if column not in source_columns),
+    ]
+    rebuilt = pd.DataFrame(index=governed.index)
+    for column in ordered_columns:
+        rebuilt[column] = (
+            governed[column] if column in governed.columns else passthrough[column]
+        )
+    return rebuilt
+
+
 def compute_intraday_variables(
     *,
     store: VariableSnapshotStore,
@@ -210,10 +243,16 @@ def compute_intraday_variables(
     regular_hours_only: bool = True,
 ) -> VariableStoreResult:
     definitions = (*source_definitions("subject"), *intraday_definitions())
-    prepared = prepare_bars_for_backtest(
-        raw_bars, regular_hours_only=regular_hours_only
-    )
     columns = [item.column for item in definitions]
+    prepared: pd.DataFrame | None = None
+
+    def compute() -> pd.DataFrame:
+        nonlocal prepared
+        prepared = prepare_bars_for_backtest(
+            raw_bars, regular_hours_only=regular_hours_only
+        )
+        return prepared[columns]
+
     result = store.resolve(
         namespace="intraday_features",
         definitions=definitions,
@@ -225,9 +264,14 @@ def compute_intraday_variables(
         },
         inputs={"raw": raw_bars},
         provenance=_provenance("price"),
-        compute=lambda: prepared[columns],
+        compute=compute,
     )
-    return replace(result, legacy_frame=prepared.copy(deep=True))
+    legacy_frame = (
+        prepared.copy(deep=True)
+        if prepared is not None
+        else _merge_cached_columns(raw_bars, result.legacy_frame)
+    )
+    return replace(result, legacy_frame=legacy_frame)
 
 
 def compute_regime_variables(
@@ -307,8 +351,14 @@ def attach_regime_variables(
     timeframe: str,
 ) -> VariableStoreResult:
     definitions = _available_definitions(regime_definitions(), daily_regime)
-    attached = attach_regime_to_intraday(intraday, daily_regime)
     columns = [item.column for item in definitions]
+    attached: pd.DataFrame | None = None
+
+    def compute() -> pd.DataFrame:
+        nonlocal attached
+        attached = attach_regime_to_intraday(intraday, daily_regime)
+        return attached[columns]
+
     result = store.resolve(
         namespace="intraday_regime_attachment",
         definitions=definitions,
@@ -319,9 +369,14 @@ def attach_regime_variables(
         },
         inputs={"intraday": intraday, "daily_regime": daily_regime},
         provenance=_provenance("price"),
-        compute=lambda: attached[columns],
+        compute=compute,
     )
-    return replace(result, legacy_frame=attached.copy(deep=True))
+    legacy_frame = (
+        attached.copy(deep=True)
+        if attached is not None
+        else _merge_cached_columns(intraday, result.legacy_frame)
+    )
+    return replace(result, legacy_frame=legacy_frame)
 
 
 def attach_sentiment_variables(
@@ -333,8 +388,14 @@ def attach_sentiment_variables(
     timeframe: str,
 ) -> VariableStoreResult:
     definitions = _available_definitions(sentiment_definitions(), daily_sentiment)
-    attached = attach_sentiment_to_intraday(intraday, daily_sentiment)
     columns = [item.column for item in definitions]
+    attached: pd.DataFrame | None = None
+
+    def compute() -> pd.DataFrame:
+        nonlocal attached
+        attached = attach_sentiment_to_intraday(intraday, daily_sentiment)
+        return attached[columns]
+
     result = store.resolve(
         namespace="intraday_sentiment_attachment",
         definitions=definitions,
@@ -345,9 +406,14 @@ def attach_sentiment_variables(
         },
         inputs={"intraday": intraday, "daily_sentiment": daily_sentiment},
         provenance=_provenance("price"),
-        compute=lambda: attached[columns],
+        compute=compute,
     )
-    return replace(result, legacy_frame=attached.copy(deep=True))
+    legacy_frame = (
+        attached.copy(deep=True)
+        if attached is not None
+        else _merge_cached_columns(intraday, result.legacy_frame)
+    )
+    return replace(result, legacy_frame=legacy_frame)
 
 
 __all__ = [
