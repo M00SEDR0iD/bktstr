@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 import httpx
 
@@ -96,3 +98,44 @@ def test_worker_persists_provider_failures_with_a_stable_error_code(tmp_path):
         "message": "Market-data provider request failed.",
         "details": {},
     }
+
+
+def test_reserved_inline_experiment_is_not_claimable_by_the_polling_worker(tmp_path):
+    """A polling worker must never steal a just-created inline backtest."""
+    store = ExperimentStore(tmp_path)
+
+    reserved, created = store.create_and_claim_experiment(
+        "backtest", {"symbol": "NVDA"}, ExecutionMode.SYNC, None
+    )
+
+    assert created is True
+    assert reserved.status is ExperimentStatus.RUNNING
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        assert executor.submit(ExperimentWorker(store, {}).run_one).result() is None
+
+
+def test_worker_terminalizes_result_persistence_errors_and_keeps_processing(tmp_path):
+    """An invalid completed result must fail only its experiment, not strand or stop the worker."""
+    store = ExperimentStore(tmp_path)
+    bad, _ = store.create_experiment("backtest", {"invalid": True}, "async", None)
+    good, _ = store.create_experiment("backtest", {"invalid": False}, "async", None)
+
+    def results(record):
+        value = float("nan") if record.request["invalid"] else 1
+        return {"metric": value}, {"source": "fixture"}
+
+    worker = ExperimentWorker(store, {"backtest": results})
+    failed = worker.run_one()
+    completed = worker.run_one()
+
+    assert failed is not None
+    assert failed.status is ExperimentStatus.FAILED
+    assert failed.error == {
+        "code": "result_persistence_failed",
+        "message": "Experiment result persistence failed.",
+        "details": {},
+    }
+    assert completed is not None
+    assert completed.status is ExperimentStatus.COMPLETED
+    assert store.load_experiment(bad.experiment_id).status is ExperimentStatus.FAILED
+    assert store.load_experiment(good.experiment_id).status is ExperimentStatus.COMPLETED

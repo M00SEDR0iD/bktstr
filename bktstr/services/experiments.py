@@ -317,6 +317,60 @@ class ExperimentStore:
             # A failed transaction must not leave this connection holding a lock.
             raise
 
+    def create_and_claim_experiment(
+        self,
+        operation: str,
+        request: Mapping[str, Any],
+        execution: ExecutionMode | str = ExecutionMode.SYNC,
+        idempotency_key: str | None = None,
+    ) -> tuple[ExperimentRecord, bool]:
+        """Atomically persist and reserve a synchronous experiment for its caller."""
+        if not operation:
+            raise ValueError("Experiment operation is required.")
+        if idempotency_key == "":
+            raise ValueError("Idempotency keys cannot be empty.")
+        request_json = _canonical_json(request)
+        execution_value = self._execution_value(execution)
+        if execution_value != ExecutionMode.SYNC.value:
+            raise ValueError("Only synchronous experiments can be created and claimed together.")
+        now = _timestamp()
+        experiment_id = f"exp_{uuid4().hex}"
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if idempotency_key is not None:
+                existing = connection.execute(
+                    "SELECT * FROM experiments WHERE operation = ? AND idempotency_key = ?",
+                    (operation, idempotency_key),
+                ).fetchone()
+                if existing is not None:
+                    if existing["request_json"] != request_json:
+                        raise IdempotencyConflictError(
+                            "This idempotency key was already used with a different request."
+                        )
+                    connection.execute("COMMIT")
+                    return self._record(existing), False
+            connection.execute(
+                """
+                INSERT INTO experiments (
+                    experiment_id, operation, status, execution, created_at, started_at, request_json, idempotency_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    experiment_id,
+                    operation,
+                    ExperimentStatus.RUNNING.value,
+                    execution_value,
+                    _encode_timestamp(now),
+                    _encode_timestamp(now),
+                    request_json,
+                    idempotency_key,
+                ),
+            )
+            self._write_artifact(experiment_id, "request.json", request_json)
+            record = self._load_row(connection, experiment_id)
+            connection.execute("COMMIT")
+            return self._record(record), True
+
     def load_experiment(self, experiment_id: str) -> ExperimentRecord:
         with self._connect() as connection:
             return self._record(self._load_row(connection, experiment_id))
@@ -526,7 +580,17 @@ class ExperimentWorker:
                     "details": {},
                 },
             )
-        return self.store.complete(record.experiment_id, result, provenance)
+        try:
+            return self.store.complete(record.experiment_id, result, provenance)
+        except Exception:
+            return self.store.fail(
+                record.experiment_id,
+                {
+                    "code": "result_persistence_failed",
+                    "message": "Experiment result persistence failed.",
+                    "details": {},
+                },
+            )
 
     def run_one(self) -> ExperimentRecord | None:
         record = self.store.claim_next()
@@ -534,6 +598,11 @@ class ExperimentWorker:
 
     def run(self, experiment_id: str) -> ExperimentRecord:
         return self._execute(self.store.claim(experiment_id))
+
+    def run_claimed(self, record: ExperimentRecord) -> ExperimentRecord:
+        if record.status is not ExperimentStatus.RUNNING:
+            raise ExperimentStateError(f"Experiment {record.experiment_id} is not running.")
+        return self._execute(record)
 
     def run_forever(self, stop_event: threading.Event) -> None:
         while not stop_event.is_set():
@@ -556,9 +625,14 @@ def submit(
     selected = (policy or ExecutionPolicy.from_environment()).choose(
         operation, execution, calendar_days=calendar_days
     )
-    record, created = store.create_experiment(operation, request, selected, idempotency_key)
-    if selected is ExecutionMode.SYNC and created:
-        return ExperimentWorker(store, operations).run(record.experiment_id)
+    if selected is ExecutionMode.SYNC:
+        record, created = store.create_and_claim_experiment(
+            operation, request, selected, idempotency_key
+        )
+        if created:
+            return ExperimentWorker(store, operations).run_claimed(record)
+        return record
+    record, _ = store.create_experiment(operation, request, selected, idempotency_key)
     return record
 
 
