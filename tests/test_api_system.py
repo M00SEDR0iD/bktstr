@@ -34,6 +34,21 @@ def test_openapi_exposes_typed_system_routes(monkeypatch):
     )
 
 
+def test_openapi_declares_capabilities_bearer_authentication(monkeypatch):
+    """Removing bearer security metadata would mislead generated API clients."""
+    monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
+
+    document = TestClient(create_app()).get("/openapi.json").json()
+
+    assert document["components"]["securitySchemes"]["HTTPBearer"] == {
+        "type": "http",
+        "scheme": "bearer",
+    }
+    assert document["paths"]["/api/v1/capabilities"]["get"]["security"] == [
+        {"HTTPBearer": []}
+    ]
+
+
 def test_unauthorized_response_has_a_request_id(monkeypatch):
     """Replacing API errors with uncorrelatable framework responses must fail."""
     monkeypatch.setenv("BKTSTR_API_KEY", "test-key")

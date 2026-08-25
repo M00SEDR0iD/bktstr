@@ -4,17 +4,23 @@ import os
 import secrets
 from typing import Annotated
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+
+bearer_auth = HTTPBearer(auto_error=False)
 
 
 def require_api_key(
-    authorization: Annotated[str | None, Header()] = None,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_auth)],
 ) -> None:
     """Require the configured service bearer key without echoing it back."""
     configured_key = os.getenv("BKTSTR_API_KEY")
-    scheme, _, supplied_key = (authorization or "").partition(" ")
-    authorized = bool(configured_key) and scheme.lower() == "bearer" and secrets.compare_digest(
-        supplied_key, configured_key
+    authorized = (
+        bool(configured_key)
+        and credentials is not None
+        and credentials.scheme.lower() == "bearer"
+        and secrets.compare_digest(credentials.credentials, configured_key)
     )
     if not authorized:
         raise HTTPException(
