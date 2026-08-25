@@ -86,6 +86,22 @@ def test_registry_looks_up_exact_versions_and_reports_missing_identity():
     assert error.value.details == {"id": "market.close", "version": "3.0.0"}
 
 
+def test_registry_rejects_root_reference_with_mismatched_tier():
+    # Break caught: a caller could relabel a Tier B root as Tier A at validation time.
+    registry = VariableRegistry()
+    registry.register(measurement_definition("technical.rsi14"))
+
+    with pytest.raises(VariableContractError) as error:
+        registry.validate_dependencies((ref("technical.rsi14", DataTier.A),))
+
+    assert error.value.code == "illegal_tier_dependency"
+    assert error.value.details == {
+        "reference_tier": "A",
+        "variable": ("technical.rsi14", "1.0.0"),
+        "variable_tier": "B",
+    }
+
+
 def test_registry_validates_a_to_b_graph_in_dependency_order():
     # Break caught: consumers preceding their inputs causes evaluation before data exists.
     registry = VariableRegistry()

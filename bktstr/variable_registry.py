@@ -68,6 +68,16 @@ class VariableRegistry:
 
         def visit(reference: VariableRef) -> None:
             definition = self.require(reference)
+            if reference.tier is not definition.tier:
+                raise VariableContractError(
+                    f"reference tier {reference.tier.value} does not match variable tier {definition.tier.value}",
+                    code="illegal_tier_dependency",
+                    details={
+                        "variable": (definition.id, definition.version),
+                        "variable_tier": definition.tier.value,
+                        "reference_tier": reference.tier.value,
+                    },
+                )
             identity = (definition.id, definition.version)
             state = states.get(identity)
             if state == "complete":
