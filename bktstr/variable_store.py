@@ -86,6 +86,7 @@ class VariableSnapshotStore:
                     frame[item.column],
                     input_digests=lineage,
                     provenance=provenance,
+                    coverage=_series_coverage(frame[item.column]),
                 )
                 for item in definitions
             )
@@ -220,6 +221,27 @@ def _validate_output(
     if undeclared_columns:
         raise ValueError(f"undeclared output columns: {', '.join(undeclared_columns)}")
     return frame
+
+
+def _series_coverage(series: pd.Series) -> dict[str, str | int | None]:
+    """Record the observed date coverage without declaring incomplete frames invalid."""
+
+    if series.empty or not isinstance(series.index, pd.DatetimeIndex):
+        return {
+            "available_start": None,
+            "available_end": None,
+            "observations": int(len(series)),
+        }
+    index = series.index
+    if index.tz is None:
+        local = index.tz_localize("UTC").tz_convert("America/New_York")
+    else:
+        local = index.tz_convert("America/New_York")
+    return {
+        "available_start": local[0].date().isoformat(),
+        "available_end": local[-1].date().isoformat(),
+        "observations": int(len(series)),
+    }
 
 
 __all__ = ["VariableSnapshotStore", "VariableStoreResult"]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -24,8 +24,10 @@ from .strategies import (
 from .variable_registry import VariableRegistry
 from .variable_store import VariableSnapshotStore
 from .variables import (
+    DataTier,
     ReplicationSuggestionPolicy,
     ResearchVariableDefinition,
+    ResearchVariableSnapshot,
     VariableContractError,
     VariableDiagnostic,
     VariableRef,
@@ -90,11 +92,35 @@ class StrategyRunResult:
 class StrategyRunError(RuntimeError):
     """A stable domain error containing safe, structured diagnostics."""
 
-    def __init__(self, code: str, diagnostics: tuple[VariableDiagnostic, ...]) -> None:
+    def __init__(
+        self,
+        code: str,
+        diagnostics: tuple[VariableDiagnostic, ...],
+        *,
+        provider_cause: BaseException | None = None,
+    ) -> None:
         self.code = str(code)
         self.diagnostics = tuple(diagnostics)
+        # Kept out of the domain message, diagnostics, and provenance.  The
+        # legacy boundary alone may re-raise an HTTP provider error for its
+        # established transport classifier.
+        self.provider_cause = provider_cause
         variable_ids = ", ".join(item.variable_id for item in self.diagnostics)
         super().__init__(f"{self.code}: {variable_ids}")
+
+
+@dataclass(frozen=True)
+class _VariableMaterialization:
+    """One immutable artifact actually consumed or produced during a run."""
+
+    snapshot: ResearchVariableSnapshot
+    purpose: str
+    role: str
+    symbol: str
+    timeframe: str
+    requested_start: date
+    requested_end: date
+    cache: Mapping[str, Any]
 
 
 class _NoWriteDerivedFrameCache(DerivedFrameCache):
@@ -146,6 +172,142 @@ def _coverage_bounds(frame: pd.DataFrame) -> tuple[str | None, str | None]:
     return local[0].date().isoformat(), local[-1].date().isoformat()
 
 
+def _coverage(
+    frame: pd.DataFrame, *, requested_start: date, requested_end: date
+) -> dict[str, str | int | None]:
+    available_start, available_end = _coverage_bounds(frame)
+    return {
+        "requested_start": requested_start.isoformat(),
+        "requested_end": requested_end.isoformat(),
+        "available_start": available_start,
+        "available_end": available_end,
+        "observations": int(len(frame)),
+    }
+
+
+def _definition_trace(
+    definition: ResearchVariableDefinition,
+) -> dict[str, str | None]:
+    return {
+        "id": definition.id,
+        "version": definition.version,
+        "kind": definition.kind.value,
+        "tier": definition.tier.value,
+        "column": definition.column,
+        "value_dtype": definition.value_dtype,
+        "frequency": definition.frequency,
+        "plugin_id": definition.plugin_id,
+        "plugin_version": definition.plugin_version,
+        "formula_version": definition.formula_version,
+    }
+
+
+def _source_materializations(
+    *,
+    definitions: tuple[ResearchVariableDefinition, ...],
+    frame: pd.DataFrame,
+    purpose: str,
+    role: str,
+    symbol: str,
+    timeframe: str,
+    requested_start: date,
+    requested_end: date,
+    cache: Mapping[str, Any],
+    provider_name: str,
+) -> tuple[_VariableMaterialization, ...]:
+    coverage = _coverage(
+        frame, requested_start=requested_start, requested_end=requested_end
+    )
+    materializations: list[_VariableMaterialization] = []
+    for definition in definitions:
+        if definition.column not in frame.columns:
+            continue
+        snapshot = ResearchVariableSnapshot.create(
+            definition,
+            frame[definition.column],
+            input_digests=(),
+            provenance={
+                "provider": provider_name,
+                "purpose": purpose,
+                "role": role,
+                "symbol": symbol,
+                "timeframe": timeframe,
+            },
+            coverage=coverage,
+        )
+        materializations.append(
+            _VariableMaterialization(
+                snapshot=snapshot,
+                purpose=purpose,
+                role=role,
+                symbol=symbol,
+                timeframe=timeframe,
+                requested_start=requested_start,
+                requested_end=requested_end,
+                cache=dict(cache),
+            )
+        )
+    return tuple(materializations)
+
+
+def _measurement_materializations(
+    *,
+    variables: VariableSet,
+    cache: CacheStatus,
+    purpose: str,
+    role: str,
+    symbol: str,
+    timeframe: str,
+    requested_start: date,
+    requested_end: date,
+    include_tier_a: bool = False,
+) -> tuple[_VariableMaterialization, ...]:
+    return tuple(
+        _VariableMaterialization(
+            snapshot=snapshot,
+            purpose=purpose,
+            role=role,
+            symbol=symbol,
+            timeframe=timeframe,
+            requested_start=requested_start,
+            requested_end=requested_end,
+            cache=_cache_status(cache),
+        )
+        for snapshot in variables.snapshots
+        if include_tier_a or snapshot.tier is not DataTier.A
+    )
+
+
+def _materialization_trace(
+    materialization: _VariableMaterialization,
+) -> dict[str, Any]:
+    snapshot = materialization.snapshot
+    coverage = {
+        "requested_start": materialization.requested_start.isoformat(),
+        "requested_end": materialization.requested_end.isoformat(),
+        **dict(snapshot.coverage),
+    }
+    scope = {
+        "purpose": materialization.purpose,
+        "role": materialization.role,
+        "symbol": materialization.symbol,
+        "timeframe": materialization.timeframe,
+    }
+    return {
+        "artifact_id": (
+            f"{snapshot.definition.id}@{materialization.purpose}:"
+            f"{materialization.role}:{materialization.timeframe}:"
+            f"{materialization.requested_start.isoformat()}:"
+            f"{materialization.requested_end.isoformat()}"
+        ),
+        "definition": _definition_trace(snapshot.definition),
+        "digest": snapshot.digest,
+        "coverage": coverage,
+        "cache": dict(materialization.cache),
+        "scope": scope,
+    }
+
+
 def _safe_build_identity(identity: Mapping[str, Any]) -> dict[str, str | None]:
     return {
         key: str(identity[key]) if identity.get(key) is not None else None
@@ -167,6 +329,183 @@ def _definition_for(
     registry: VariableRegistry, variable_id: str
 ) -> ResearchVariableDefinition:
     return registry.require(variable_id)
+
+
+def _reference_from_contract_details(
+    registry: VariableRegistry, details: Mapping[str, Any]
+) -> VariableRef | None:
+    """Recover the governed identity a contract error names, without its text."""
+
+    def registered_reference(value: Any) -> VariableRef | None:
+        if isinstance(value, ResearchVariableDefinition):
+            return value.ref
+        if isinstance(value, VariableRef):
+            return value
+        if isinstance(value, Mapping):
+            variable_id = value.get("id")
+            version = value.get("version")
+            if isinstance(variable_id, str):
+                definition = registry.get(
+                    variable_id,
+                    version if isinstance(version, str) else None,
+                )
+                return definition.ref if definition is not None else None
+        if isinstance(value, str):
+            definition = registry.get(value)
+            return definition.ref if definition is not None else None
+        if (
+            isinstance(value, tuple)
+            and len(value) >= 2
+            and isinstance(value[0], str)
+            and isinstance(value[1], str)
+        ):
+            definition = registry.get(value[0], value[1])
+            return definition.ref if definition is not None else None
+        return None
+
+    for key in ("variable", "definition", "variable_id", "id", "dependency"):
+        reference = registered_reference(details.get(key))
+        if reference is not None:
+            return reference
+    cycle = details.get("cycle")
+    if isinstance(cycle, tuple):
+        for identity in cycle:
+            reference = registered_reference(identity)
+            if reference is not None:
+                return reference
+    return None
+
+
+def _contract_target(
+    *,
+    registry: VariableRegistry,
+    fallback_variable_id: str,
+    error: VariableContractError,
+) -> tuple[ResearchVariableDefinition, VariableRef]:
+    fallback = _definition_for(registry, fallback_variable_id)
+    reference = _reference_from_contract_details(registry, error.details)
+    if reference is None:
+        return fallback, fallback.ref
+    return registry.get(reference) or fallback, reference
+
+
+def _definition_mismatched_fields(
+    actual: ResearchVariableDefinition,
+    registered: ResearchVariableDefinition,
+) -> tuple[str, ...]:
+    return tuple(
+        item.name
+        for item in fields(ResearchVariableDefinition)
+        if getattr(actual, item.name) != getattr(registered, item.name)
+    )
+
+
+def _validate_generated_definitions(
+    *,
+    registry: VariableRegistry,
+    definitions: tuple[ResearchVariableDefinition, ...],
+    affected_rules: tuple[str, ...],
+) -> None:
+    """Ensure generated definitions are exactly the definitions governance approved."""
+
+    seen: dict[tuple[str, str], ResearchVariableDefinition] = {}
+    seen_by_id: dict[str, ResearchVariableDefinition] = {}
+    for actual in definitions:
+        identity = (actual.id, actual.version)
+        prior = seen.get(identity)
+        if prior is not None and prior != actual:
+            _raise_diagnostic(
+                "schema_mismatch",
+                _diagnostic(
+                    code="schema_mismatch",
+                    definition=actual,
+                    variable=actual.ref,
+                    affected_coverage={},
+                    affected_rules=affected_rules,
+                    forceable=False,
+                    details={
+                        "failure_class": "materialization_definition",
+                        "mismatched_fields": _definition_mismatched_fields(
+                            actual, prior
+                        ),
+                    },
+                ),
+            )
+        prior_by_id = seen_by_id.get(actual.id)
+        if prior_by_id is not None and prior_by_id != actual:
+            _raise_diagnostic(
+                "schema_mismatch",
+                _diagnostic(
+                    code="schema_mismatch",
+                    definition=actual,
+                    variable=actual.ref,
+                    affected_coverage={},
+                    affected_rules=affected_rules,
+                    forceable=False,
+                    details={
+                        "failure_class": "materialization_definition",
+                        "mismatched_fields": _definition_mismatched_fields(
+                            actual, prior_by_id
+                        ),
+                    },
+                ),
+            )
+        seen[identity] = actual
+        seen_by_id[actual.id] = actual
+
+    for actual in seen.values():
+        registered = registry.get(actual.ref)
+        if registered is None:
+            _raise_diagnostic(
+                "unknown_variable",
+                _diagnostic(
+                    code="unknown_variable",
+                    definition=actual,
+                    variable=actual.ref,
+                    affected_coverage={},
+                    affected_rules=affected_rules,
+                    forceable=False,
+                    details={"failure_class": "registry_definition"},
+                ),
+            )
+        mismatched_fields = _definition_mismatched_fields(actual, registered)
+        if not mismatched_fields:
+            continue
+        code = (
+            "formula_mismatch"
+            if mismatched_fields == ("formula_version",)
+            else "schema_mismatch"
+        )
+        _raise_diagnostic(
+            code,
+            _diagnostic(
+                code=code,
+                definition=actual,
+                variable=actual.ref,
+                affected_coverage={},
+                affected_rules=affected_rules,
+                forceable=False,
+                details={
+                    "failure_class": "registry_definition",
+                    "mismatched_fields": mismatched_fields,
+                },
+            ),
+        )
+
+
+def _validate_materialized_definitions(
+    *,
+    registry: VariableRegistry,
+    materializations: tuple[_VariableMaterialization, ...],
+    affected_rules: tuple[str, ...],
+) -> None:
+    """Recheck the definitions carried by every actual immutable artifact."""
+
+    _validate_generated_definitions(
+        registry=registry,
+        definitions=tuple(item.snapshot.definition for item in materializations),
+        affected_rules=affected_rules,
+    )
 
 
 def _diagnostic(
@@ -199,8 +538,19 @@ def _diagnostic(
     )
 
 
-def _raise_diagnostic(code: str, diagnostic: VariableDiagnostic) -> None:
-    raise StrategyRunError(code, (diagnostic,))
+def _raise_diagnostic(
+    code: str,
+    diagnostic: VariableDiagnostic,
+    *,
+    provider_cause: BaseException | None = None,
+) -> None:
+    if provider_cause is None:
+        raise StrategyRunError(code, (diagnostic,))
+    raise StrategyRunError(
+        code,
+        (diagnostic,),
+        provider_cause=provider_cause,
+    ) from None
 
 
 def _missing_coverage(
@@ -242,7 +592,11 @@ def _contract_failure(
     error: VariableContractError,
     affected_rules: tuple[str, ...],
 ) -> None:
-    definition = _definition_for(registry, variable_id)
+    definition, variable = _contract_target(
+        registry=registry,
+        fallback_variable_id=variable_id,
+        error=error,
+    )
     code = (
         "immutable_snapshot_corruption"
         if error.code in _CORRUPTION_CODES or "snapshot" in error.code
@@ -253,7 +607,7 @@ def _contract_failure(
         _diagnostic(
             code=code,
             definition=definition,
-            variable=definition.ref,
+            variable=variable,
             affected_coverage={},
             affected_rules=affected_rules,
             forceable=False,
@@ -269,6 +623,7 @@ def _provider_failure(
     required_start: date,
     required_end: date,
     affected_rules: tuple[str, ...],
+    provider_cause: BaseException | None = None,
 ) -> None:
     definition = _definition_for(registry, variable_id)
     _raise_diagnostic(
@@ -287,6 +642,7 @@ def _provider_failure(
             forceable=False,
             details={"failure_class": "provider"},
         ),
+        provider_cause=provider_cause,
     )
 
 
@@ -302,13 +658,14 @@ async def _fetch_tier_a(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     try:
         frame = await dependencies.provider.fetch_bars(symbol, start, end, timeframe)
-    except Exception:
+    except Exception as error:
         _provider_failure(
             registry=dependencies.variable_registry,
             variable_id=variable_id,
             required_start=start,
             required_end=end,
             affected_rules=affected_rules,
+            provider_cause=error,
         )
     if not isinstance(frame, pd.DataFrame):
         _provider_failure(
@@ -484,6 +841,80 @@ def _filter_diagnostic(
     )
 
 
+def _filter_input_lineage(
+    filter_definition, variables: VariableSet
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "id": reference.id,
+            "version": reference.version,
+            "tier": reference.tier.value,
+            "digest": (
+                variables[reference.id].digest
+                if reference.id in variables
+                else None
+            ),
+        }
+        for reference in filter_definition.inputs
+    )
+
+
+def _filter_thresholds(rule: str | None) -> tuple[Mapping[str, Any], ...]:
+    if rule is None:
+        return ()
+    from .rules import parse_rules
+
+    try:
+        parsed = parse_rules(rule)
+    except ValueError:
+        # Preserve existing strategy-definition compatibility: parsing a rule is
+        # diagnostic provenance here, not a new execution-time validation point.
+        return ({"expression": rule},)
+    return tuple(
+        {
+            "field": item.left,
+            "operator": item.op,
+            "value": item.right,
+        }
+        for item in parsed
+    )
+
+
+def _observed_filter_value(snapshot: ResearchVariableSnapshot | None) -> Any | None:
+    if snapshot is None:
+        return None
+    observed = snapshot.series.dropna()
+    if observed.empty:
+        return None
+    value = observed.iloc[-1]
+    return value.item() if hasattr(value, "item") else value
+
+
+def _filter_decision(
+    *,
+    filter_definition,
+    request: StrategyRunRequest,
+    variables: VariableSet,
+    available: bool,
+) -> Mapping[str, Any]:
+    output = variables.get(filter_definition.output.id)
+    status = "evaluated" if available else "not_evaluated"
+    return {
+        "id": filter_definition.id,
+        "version": filter_definition.version,
+        "tier": filter_definition.tier.value,
+        "role": filter_definition.role.value,
+        "status": status,
+        "outcome": "evaluated" if available else "omitted",
+        "confirmation": bool(request.confirm_degraded),
+        "inputs": _filter_input_lineage(filter_definition, variables),
+        "observed_value": _observed_filter_value(output) if available else None,
+        "rule": filter_definition.rule,
+        "threshold": _filter_thresholds(filter_definition.rule),
+        "backfill": {"attempted": False, "applied": False},
+    }
+
+
 def _evaluate_filters(
     *,
     definition: StrategyDefinition,
@@ -500,14 +931,12 @@ def _evaluate_filters(
         available = filter_definition.output.id in variables
         if available:
             decisions.append(
-                {
-                    "id": filter_definition.id,
-                    "version": filter_definition.version,
-                    "tier": filter_definition.tier.value,
-                    "role": filter_definition.role.value,
-                    "status": "evaluated",
-                    "inputs": tuple(item.id for item in filter_definition.inputs),
-                }
+                _filter_decision(
+                    filter_definition=filter_definition,
+                    request=request,
+                    variables=variables,
+                    available=True,
+                )
             )
             continue
         diagnostic = _filter_diagnostic(definition, filter_definition, request)
@@ -520,24 +949,53 @@ def _evaluate_filters(
         diagnostics.append(diagnostic)
         degraded = True
         decisions.append(
-            {
-                "id": filter_definition.id,
-                "version": filter_definition.version,
-                "tier": filter_definition.tier.value,
-                "role": filter_definition.role.value,
-                "status": "not_evaluated",
-                "inputs": tuple(item.id for item in filter_definition.inputs),
-            }
+            _filter_decision(
+                filter_definition=filter_definition,
+                request=request,
+                variables=variables,
+                available=False,
+            )
         )
     return tuple(diagnostics), tuple(decisions), degraded
 
 
 def _dependency_trace(
-    definitions: tuple[ResearchVariableDefinition, ...], variables: VariableSet
+    definitions: tuple[ResearchVariableDefinition, ...],
+    materializations: tuple[_VariableMaterialization, ...],
 ) -> tuple[Mapping[str, Any], ...]:
+    # The graph roots express calculated dependencies, while materializations
+    # express every source column actually acquired (including execution-only
+    # columns such as subject open).  The latter are appended exactly once so a
+    # reused variable ID is disambiguated by its scoped artifacts, not by a
+    # duplicate top-level record.
+    traced_definitions = list(definitions)
+    definitions_by_id = {definition.id: definition for definition in definitions}
+    for materialization in materializations:
+        actual = materialization.snapshot.definition
+        if actual.id not in definitions_by_id:
+            traced_definitions.append(actual)
+            definitions_by_id[actual.id] = actual
+    by_id: dict[str, list[_VariableMaterialization]] = {}
+    for materialization in materializations:
+        by_id.setdefault(materialization.snapshot.definition.id, []).append(
+            materialization
+        )
     trace: list[Mapping[str, Any]] = []
-    for definition in definitions:
-        snapshot = variables.get(definition.id)
+    for definition in traced_definitions:
+        records = tuple(
+            _materialization_trace(item) for item in by_id.get(definition.id, ())
+        )
+        digests: str | tuple[str, ...] | None
+        coverages: Mapping[str, Any] | tuple[Mapping[str, Any], ...]
+        if len(records) == 1:
+            digests = records[0]["digest"]
+            coverages = records[0]["coverage"]
+        elif records:
+            digests = tuple(item["digest"] for item in records)
+            coverages = tuple(item["coverage"] for item in records)
+        else:
+            digests = None
+            coverages = {}
         trace.append(
             {
                 "id": definition.id,
@@ -546,8 +1004,9 @@ def _dependency_trace(
                 "kind": definition.kind.value,
                 "formula_version": definition.formula_version,
                 "dependencies": tuple(item.id for item in definition.inputs),
-                "digest": snapshot.digest if snapshot is not None else None,
-                "coverage": dict(snapshot.coverage) if snapshot is not None else {},
+                "digest": digests,
+                "coverage": coverages,
+                "materializations": records,
             }
         )
     return tuple(trace)
@@ -615,7 +1074,54 @@ async def execute_strategy_run(
     regime_rules = resolved.values["regime_rules"]
     sentiment_enabled = bool(resolved.values["sentiment"])
 
-    # The registry validation is governance-only and happens before acquisition.
+    subject = request.instruments.get("subject")
+    if subject is None:
+        raise ValueError("strategy run requires a subject instrument")
+    needs_regime = bool(regime_rules and regime_uses_market_fields(regime_rules))
+    # The compatibility adapter preserves the legacy distinction: a sentiment
+    # sector is not a regime benchmark unless the request explicitly supplies one.
+    benchmark = request.instruments.get("benchmark")
+    sector = request.instruments.get("sector")
+    market = request.instruments.get("market")
+    if sentiment_enabled and (not sector or not market):
+        raise ValueError("sentiment strategy run requires sector and market instruments")
+
+    (
+        attach_regime_variables,
+        attach_sentiment_variables,
+        compute_intraday_variables,
+        compute_regime_variables,
+        compute_sentiment_variables,
+        intraday_definitions,
+        regime_definitions,
+        sentiment_definitions,
+        source_definitions,
+    ) = _measurement_adapters()
+    generated_definitions = [
+        *source_definitions("subject"),
+        *intraday_definitions(),
+    ]
+    if needs_regime:
+        generated_definitions.extend(source_definitions("subject"))
+        if benchmark:
+            generated_definitions.extend(source_definitions("benchmark"))
+        generated_definitions.extend(
+            regime_definitions(include_benchmark=bool(benchmark))
+        )
+    if sentiment_enabled:
+        generated_definitions.extend(source_definitions("subject"))
+        generated_definitions.extend(source_definitions("sector"))
+        generated_definitions.extend(source_definitions("market"))
+        generated_definitions.extend(sentiment_definitions())
+    _validate_generated_definitions(
+        registry=dependencies.variable_registry,
+        definitions=tuple(generated_definitions),
+        affected_rules=tuple(item for item in (entry_rules, regime_rules) if item),
+    )
+
+    # The registry graph is validated only after its concrete generated
+    # definitions have been checked, so a tampered tier/schema never masquerades
+    # as a governed dependency graph.
     try:
         dependencies.variable_registry.validate_dependencies(
             tuple(item.variable for item in definition.variable_uses)
@@ -631,18 +1137,6 @@ async def execute_strategy_run(
         )
     stages.append("variable_graph_validated")
 
-    subject = request.instruments.get("subject")
-    if subject is None:
-        raise ValueError("strategy run requires a subject instrument")
-    needs_regime = bool(regime_rules and regime_uses_market_fields(regime_rules))
-    # The compatibility adapter preserves the legacy distinction: a sentiment
-    # sector is not a regime benchmark unless the request explicitly supplies one.
-    benchmark = request.instruments.get("benchmark")
-    sector = request.instruments.get("sector")
-    market = request.instruments.get("market")
-    if sentiment_enabled and (not sector or not market):
-        raise ValueError("sentiment strategy run requires sector and market instruments")
-
     # Tier A acquisition is deliberately complete before any Tier B calculation.
     raw_bars, intraday_cache = await _fetch_tier_a(
         dependencies=dependencies,
@@ -655,14 +1149,15 @@ async def execute_strategy_run(
     )
 
     regime_subject_daily = regime_benchmark_daily = None
+    regime_warmup_start: date | None = None
     regime_data = None
     if needs_regime:
-        warmup_start = request.start - timedelta(days=120)
+        regime_warmup_start = request.start - timedelta(days=120)
         regime_subject_daily, subject_cache = await _fetch_tier_a(
             dependencies=dependencies,
             variable_id="market.subject.close",
             symbol=subject,
-            start=warmup_start,
+            start=regime_warmup_start,
             end=request.end,
             timeframe="1d",
             affected_rules=(regime_rules,),
@@ -673,7 +1168,7 @@ async def execute_strategy_run(
                 dependencies=dependencies,
                 variable_id="market.benchmark.close",
                 symbol=benchmark,
-                start=warmup_start,
+                start=regime_warmup_start,
                 end=request.end,
                 timeframe="1d",
                 affected_rules=(regime_rules,),
@@ -687,30 +1182,44 @@ async def execute_strategy_run(
             if regime_benchmark_daily is not None
             else 0,
             "benchmark_cache": benchmark_cache,
-            "warmup_start": warmup_start.isoformat(),
+            "warmup_start": regime_warmup_start.isoformat(),
         }
 
     sentiment_subject_daily = sentiment_sector_daily = sentiment_market_daily = None
+    sentiment_warmup_start: date | None = None
     sentiment_coverages = None
     if sentiment_enabled:
-        warmup_start = request.start - timedelta(days=460)
+        sentiment_warmup_start = request.start - timedelta(days=460)
         try:
             sentiment_subject_daily, subject_coverage = await _fetch_sentiment_daily(
-                dependencies.provider, subject, warmup_start, request.start, request.end
+                dependencies.provider,
+                subject,
+                sentiment_warmup_start,
+                request.start,
+                request.end,
             )
             sentiment_sector_daily, sector_coverage = await _fetch_sentiment_daily(
-                dependencies.provider, sector, warmup_start, request.start, request.end
+                dependencies.provider,
+                sector,
+                sentiment_warmup_start,
+                request.start,
+                request.end,
             )
             sentiment_market_daily, market_coverage = await _fetch_sentiment_daily(
-                dependencies.provider, market, warmup_start, request.start, request.end
+                dependencies.provider,
+                market,
+                sentiment_warmup_start,
+                request.start,
+                request.end,
             )
-        except Exception:
+        except Exception as error:
             _provider_failure(
                 registry=dependencies.variable_registry,
                 variable_id="market.subject.close",
-                required_start=warmup_start,
+                required_start=sentiment_warmup_start,
                 required_end=request.end,
                 affected_rules=(regime_rules or "sentiment",),
+                provider_cause=error,
             )
         daily_sets = (
             ("market.subject.close", sentiment_subject_daily),
@@ -722,7 +1231,7 @@ async def execute_strategy_run(
                 _missing_coverage(
                     registry=dependencies.variable_registry,
                     variable_id=variable_id,
-                    required_start=warmup_start,
+                    required_start=sentiment_warmup_start,
                     required_end=request.end,
                     frame=frame,
                     affected_rules=(regime_rules or "sentiment",),
@@ -730,17 +1239,96 @@ async def execute_strategy_run(
         sentiment_coverages = (subject_coverage, sector_coverage, market_coverage)
     stages.append("tier_a_acquired")
 
-    (
-        attach_regime_variables,
-        attach_sentiment_variables,
-        compute_intraday_variables,
-        compute_regime_variables,
-        compute_sentiment_variables,
-        intraday_definitions,
-        regime_definitions,
-        sentiment_definitions,
-    ) = _measurement_adapters()
     store = _store_for_run(dependencies)
+    materializations: list[_VariableMaterialization] = list(
+        _source_materializations(
+            definitions=source_definitions("subject"),
+            frame=raw_bars,
+            purpose="intraday",
+            role="subject",
+            symbol=subject,
+            timeframe=request.timeframe,
+            requested_start=request.start,
+            requested_end=request.end,
+            cache=intraday_cache,
+            provider_name=dependencies.provider_name,
+        )
+    )
+    if needs_regime:
+        assert regime_warmup_start is not None
+        materializations.extend(
+            _source_materializations(
+                definitions=source_definitions("subject"),
+                frame=regime_subject_daily,
+                purpose="regime",
+                role="subject",
+                symbol=subject,
+                timeframe="1d",
+                requested_start=regime_warmup_start,
+                requested_end=request.end,
+                cache=subject_cache,
+                provider_name=dependencies.provider_name,
+            )
+        )
+        if regime_benchmark_daily is not None:
+            materializations.extend(
+                _source_materializations(
+                    definitions=source_definitions("benchmark"),
+                    frame=regime_benchmark_daily,
+                    purpose="regime",
+                    role="benchmark",
+                    symbol=benchmark,
+                    timeframe="1d",
+                    requested_start=regime_warmup_start,
+                    requested_end=request.end,
+                    cache=benchmark_cache or {},
+                    provider_name=dependencies.provider_name,
+                )
+            )
+    if sentiment_enabled:
+        assert sentiment_warmup_start is not None
+        materializations.extend(
+            _source_materializations(
+                definitions=source_definitions("subject"),
+                frame=sentiment_subject_daily,
+                purpose="sentiment",
+                role="subject",
+                symbol=subject,
+                timeframe="1d",
+                requested_start=sentiment_warmup_start,
+                requested_end=request.end,
+                cache=subject_coverage["cache"],
+                provider_name=dependencies.provider_name,
+            )
+        )
+        materializations.extend(
+            _source_materializations(
+                definitions=source_definitions("sector"),
+                frame=sentiment_sector_daily,
+                purpose="sentiment",
+                role="sector",
+                symbol=sector,
+                timeframe="1d",
+                requested_start=sentiment_warmup_start,
+                requested_end=request.end,
+                cache=sector_coverage["cache"],
+                provider_name=dependencies.provider_name,
+            )
+        )
+        materializations.extend(
+            _source_materializations(
+                definitions=source_definitions("market"),
+                frame=sentiment_market_daily,
+                purpose="sentiment",
+                role="market",
+                symbol=market,
+                timeframe="1d",
+                requested_start=sentiment_warmup_start,
+                requested_end=request.end,
+                cache=market_coverage["cache"],
+                provider_name=dependencies.provider_name,
+            )
+        )
     try:
         intraday_result = compute_intraday_variables(
             store=store,
@@ -758,6 +1346,19 @@ async def execute_strategy_run(
         )
     bars = intraday_result.legacy_frame
     variable_sets = [intraday_result.variables]
+    materializations.extend(
+        _measurement_materializations(
+            variables=intraday_result.variables,
+            cache=intraday_result.status,
+            purpose="intraday_features",
+            role="subject",
+            symbol=subject,
+            timeframe=request.timeframe,
+            requested_start=request.start,
+            requested_end=request.end,
+            include_tier_a=True,
+        )
+    )
     derived_stats: dict[str, Any] = {
         "enabled": dependencies.derived_cache_enabled,
         "intraday": _cache_status(intraday_result.status),
@@ -790,6 +1391,31 @@ async def execute_strategy_run(
             )
         bars = regime_attachment.legacy_frame
         variable_sets.extend((regime_result.variables, regime_attachment.variables))
+        assert regime_warmup_start is not None
+        materializations.extend(
+            _measurement_materializations(
+                variables=regime_result.variables,
+                cache=regime_result.status,
+                purpose="daily_regime",
+                role="subject",
+                symbol=subject,
+                timeframe="1d",
+                requested_start=regime_warmup_start,
+                requested_end=request.end,
+            )
+        )
+        materializations.extend(
+            _measurement_materializations(
+                variables=regime_attachment.variables,
+                cache=regime_attachment.status,
+                purpose="intraday_regime_attachment",
+                role="subject",
+                symbol=subject,
+                timeframe=request.timeframe,
+                requested_start=request.start,
+                requested_end=request.end,
+            )
+        )
         derived_stats["regime"] = _cache_status(regime_result.status)
         attachments["regime"] = {
             "availability": "prior_day",
@@ -828,6 +1454,31 @@ async def execute_strategy_run(
             )
         bars = sentiment_attachment.legacy_frame
         variable_sets.extend((sentiment_result.variables, sentiment_attachment.variables))
+        assert sentiment_warmup_start is not None
+        materializations.extend(
+            _measurement_materializations(
+                variables=sentiment_result.variables,
+                cache=sentiment_result.status,
+                purpose="daily_sentiment",
+                role="subject",
+                symbol=subject,
+                timeframe="1d",
+                requested_start=sentiment_warmup_start,
+                requested_end=request.end,
+            )
+        )
+        materializations.extend(
+            _measurement_materializations(
+                variables=sentiment_attachment.variables,
+                cache=sentiment_attachment.status,
+                purpose="intraday_sentiment_attachment",
+                role="subject",
+                symbol=subject,
+                timeframe=request.timeframe,
+                requested_start=request.start,
+                requested_end=request.end,
+            )
+        )
         derived_stats["sentiment"] = _cache_status(sentiment_result.status)
         attachments["sentiment"] = {
             "availability": "prior_day",
@@ -837,6 +1488,26 @@ async def execute_strategy_run(
 
     variables = _merge_variables(*variable_sets)
     stages.append("tier_b_calculated")
+    _validate_materialized_definitions(
+        registry=dependencies.variable_registry,
+        materializations=tuple(materializations),
+        affected_rules=tuple(
+            item for item in (entry_rules, regime_rules) if item
+        ),
+    )
+    try:
+        trace_definitions = dependencies.variable_registry.validate_dependencies(
+            tuple(item.ref for item in active_definitions)
+        )
+    except VariableContractError as error:
+        _contract_failure(
+            registry=dependencies.variable_registry,
+            variable_id="market.subject.close",
+            error=error,
+            affected_rules=tuple(
+                item for item in (entry_rules, regime_rules) if item
+            ),
+        )
     _require_usable_rule_values(
         registry=dependencies.variable_registry,
         variables=variables,
@@ -923,10 +1594,6 @@ async def execute_strategy_run(
             ),
         }
 
-    trace_definitions = dependencies.variable_registry.validate_dependencies(
-        tuple(item.ref for item in active_definitions)
-    )
-
     return StrategyRunResult(
         resolved_strategy=resolved,
         variables=variables,
@@ -944,7 +1611,9 @@ async def execute_strategy_run(
             "provider": {"name": dependencies.provider_name},
             "build": _safe_build_identity(dependencies.build_identity),
             "stages": tuple(stages),
-            "dependency_trace": _dependency_trace(trace_definitions, variables),
+            "dependency_trace": _dependency_trace(
+                trace_definitions, tuple(materializations)
+            ),
             "attachments": attachments,
             "filters": filter_decisions,
         },
@@ -966,6 +1635,7 @@ def _measurement_adapters():
         intraday_definitions,
         regime_definitions,
         sentiment_definitions,
+        source_definitions,
     )
 
     return (
@@ -977,6 +1647,7 @@ def _measurement_adapters():
         intraday_definitions,
         regime_definitions,
         sentiment_definitions,
+        source_definitions,
     )
 
 

@@ -5,6 +5,8 @@ from datetime import date
 import os
 import re
 
+import httpx
+
 from bktstr_cache.derived import DerivedFrameCache
 
 from .cache import BarCache, CachedProvider
@@ -182,6 +184,7 @@ async def execute_backtest(request: BacktestRequest) -> dict:
     from .measurements import baseline_variable_registry
     from .orchestrator import (
         OrchestratorDependencies,
+        StrategyRunError,
         execute_strategy_run,
         legacy_request_to_strategy_run,
     )
@@ -194,17 +197,22 @@ async def execute_backtest(request: BacktestRequest) -> dict:
     else:
         upstream = YahooProvider()
     provider = CachedProvider(upstream, BarCache(), provider_name=provider_name)
-    result = await execute_strategy_run(
-        legacy_request_to_strategy_run(request),
-        OrchestratorDependencies(
-            provider=provider,
-            provider_name=provider_name,
-            variable_store=VariableSnapshotStore(DerivedFrameCache()),
-            variable_registry=baseline_variable_registry(),
-            strategy_registry=baseline_strategy_registry(),
-            derived_cache_enabled=_derived_cache_enabled(),
-        ),
-    )
+    try:
+        result = await execute_strategy_run(
+            legacy_request_to_strategy_run(request),
+            OrchestratorDependencies(
+                provider=provider,
+                provider_name=provider_name,
+                variable_store=VariableSnapshotStore(DerivedFrameCache()),
+                variable_registry=baseline_variable_registry(),
+                strategy_registry=baseline_strategy_registry(),
+                derived_cache_enabled=_derived_cache_enabled(),
+            ),
+        )
+    except StrategyRunError as error:
+        if isinstance(error.provider_cause, httpx.HTTPStatusError):
+            raise error.provider_cause from None
+        raise
     return serialize_strategy_run_result(request, result)
 
 
