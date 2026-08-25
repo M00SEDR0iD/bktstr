@@ -59,14 +59,68 @@ def test_completed_record_is_immutable_and_writes_canonical_artifacts(tmp_path):
 
     assert completed.status is ExperimentStatus.COMPLETED
     artifact_dir = tmp_path / "artifacts" / record.experiment_id
-    assert json.loads((artifact_dir / "request.json").read_text(encoding="utf-8")) == {"symbol": "NVDA", "z": 1}
-    assert (artifact_dir / "request.json").read_bytes() == b'{"symbol":"NVDA","z":1}'
-    assert json.loads((artifact_dir / "result.json").read_text(encoding="utf-8")) == {"metrics": {"trade_count": 1}}
-    assert json.loads((artifact_dir / "provenance.json").read_text(encoding="utf-8")) == {
+    manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    generation = artifact_dir / "generations" / manifest["generation"]
+    assert json.loads((generation / "request.json").read_text(encoding="utf-8")) == {"symbol": "NVDA", "z": 1}
+    assert (generation / "request.json").read_bytes() == b'{"symbol":"NVDA","z":1}'
+    assert json.loads((generation / "result.json").read_text(encoding="utf-8")) == {"metrics": {"trade_count": 1}}
+    assert json.loads((generation / "provenance.json").read_text(encoding="utf-8")) == {
         "software": {"bktstr_version": "0.5.0"}
     }
     with pytest.raises(ExperimentStateError):
         store.complete(record.experiment_id, {"metrics": {}}, {})
+
+
+def test_failed_artifact_publish_never_surfaces_an_uncommitted_terminal_generation(
+    tmp_path, monkeypatch
+):
+    """A crash between SQLite commit and publication must recover from SQLite, not lie via files."""
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment("backtest", {"symbol": "NVDA"}, "sync", None)
+    previous_manifest = json.loads(
+        (tmp_path / "artifacts" / record.experiment_id / "manifest.json").read_text("utf-8")
+    )
+
+    def interrupted(*_args, **_kwargs):
+        raise OSError("simulated publish interruption")
+
+    monkeypatch.setattr(store, "_publish_artifact_generation", interrupted)
+    with pytest.raises(OSError, match="publish interruption"):
+        store.complete(record.experiment_id, {"metrics": {"trade_count": 1}}, {"source": "fixture"})
+
+    # SQLite is authoritative and the last manifest is still explicitly nonterminal.
+    assert store.load_experiment(record.experiment_id).status is ExperimentStatus.COMPLETED
+    assert json.loads(
+        (tmp_path / "artifacts" / record.experiment_id / "manifest.json").read_text("utf-8")
+    ) == previous_manifest
+
+    reopened = ExperimentStore(tmp_path)
+    manifest = json.loads(
+        (tmp_path / "artifacts" / record.experiment_id / "manifest.json").read_text("utf-8")
+    )
+    assert manifest["status"] == "completed"
+    generation = tmp_path / "artifacts" / record.experiment_id / "generations" / manifest["generation"]
+    assert json.loads((generation / "result.json").read_text("utf-8")) == {"metrics": {"trade_count": 1}}
+    assert reopened.load_experiment(record.experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_failed_creation_transaction_publishes_no_artifact_generation(tmp_path, monkeypatch):
+    """A creation transaction failure cannot leave an artifact a later reader could trust."""
+    import sqlite3
+
+    store = ExperimentStore(tmp_path)
+
+    def interrupted(*_args, **_kwargs):
+        raise sqlite3.OperationalError("simulated transaction failure")
+
+    monkeypatch.setattr(store, "_set_artifact_generation", interrupted)
+    with pytest.raises(sqlite3.OperationalError, match="transaction failure"):
+        store.create_experiment("backtest", {"symbol": "NVDA"}, "async", None)
+
+    assert list((tmp_path / "artifacts").iterdir()) == []
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM experiments").fetchone()[0] == 0
 
 
 def test_reopened_store_loads_terminal_records_and_rejects_non_finite_json(tmp_path):

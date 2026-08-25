@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -43,6 +44,24 @@ _DIRECT_PARAMETERS = frozenset({"side", "entry_rules"})
 
 def _immutable_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
     return MappingProxyType(dict(value))
+
+
+def _canonical_identity(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _canonical_identity(item) for key, item in sorted(value.items())}
+    if isinstance(value, tuple | list):
+        return [_canonical_identity(item) for item in value]
+    if isinstance(value, date | datetime):
+        return value.isoformat()
+    return value
+
+
+def _snapshot_id(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        _canonical_identity(value), allow_nan=False, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), default=str,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 @dataclass(frozen=True)
@@ -151,6 +170,8 @@ class ResearchProvenance:
     market_data: Mapping[str, Any]
     execution_model: Mapping[str, Any]
     software: Mapping[str, Any]
+    governed_dependencies: tuple[Mapping[str, Any], ...] = ()
+    attachments: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -322,7 +343,10 @@ def _regime_configuration(value: RegimeInput | None) -> Mapping[str, Any]:
 
 
 def project_research_result(
-    value: BacktestInput, legacy_result: Mapping[str, Any]
+    value: BacktestInput,
+    legacy_result: Mapping[str, Any],
+    *,
+    execution_provenance: Mapping[str, Any] | None = None,
 ) -> BacktestResearchResult:
     if not isinstance(value, BacktestInput):
         raise TypeError("input must be a BacktestInput")
@@ -393,7 +417,30 @@ def project_research_result(
         regime=_regime_configuration(value.regime),
         execution=execution_configuration,
     )
-    provider = data.get("provider") if isinstance(data.get("provider"), str) else None
+    provider = data.get("provider") if isinstance(data.get("provider"), str) else value.source
+    bars = data.get("bars")
+    if not isinstance(bars, int) or isinstance(bars, bool):
+        bars = 0
+    cache = data.get("cache")
+    if not isinstance(cache, Mapping):
+        cache = {"hit_days": 0, "miss_days": 0, "fetched_ranges": 0}
+    governed = execution_provenance or {}
+    dependency_trace = governed.get("dependency_trace", ())
+    attachments = governed.get("attachments", {})
+    identity = {
+        "provider": provider,
+        "provider_version": data.get("version") or data.get("data_version"),
+        "market": {
+            "symbol": value.symbol,
+            "start": value.start.isoformat(),
+            "end": value.end.isoformat(),
+            "timeframe": value.timeframe,
+        },
+        "coverage": {"bars": bars},
+        "cache": cache,
+        "dependency_trace": dependency_trace,
+        "attachments": attachments,
+    }
     provenance = ResearchProvenance(
         strategy=configuration.strategy,
         market_data=_immutable_mapping(
@@ -401,12 +448,13 @@ def project_research_result(
                 "source": provider,
                 "requested_source": value.source,
                 "version": data.get("version") or data.get("data_version"),
+                "snapshot_id": _snapshot_id(identity),
                 "coverage": {
                     "requested_start": value.start.isoformat(),
                     "requested_end": value.end.isoformat(),
-                    "bars": data.get("bars"),
+                    "bars": bars,
                 },
-                "cache": data.get("cache"),
+                "cache": cache,
             }
         ),
         execution_model=_immutable_mapping(
@@ -418,6 +466,18 @@ def project_research_result(
         ),
         software=_immutable_mapping(
             {"bktstr_version": __version__, **runtime_build_info()}
+        ),
+        governed_dependencies=tuple(
+            _immutable_mapping(item)
+            for item in dependency_trace
+            if isinstance(item, Mapping)
+        ),
+        attachments=_immutable_mapping(
+            {
+                str(name): _immutable_mapping(item)
+                for name, item in attachments.items()
+                if isinstance(name, str) and isinstance(item, Mapping)
+            }
         ),
     )
     return BacktestResearchResult(
@@ -431,7 +491,10 @@ def project_research_result(
 async def run_backtest(value: BacktestInput) -> BacktestResearchResult:
     request = to_legacy_request(value)
     legacy_result = await execute_backtest(request)
-    return project_research_result(value, legacy_result)
+    provenance = getattr(legacy_result, "execution_provenance", None)
+    return project_research_result(
+        value, legacy_result, execution_provenance=provenance
+    )
 
 
 SWEEP_OBJECTIVES = frozenset(

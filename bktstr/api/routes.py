@@ -57,7 +57,11 @@ from .schemas import (
 api_router = APIRouter()
 
 
-@api_router.get("/health", response_model=HealthResponse, responses={500: {"model": ErrorResponse}})
+def _error_responses(*statuses: int) -> dict[int, dict[str, type[ErrorResponse]]]:
+    return {status: {"model": ErrorResponse} for status in statuses}
+
+
+@api_router.get("/health", response_model=HealthResponse, responses=_error_responses(500))
 def versioned_health() -> dict:
     return health_payload()
 
@@ -65,7 +69,7 @@ def versioned_health() -> dict:
 @api_router.get(
     "/capabilities",
     response_model=CapabilityResponse,
-    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    responses=_error_responses(401, 500),
 )
 def capabilities(_: Annotated[None, Depends(require_api_key)]) -> dict:
     return capabilities_payload()
@@ -74,7 +78,7 @@ def capabilities(_: Annotated[None, Depends(require_api_key)]) -> dict:
 @api_router.get(
     "/market-data",
     response_model=MarketDataResponse,
-    responses={401: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    responses=_error_responses(400, 401, 422, 500, 502),
 )
 async def get_market_data(
     symbol: Annotated[str, Query(min_length=1, max_length=15)],
@@ -252,10 +256,7 @@ def _experiment_store(request: Request) -> ExperimentStore:
     response_model=BacktestExperimentResponse,
     responses={
         202: {"model": BacktestExperimentResponse},
-        401: {"model": ErrorResponse},
-        409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
-        500: {"model": ErrorResponse},
+        **_error_responses(400, 401, 409, 422, 500),
     },
 )
 def create_backtest(
@@ -273,6 +274,8 @@ def create_backtest(
         ),
     ] = None,
 ) -> BacktestExperimentResponse:
+    # Invalid requests are rejected before they can enter the durable queue.
+    _backtest_input(body)
     canonical_request = body.model_dump(mode="json")
     record = submit(
         _experiment_store(request),
@@ -342,9 +345,7 @@ def _submit_research_operation(
     response_model=ParameterSweepExperimentResponse,
     responses={
         202: {"model": ParameterSweepExperimentResponse},
-        401: {"model": ErrorResponse},
-        409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        **_error_responses(400, 401, 409, 422, 500),
     },
 )
 def create_parameter_sweep(
@@ -370,9 +371,7 @@ def create_parameter_sweep(
     response_model=CompareExperimentResponse,
     responses={
         202: {"model": CompareExperimentResponse},
-        401: {"model": ErrorResponse},
-        409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        **_error_responses(400, 401, 409, 422, 500),
     },
 )
 def create_comparison(
@@ -398,9 +397,7 @@ def create_comparison(
     response_model=RegimeComparisonExperimentResponse,
     responses={
         202: {"model": RegimeComparisonExperimentResponse},
-        401: {"model": ErrorResponse},
-        409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        **_error_responses(400, 401, 409, 422, 500),
     },
 )
 def create_regime_comparison(
@@ -428,7 +425,7 @@ def _load_experiment(request: Request, experiment_id: str) -> ExperimentRecord:
 @api_router.get(
     "/backtests/{experiment_id}",
     response_model=BacktestExperimentResponse,
-    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
+    responses=_error_responses(401, 404, 500),
 )
 def get_backtest(
     experiment_id: str,
@@ -444,7 +441,7 @@ def get_backtest(
 @api_router.get(
     "/experiments/{experiment_id}",
     response_model=ExperimentResponse,
-    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
+    responses=_error_responses(401, 404, 500),
 )
 def get_experiment(
     experiment_id: str,
@@ -472,7 +469,7 @@ def get_experiment(
     response_model=ErrorResponse,
     status_code=410,
     responses={
-        401: {"model": ErrorResponse},
+        **_error_responses(401, 500),
         410: {
             "model": ErrorResponse,
             "description": "The legacy endpoint was removed; use the typed replacement.",

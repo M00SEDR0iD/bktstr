@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -208,7 +209,8 @@ class ExperimentStore:
                     error_json TEXT,
                     provenance_json TEXT,
                     idempotency_key TEXT,
-                    parent_experiment_id TEXT
+                    parent_experiment_id TEXT,
+                    artifact_generation TEXT
                 )
                 """
             )
@@ -220,6 +222,10 @@ class ExperimentStore:
                 connection.execute(
                     "ALTER TABLE experiments ADD COLUMN parent_experiment_id TEXT"
                 )
+            if "artifact_generation" not in columns:
+                connection.execute(
+                    "ALTER TABLE experiments ADD COLUMN artifact_generation TEXT"
+                )
             connection.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS experiments_operation_idempotency_key
@@ -227,20 +233,110 @@ class ExperimentStore:
                 WHERE idempotency_key IS NOT NULL
                 """
             )
+        self._reconcile_artifacts()
 
-    def _artifact_path(self, experiment_id: str, filename: str) -> Path:
-        return self.artifacts_root / experiment_id / filename
-
-    def _write_artifact(self, experiment_id: str, filename: str, canonical_json: str) -> None:
-        destination = self._artifact_path(experiment_id, filename)
+    @staticmethod
+    def _write_json(destination: Path, canonical_json: str) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_name(f".{filename}.{uuid4().hex}.tmp")
+        temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
         try:
             temporary.write_bytes(canonical_json.encode("utf-8"))
             os.replace(temporary, destination)
         finally:
             if temporary.exists():
                 temporary.unlink()
+
+    @staticmethod
+    def _artifact_files(row: sqlite3.Row) -> dict[str, str]:
+        files = {"request.json": row["request_json"]}
+        for filename, column in (
+            ("result.json", "result_json"),
+            ("provenance.json", "provenance_json"),
+            ("error.json", "error_json"),
+        ):
+            if row[column] is not None:
+                files[filename] = row[column]
+        return files
+
+    @classmethod
+    def _generation_for(cls, row: sqlite3.Row) -> str:
+        files = cls._artifact_files(row)
+        digest = hashlib.sha256(
+            _canonical_json(
+                {
+                    "status": row["status"],
+                    "files": {
+                        name: hashlib.sha256(contents.encode("utf-8")).hexdigest()
+                        for name, contents in sorted(files.items())
+                    },
+                }
+            ).encode("utf-8")
+        ).hexdigest()
+        # Keep the generation portable as a directory name on Railway and local
+        # Windows development volumes; the manifest still records file digests.
+        return digest
+
+    def _set_artifact_generation(
+        self, connection: sqlite3.Connection, experiment_id: str
+    ) -> sqlite3.Row:
+        row = self._load_row(connection, experiment_id)
+        generation = self._generation_for(row)
+        connection.execute(
+            "UPDATE experiments SET artifact_generation = ? WHERE experiment_id = ?",
+            (generation, experiment_id),
+        )
+        return self._load_row(connection, experiment_id)
+
+    def _publish_artifact_generation(self, experiment_id: str) -> None:
+        """Publish only a fully committed generation, then atomically move its manifest."""
+        with self._connect() as connection:
+            row = self._load_row(connection, experiment_id)
+        generation = row["artifact_generation"]
+        if not isinstance(generation, str) or not generation:
+            return
+        files = self._artifact_files(row)
+        artifact_dir = self.artifacts_root / experiment_id
+        staging = self.artifacts_root / ".staging" / f"{experiment_id}.{uuid4().hex}"
+        try:
+            for filename, contents in files.items():
+                self._write_json(staging / filename, contents)
+            generation_dir = artifact_dir / "generations" / generation
+            generation_dir.parent.mkdir(parents=True, exist_ok=True)
+            if not generation_dir.exists():
+                os.replace(staging, generation_dir)
+            manifest = {
+                "generation": generation,
+                "status": row["status"],
+                "files": {
+                    name: hashlib.sha256(contents.encode("utf-8")).hexdigest()
+                    for name, contents in sorted(files.items())
+                },
+            }
+            # A later state transition may have committed while this generation
+            # was staged. It may remain as an unreferenced immutable directory,
+            # but can never replace the current manifest.
+            with self._connect() as connection:
+                current = self._load_row(connection, experiment_id)
+            if current["artifact_generation"] != generation:
+                return
+            self._write_json(artifact_dir / "manifest.json", _canonical_json(manifest))
+        finally:
+            if staging.exists():
+                for child in sorted(staging.rglob("*"), reverse=True):
+                    if child.is_file():
+                        child.unlink()
+                    elif child.is_dir():
+                        child.rmdir()
+                staging.rmdir()
+
+    def _reconcile_artifacts(self) -> None:
+        """Rebuild any missing manifest from committed SQLite state at startup."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT experiment_id FROM experiments WHERE artifact_generation IS NOT NULL"
+            ).fetchall()
+        for row in rows:
+            self._publish_artifact_generation(row["experiment_id"])
 
     @staticmethod
     def _record(row: sqlite3.Row) -> ExperimentRecord:
@@ -325,10 +421,10 @@ class ExperimentStore:
                         parent_experiment_id,
                     ),
                 )
-                self._write_artifact(experiment_id, "request.json", request_json)
-                row = self._load_row(connection, experiment_id)
+                row = self._set_artifact_generation(connection, experiment_id)
                 connection.execute("COMMIT")
-                return self._record(row), True
+            self._publish_artifact_generation(experiment_id)
+            return self._record(row), True
         except Exception:
             # A failed transaction must not leave this connection holding a lock.
             raise
@@ -387,10 +483,10 @@ class ExperimentStore:
                     parent_experiment_id,
                 ),
             )
-            self._write_artifact(experiment_id, "request.json", request_json)
-            record = self._load_row(connection, experiment_id)
+            record = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-            return self._record(record), True
+        self._publish_artifact_generation(experiment_id)
+        return self._record(record), True
 
     def load_experiment(self, experiment_id: str) -> ExperimentRecord:
         with self._connect() as connection:
@@ -411,9 +507,10 @@ class ExperimentStore:
                 "UPDATE experiments SET status = ?, started_at = ? WHERE experiment_id = ?",
                 (ExperimentStatus.RUNNING.value, _encode_timestamp(now), row["experiment_id"]),
             )
-            claimed = self._load_row(connection, row["experiment_id"])
+            claimed = self._set_artifact_generation(connection, row["experiment_id"])
             connection.execute("COMMIT")
-            return self._record(claimed)
+        self._publish_artifact_generation(claimed["experiment_id"])
+        return self._record(claimed)
 
     def claim(self, experiment_id: str) -> ExperimentRecord:
         """Claim one particular queued row for synchronous execution."""
@@ -427,20 +524,32 @@ class ExperimentStore:
                 "UPDATE experiments SET status = ?, started_at = ? WHERE experiment_id = ?",
                 (ExperimentStatus.RUNNING.value, _encode_timestamp(now), experiment_id),
             )
-            claimed = self._load_row(connection, experiment_id)
+            claimed = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-            return self._record(claimed)
+        self._publish_artifact_generation(experiment_id)
+        return self._record(claimed)
 
     def recover_incomplete(self) -> int:
         """Return records abandoned by a prior process to the durable queue."""
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            running_ids = [
+                row["experiment_id"]
+                for row in connection.execute(
+                    "SELECT experiment_id FROM experiments WHERE status = ?",
+                    (ExperimentStatus.RUNNING.value,),
+                )
+            ]
             cursor = connection.execute(
                 "UPDATE experiments SET status = ?, started_at = NULL WHERE status = ?",
                 (ExperimentStatus.QUEUED.value, ExperimentStatus.RUNNING.value),
             )
+            for experiment_id in running_ids:
+                self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-            return cursor.rowcount
+        for experiment_id in running_ids:
+            self._publish_artifact_generation(experiment_id)
+        return cursor.rowcount
 
     def complete(
         self,
@@ -462,8 +571,6 @@ class ExperimentStore:
                     (ExperimentStatus.RUNNING.value, _encode_timestamp(_timestamp()), experiment_id),
                 )
             completed_at = _timestamp()
-            self._write_artifact(experiment_id, "result.json", result_json)
-            self._write_artifact(experiment_id, "provenance.json", provenance_json)
             connection.execute(
                 """
                 UPDATE experiments
@@ -478,9 +585,10 @@ class ExperimentStore:
                     experiment_id,
                 ),
             )
-            completed = self._load_row(connection, experiment_id)
+            completed = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-            return self._record(completed)
+        self._publish_artifact_generation(experiment_id)
+        return self._record(completed)
 
     def fail(self, experiment_id: str, error: Mapping[str, Any]) -> ExperimentRecord:
         error_json = _canonical_json(error)
@@ -493,7 +601,6 @@ class ExperimentStore:
                     f"Experiment {experiment_id} must be running before it can fail."
                 )
             completed_at = _timestamp()
-            self._write_artifact(experiment_id, "error.json", error_json)
             connection.execute(
                 """
                 UPDATE experiments
@@ -502,9 +609,10 @@ class ExperimentStore:
                 """,
                 (ExperimentStatus.FAILED.value, _encode_timestamp(completed_at), error_json, experiment_id),
             )
-            failed = self._load_row(connection, experiment_id)
+            failed = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-            return self._record(failed)
+        self._publish_artifact_generation(experiment_id)
+        return self._record(failed)
 
 
 def create_experiment(*args: Any, store: ExperimentStore | None = None, **kwargs: Any) -> tuple[ExperimentRecord, bool]:

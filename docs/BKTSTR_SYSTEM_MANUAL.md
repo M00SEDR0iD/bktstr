@@ -735,11 +735,16 @@ Use high-level operations rather than client-supplied formulas:
   envelope for polling any operation.
 
 All submissions create an immutable experiment with canonical typed request,
-result, and provenance artifacts on the Railway volume. A completed result
-records the exact strategy configuration, dates, symbol, timeframe, selected
-data source/version and coverage, slippage/execution assumptions, regime
-settings, BKTSTR version and commit. Use the experiment ID when comparing or
-reproducing research.
+result, and provenance artifacts on the Railway volume. SQLite is the committed
+source of record. Artifact files are written as immutable generations and a
+single atomic manifest points only to the generation matching that committed
+row; startup reconciliation recreates a missing manifest from SQLite and never
+mistakes an interrupted generation for a completed experiment. A completed
+result records the exact strategy configuration, dates, symbol, timeframe,
+selected data source/version or stable snapshot digest, actual coverage and
+cache lineage, governed dependency/regime/sentiment provenance, slippage/
+execution assumptions, regime settings, BKTSTR version and commit. Use the
+experiment ID when comparing or reproducing research.
 
 Every submitted operation accepts `execution: "auto" | "sync" | "async"`.
 `auto` completes a bounded single backtest inline and queues parameter sweeps,
@@ -778,6 +783,14 @@ reported fields after `422 validation_error`; inspect input after `400
 invalid_request`; authenticate after `401 unauthorized`; wait/poll after `202`;
 adjust a forced inline request after `409 execution_not_available`; and retry a
 provider failure only after evaluating the returned error code.
+
+Semantic validation occurs before an experiment is created: an invalid sweep
+grid, candidate set, regime labels, or backtest configuration returns `400
+invalid_request` with `details.fields` and creates no queued or failed record.
+Once a valid request is durable, provider and execution failures are instead
+recorded on that experiment for polling. Generated OpenAPI enumerates the
+`400`, `401`, `409`, `422`, `500`, and where applicable `502` error envelopes
+for each public operation.
 
 The former `GET /api/v1/backtest` endpoint is intentionally removed in v0.6 to
 avoid a second execution path. It returns `410 legacy_endpoint_removed`, a

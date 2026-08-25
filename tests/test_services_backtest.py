@@ -122,7 +122,19 @@ def test_typed_backtest_projects_research_fields_and_calls_legacy_once(monkeypat
     assert result.metrics.total_return == 0.125
     assert result.provenance.strategy["id"] == "bktstr.bearish-regime-scalp"
     assert result.provenance.market_data["source"] == "fixture"
-    assert result.provenance.market_data["version"] is None
+    # A completed experiment must be able to distinguish changed source data even
+    # when the provider does not report a vendor version.
+    assert result.provenance.market_data["snapshot_id"].startswith("sha256:")
+    assert result.provenance.market_data["coverage"] == {
+        "requested_start": "2026-08-17",
+        "requested_end": "2026-08-17",
+        "bars": 3,
+    }
+    assert result.provenance.market_data["cache"] == {
+        "hit_days": 0,
+        "miss_days": 1,
+        "fetched_ranges": 1,
+    }
     assert result.provenance.execution_model == {
         "id": "bktstr.next-bar-open",
         "version": "1.0.0",

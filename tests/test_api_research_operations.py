@@ -116,6 +116,18 @@ def test_sync_research_operation_is_refused_by_shared_execution_policy(
     assert response.json()["error"]["code"] == "execution_not_available"
 
 
+def test_invalid_sweep_is_rejected_before_it_creates_a_durable_experiment(monkeypatch, tmp_path):
+    # Break caught: invalid queued work could become a pollable failed experiment.
+    invalid = {**SWEEP_BODY, "grid": {}}
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post("/api/v1/parameter-sweeps", json=invalid, headers=AUTH)
+        assert client.app.state.experiment_store.claim_next() is None
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert response.json()["error"]["details"]["fields"] == ["grid"]
+
+
 def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
     monkeypatch, tmp_path
 ):
@@ -140,6 +152,8 @@ def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
         assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
             f"/{response_name}"
         )
+        for status in ("400", "401", "409", "422", "500"):
+            assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
     canonical = document["paths"]["/api/v1/experiments/{experiment_id}"]["get"][
         "responses"

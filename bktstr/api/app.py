@@ -22,7 +22,7 @@ from bktstr.services.experiments import (
 )
 
 from .routes import api_router, experiment_operations
-from .schemas import ApiError, HealthResponse
+from .schemas import ApiError, ErrorResponse, HealthResponse
 
 
 def _request_id(request: Request) -> str:
@@ -44,6 +44,26 @@ def _error_response(
         request_id=_request_id(request),
     )
     return JSONResponse(status_code=status_code, content={"error": error.model_dump()}, headers=headers)
+
+
+def _value_error_fields(exc: ValueError) -> list[str]:
+    """Map service-level semantic validation back to stable request field paths."""
+    message = str(exc).lower()
+    for marker, fields in (
+        ("cursor", ["cursor"]),
+        ("grid", ["grid"]),
+        ("candidate", ["candidates"]),
+        ("label", ["labels"]),
+        ("execution", ["execution"]),
+        ("idempotency", ["Idempotency-Key"]),
+        ("benchmark", ["regime", "benchmark"]),
+        ("source", ["market", "source"]),
+        ("timeframe", ["market", "timeframe"]),
+        ("symbol", ["market", "symbol"]),
+    ):
+        if marker in message:
+            return fields
+    return []
 
 
 @asynccontextmanager
@@ -104,7 +124,13 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(ValueError)
     async def handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
-        return _error_response(request, 400, "invalid_request", str(exc))
+        return _error_response(
+            request,
+            400,
+            "invalid_request",
+            str(exc),
+            {"fields": _value_error_fields(exc)},
+        )
 
     @app.exception_handler(IdempotencyConflictError)
     async def handle_idempotency_conflict(
@@ -134,7 +160,7 @@ def create_app() -> FastAPI:
     async def handle_unexpected_error(request: Request, _: Exception) -> JSONResponse:
         return _error_response(request, 500, "internal_error", "An unexpected server error occurred.")
 
-    @app.get("/health", response_model=HealthResponse)
+    @app.get("/health", response_model=HealthResponse, responses={500: {"model": ErrorResponse}})
     def root_health() -> dict:
         return health_payload()
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import os
+from types import MappingProxyType
 import re
 
 import httpx
@@ -179,6 +180,14 @@ def provider_name_for_request(request: BacktestRequest, *, today: date | None = 
     raise RuntimeError("MASSIVE_API_KEY is required for historical intraday ranges older than the Yahoo fallback window")
 
 
+class SerializedBacktestResult(dict):
+    """Frozen compatibility payload with private execution provenance for new services."""
+
+    def __init__(self, payload: dict, execution_provenance: dict) -> None:
+        super().__init__(payload)
+        self.execution_provenance = MappingProxyType(dict(execution_provenance))
+
+
 async def execute_backtest(request: BacktestRequest) -> dict:
     # These imports remain local because the governed measurements preserve the
     # legacy formula-version constants declared by this compatibility module.
@@ -220,7 +229,7 @@ async def execute_backtest(request: BacktestRequest) -> dict:
 def serialize_strategy_run_result(request: BacktestRequest, result) -> dict:
     """Render the domain result through the unchanged v0.3 compatibility payload."""
 
-    return {
+    payload = {
         "request": {
             "symbol": request.symbol,
             "start": request.start.isoformat(),
@@ -248,3 +257,7 @@ def serialize_strategy_run_result(request: BacktestRequest, result) -> dict:
         "summary": dict(result.summary),
         "trades": [dict(item) for item in result.trades],
     }
+    # This metadata is deliberately not a JSON key in the frozen v0.5 payload.
+    # The typed research service consumes it in-process to retain the governed
+    # input lineage needed for reproducibility.
+    return SerializedBacktestResult(payload, dict(result.provenance))

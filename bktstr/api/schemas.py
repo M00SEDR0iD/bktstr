@@ -527,7 +527,7 @@ class MarketDataCoverageResponse(BaseModel):
 
     requested_start: date
     requested_end: date
-    bars: int | None
+    bars: int
 
 
 class CacheUsageResponse(BaseModel):
@@ -541,11 +541,12 @@ class CacheUsageResponse(BaseModel):
 class MarketDataProvenanceResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source: str | None
+    source: str
     requested_source: str
     version: str | int | None
+    snapshot_id: str
     coverage: MarketDataCoverageResponse
-    cache: CacheUsageResponse | None = None
+    cache: CacheUsageResponse
 
 
 class ExecutionModelProvenanceResponse(BaseModel):
@@ -574,6 +575,8 @@ class ResearchProvenanceResponse(BaseModel):
     market_data: MarketDataProvenanceResponse
     execution_model: ExecutionModelProvenanceResponse
     software: SoftwareProvenanceResponse
+    governed_dependencies: list[dict[str, Any]] = Field(default_factory=list)
+    attachments: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class BacktestResult(BaseModel):

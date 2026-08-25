@@ -90,11 +90,13 @@ def _research_result(value) -> BacktestResearchResult:
                     "source": "fixture",
                     "requested_source": value.source,
                     "version": "fixture-v1",
+                    "snapshot_id": "sha256:fixture-market-input",
                     "coverage": {
                         "requested_start": value.start.isoformat(),
                         "requested_end": value.end.isoformat(),
                         "bars": 3,
                     },
+                    "cache": {"hit_days": 0, "miss_days": 1, "fetched_ranges": 1},
                 }
             ),
             execution_model=MappingProxyType(
@@ -131,6 +133,15 @@ def test_completed_backtest_returns_typed_experiment(monkeypatch, tmp_path):
     assert body["experiment_id"].startswith("exp_")
     assert {"metrics", "trades", "configuration", "provenance"} <= body["result"].keys()
     assert body["request"] == BACKTEST_BODY
+    market_data = body["result"]["provenance"]["market_data"]
+    # The completed result—not merely the request—retains a stable market input
+    # identity and actual coverage for later reproducibility checks.
+    assert market_data["snapshot_id"] == "sha256:fixture-market-input"
+    assert market_data["coverage"] == {
+        "requested_start": "2026-08-17",
+        "requested_end": "2026-08-17",
+        "bars": 3,
+    }
 
 
 def test_async_idempotent_submission_can_be_polled(monkeypatch, tmp_path):

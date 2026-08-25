@@ -87,6 +87,7 @@ def test_market_data_rejects_cursor_for_different_canonical_request(monkeypatch,
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_request"
+    assert response.json()["error"]["details"]["fields"] == ["cursor"]
 
 
 def test_market_data_validates_page_bounds_and_openapi_contract(monkeypatch, tmp_path):
@@ -102,6 +103,8 @@ def test_market_data_validates_page_bounds_and_openapi_contract(monkeypatch, tmp
     assert operation["responses"]["200"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("/MarketDataResponse")
+    for status in ("400", "401", "422", "500", "502"):
+        assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
 
 def test_market_data_service_uses_cached_bars_and_binds_cursors_to_identity(monkeypatch):
