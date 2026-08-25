@@ -412,6 +412,148 @@ def test_contract_failure_attributes_definition_named_in_error_details(
     assert diagnostic.forceable is False
 
 
+@pytest.mark.parametrize(
+    ("details", "expected_id", "expected_version", "expected_variable"),
+    (
+        (
+            {
+                "dependency": {
+                    "id": "strategy.bktstr.bearish-regime-scalp.filter.unregistered-input",
+                    "version": "9.9.9",
+                    "tier": "C",
+                }
+            },
+            "strategy.bktstr.bearish-regime-scalp.filter.unregistered-input",
+            "9.9.9",
+            VariableRef(
+                "strategy.bktstr.bearish-regime-scalp.filter.unregistered-input",
+                "9.9.9",
+                DataTier.C,
+            ),
+        ),
+        (
+            {
+                "id": "strategy.bktstr.bearish-regime-scalp.filter.versioned-unregistered",
+                "version": "9.9.9",
+            },
+            "strategy.bktstr.bearish-regime-scalp.filter.versioned-unregistered",
+            "9.9.9",
+            None,
+        ),
+        (
+            {
+                "id": "technical.rsi14",
+                "version": "1.0.0",
+                "tier": "C",
+            },
+            "technical.rsi14",
+            "1.0.0",
+            VariableRef("technical.rsi14", "1.0.0", DataTier.C),
+        ),
+    ),
+)
+def test_contract_failure_preserves_unregistered_structured_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    details: dict[str, object],
+    expected_id: str,
+    expected_version: str,
+    expected_variable: VariableRef | None,
+):
+    # Break caught: an unavailable strategy/filter dependency could be relabeled as the primary signal.
+    def fail_with_unregistered_dependency(*args, **kwargs):
+        raise VariableContractError(
+            "dependency is not registered",
+            code="unknown_variable",
+            details=details,
+        )
+
+    monkeypatch.setattr(
+        VariableSnapshotStore, "resolve", fail_with_unregistered_dependency
+    )
+    with pytest.raises(StrategyRunError) as raised:
+        _run(_request(), _dependencies(tmp_path, FixtureProvider()))
+
+    diagnostic = raised.value.diagnostics[0]
+    assert diagnostic.code == "unknown_variable"
+    assert diagnostic.variable_id == expected_id
+    assert diagnostic.variable == expected_variable
+    assert diagnostic.details["attribution"] == {
+        "id": expected_id,
+        "version": expected_version,
+        "tier": expected_variable.tier.value if expected_variable else None,
+        "registered": False,
+    }
+    assert diagnostic.forceable is False
+
+
+def test_contract_failure_with_ambiguous_id_only_details_uses_stable_registered_ref(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Break caught: handling an original contract error could raise a second ambiguous-version error.
+    registry = baseline_variable_registry()
+    first = registry.require("technical.rsi14")
+    registry.register(replace(first, version="2.0.0"))
+
+    def fail_with_ambiguous_id(*args, **kwargs):
+        raise VariableContractError(
+            "the adapter named an ambiguous variable ID",
+            code="schema_mismatch",
+            details={"id": "technical.rsi14"},
+        )
+
+    monkeypatch.setattr(VariableSnapshotStore, "resolve", fail_with_ambiguous_id)
+    with pytest.raises(StrategyRunError) as raised:
+        _run(
+            _request(),
+            _dependencies(tmp_path, FixtureProvider(), variable_registry=registry),
+        )
+
+    diagnostic = raised.value.diagnostics[0]
+    assert diagnostic.code == "schema_mismatch"
+    assert diagnostic.variable_id == "technical.rsi14"
+    assert diagnostic.variable == VariableRef("technical.rsi14", "1.0.0", DataTier.B)
+    assert diagnostic.details["attribution"] == {
+        "id": "technical.rsi14",
+        "version": "1.0.0",
+        "tier": "B",
+        "registered": True,
+    }
+    assert diagnostic.forceable is False
+
+
+def test_contract_failure_prefers_exact_version_from_ambiguous_details(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Break caught: a supplied version could be discarded while resolving an otherwise ambiguous ID.
+    registry = baseline_variable_registry()
+    first = registry.require("technical.rsi14")
+    registry.register(replace(first, version="2.0.0"))
+
+    def fail_with_exact_version(*args, **kwargs):
+        raise VariableContractError(
+            "the adapter named a versioned variable ID",
+            code="schema_mismatch",
+            details={"id": "technical.rsi14", "version": "2.0.0"},
+        )
+
+    monkeypatch.setattr(VariableSnapshotStore, "resolve", fail_with_exact_version)
+    with pytest.raises(StrategyRunError) as raised:
+        _run(
+            _request(),
+            _dependencies(tmp_path, FixtureProvider(), variable_registry=registry),
+        )
+
+    diagnostic = raised.value.diagnostics[0]
+    assert diagnostic.variable == VariableRef("technical.rsi14", "2.0.0", DataTier.B)
+    assert diagnostic.details["attribution"] == {
+        "id": "technical.rsi14",
+        "version": "2.0.0",
+        "tier": "B",
+        "registered": True,
+    }
+
+
 def test_all_tier_a_acquisitions_finish_before_first_tier_b_adapter_call(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

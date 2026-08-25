@@ -123,6 +123,21 @@ class _VariableMaterialization:
     cache: Mapping[str, Any]
 
 
+@dataclass(frozen=True)
+class _ContractDetailIdentity:
+    variable_id: str
+    version: str | None
+    tier: DataTier | None
+
+
+@dataclass(frozen=True)
+class _ContractDiagnosticTarget:
+    definition: ResearchVariableDefinition | None
+    variable_id: str
+    variable: VariableRef | None
+    attribution: Mapping[str, Any] | None = None
+
+
 class _NoWriteDerivedFrameCache(DerivedFrameCache):
     """Preserve cache-key semantics while the public toggle disables persistence."""
 
@@ -332,48 +347,116 @@ def _definition_for(
 
 
 def _reference_from_contract_details(
-    registry: VariableRegistry, details: Mapping[str, Any]
-) -> VariableRef | None:
-    """Recover the governed identity a contract error names, without its text."""
+    details: Mapping[str, Any]
+) -> _ContractDetailIdentity | None:
+    """Recover an error's structured identity without requiring registry membership."""
 
-    def registered_reference(value: Any) -> VariableRef | None:
-        if isinstance(value, ResearchVariableDefinition):
-            return value.ref
-        if isinstance(value, VariableRef):
+    def valid_variable_id(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            VariableRef(value, "0.0.0", DataTier.A)
+        except VariableContractError:
+            return None
+        return value
+
+    def tier(value: Any) -> DataTier | None:
+        if isinstance(value, DataTier):
             return value
-        if isinstance(value, Mapping):
-            variable_id = value.get("id")
-            version = value.get("version")
-            if isinstance(variable_id, str):
-                definition = registry.get(
-                    variable_id,
-                    version if isinstance(version, str) else None,
-                )
-                return definition.ref if definition is not None else None
         if isinstance(value, str):
-            definition = registry.get(value)
-            return definition.ref if definition is not None else None
-        if (
-            isinstance(value, tuple)
-            and len(value) >= 2
-            and isinstance(value[0], str)
-            and isinstance(value[1], str)
-        ):
-            definition = registry.get(value[0], value[1])
-            return definition.ref if definition is not None else None
+            try:
+                return DataTier(value)
+            except ValueError:
+                return None
         return None
 
+    def identity_from_value(
+        value: Any, *, fallback_tier: Any = None
+    ) -> _ContractDetailIdentity | None:
+        if isinstance(value, ResearchVariableDefinition):
+            return _ContractDetailIdentity(
+                value.id,
+                value.version,
+                value.tier,
+            )
+        if isinstance(value, VariableRef):
+            return _ContractDetailIdentity(value.id, value.version, value.tier)
+        if isinstance(value, Mapping):
+            variable_id = valid_variable_id(value.get("id"))
+            if variable_id is None:
+                return None
+            version = value.get("version")
+            return _ContractDetailIdentity(
+                variable_id,
+                version if isinstance(version, str) else None,
+                tier(value.get("tier")) or tier(fallback_tier),
+            )
+        if isinstance(value, str):
+            variable_id = valid_variable_id(value)
+            return (
+                _ContractDetailIdentity(variable_id, None, tier(fallback_tier))
+                if variable_id is not None
+                else None
+            )
+        if isinstance(value, tuple) and value and isinstance(value[0], str):
+            variable_id = valid_variable_id(value[0])
+            if variable_id is None:
+                return None
+            version = value[1] if len(value) >= 2 and isinstance(value[1], str) else None
+            explicit_tier = value[2] if len(value) >= 3 else fallback_tier
+            return _ContractDetailIdentity(
+                variable_id,
+                version,
+                tier(explicit_tier),
+            )
+        return None
+
+    direct = identity_from_value(details)
+    if direct is not None:
+        return direct
     for key in ("variable", "definition", "variable_id", "id", "dependency"):
-        reference = registered_reference(details.get(key))
-        if reference is not None:
-            return reference
+        detail_tier = details.get(f"{key}_tier")
+        if key == "variable":
+            detail_tier = detail_tier or details.get("variable_tier")
+        if key == "dependency":
+            detail_tier = detail_tier or details.get("dependency_tier")
+        identity = identity_from_value(details.get(key), fallback_tier=detail_tier)
+        if identity is not None:
+            return identity
     cycle = details.get("cycle")
     if isinstance(cycle, tuple):
-        for identity in cycle:
-            reference = registered_reference(identity)
-            if reference is not None:
-                return reference
+        for item in cycle:
+            identity = identity_from_value(item)
+            if identity is not None:
+                return identity
     return None
+
+
+def _stable_registered_definition(
+    registry: VariableRegistry,
+    identity: _ContractDetailIdentity,
+) -> ResearchVariableDefinition | None:
+    candidates = tuple(
+        definition
+        for (variable_id, version), definition in registry.definitions.items()
+        if variable_id == identity.variable_id
+        and (identity.version is None or version == identity.version)
+        and (identity.tier is None or definition.tier is identity.tier)
+    )
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item.version, item.tier.value))
+
+
+def _explicit_contract_reference(
+    identity: _ContractDetailIdentity,
+) -> VariableRef | None:
+    if identity.version is None or identity.tier is None:
+        return None
+    try:
+        return VariableRef(identity.variable_id, identity.version, identity.tier)
+    except VariableContractError:
+        return None
 
 
 def _contract_target(
@@ -381,12 +464,31 @@ def _contract_target(
     registry: VariableRegistry,
     fallback_variable_id: str,
     error: VariableContractError,
-) -> tuple[ResearchVariableDefinition, VariableRef]:
-    fallback = _definition_for(registry, fallback_variable_id)
-    reference = _reference_from_contract_details(registry, error.details)
-    if reference is None:
-        return fallback, fallback.ref
-    return registry.get(reference) or fallback, reference
+) -> _ContractDiagnosticTarget:
+    identity = _reference_from_contract_details(error.details)
+    if identity is None:
+        fallback = _definition_for(registry, fallback_variable_id)
+        return _ContractDiagnosticTarget(fallback, fallback.id, fallback.ref)
+    registered = _stable_registered_definition(registry, identity)
+    explicit = _explicit_contract_reference(identity)
+    reference = explicit or (registered.ref if registered is not None else None)
+    resolved_version = (
+        reference.version if reference is not None else identity.version
+    )
+    resolved_tier = reference.tier.value if reference is not None else (
+        identity.tier.value if identity.tier is not None else None
+    )
+    return _ContractDiagnosticTarget(
+        definition=registered,
+        variable_id=identity.variable_id,
+        variable=reference,
+        attribution={
+            "id": identity.variable_id,
+            "version": resolved_version,
+            "tier": resolved_tier,
+            "registered": registered is not None,
+        },
+    )
 
 
 def _definition_mismatched_fields(
@@ -512,19 +614,23 @@ def _diagnostic(
     *,
     code: str,
     definition: ResearchVariableDefinition | None,
-    variable: VariableRef,
+    variable: VariableRef | None,
+    variable_id: str | None = None,
     affected_coverage: Mapping[str, Any],
     affected_rules: tuple[str, ...],
     forceable: bool,
     details: Mapping[str, Any] | None = None,
 ) -> VariableDiagnostic:
+    resolved_variable_id = variable.id if variable is not None else variable_id
+    if resolved_variable_id is None:
+        raise ValueError("diagnostic requires a variable ID")
     policy = (
         definition.suggestion_policy
         if definition is not None
         else ReplicationSuggestionPolicy.no_safe_suggestion()
     )
     suggested = policy.suggest(
-        variable_id=variable.id,
+        variable_id=resolved_variable_id,
         variable=variable,
         affected_rules=affected_rules,
         forceable=forceable,
@@ -533,7 +639,11 @@ def _diagnostic(
     return replace(
         suggested,
         code=code,
-        message=f"{code} for {variable.id} (Tier {variable.tier.value})",
+        message=(
+            f"{code} for {resolved_variable_id} (Tier {variable.tier.value})"
+            if variable is not None
+            else f"{code} for {resolved_variable_id}"
+        ),
         affected_coverage=dict(affected_coverage),
     )
 
@@ -592,7 +702,7 @@ def _contract_failure(
     error: VariableContractError,
     affected_rules: tuple[str, ...],
 ) -> None:
-    definition, variable = _contract_target(
+    target = _contract_target(
         registry=registry,
         fallback_variable_id=variable_id,
         error=error,
@@ -606,12 +716,20 @@ def _contract_failure(
         code,
         _diagnostic(
             code=code,
-            definition=definition,
-            variable=variable,
+            definition=target.definition,
+            variable=target.variable,
+            variable_id=target.variable_id,
             affected_coverage={},
             affected_rules=affected_rules,
             forceable=False,
-            details={"failure_class": "variable_contract"},
+            details={
+                "failure_class": "variable_contract",
+                **(
+                    {"attribution": target.attribution}
+                    if target.attribution is not None
+                    else {}
+                ),
+            },
         ),
     )
 
