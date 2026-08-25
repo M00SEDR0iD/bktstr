@@ -90,6 +90,49 @@ class BacktestCreate(BaseModel):
     include_trades: bool = True
 
 
+class ParameterSweepCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base: BacktestCreate
+    grid: dict[str, list[ParameterValue]]
+    objective: Literal[
+        "ev_per_trade", "profit_factor", "sharpe", "max_drawdown", "total_pnl"
+    ]
+    execution: ExecutionMode = ExecutionMode.AUTO
+
+
+class NamedVariantCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    backtest: BacktestCreate
+
+
+class CompareCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[str | NamedVariantCreate] = Field(min_length=2, max_length=20)
+    execution: ExecutionMode = ExecutionMode.AUTO
+
+
+class RegimeLabelCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1)
+    start: date
+    end: date
+    rule: str | None = None
+
+
+class RegimeComparisonCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base: BacktestCreate
+    labels: list[RegimeLabelCreate] = Field(min_length=2, max_length=12)
+    disjoint_periods: bool = False
+    execution: ExecutionMode = ExecutionMode.AUTO
+
+
 class BacktestMetricsResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -236,6 +279,55 @@ class BacktestResult(BaseModel):
     provenance: ResearchProvenanceResponse
 
 
+class SweepVariantResponse(BaseModel):
+    experiment_id: str
+    parameters: dict[str, ParameterValue]
+    score: float | None
+    metrics: BacktestMetricsResponse
+
+
+class ParameterSweepResult(BaseModel):
+    objective: Literal[
+        "ev_per_trade", "profit_factor", "sharpe", "max_drawdown", "total_pnl"
+    ]
+    variants: list[SweepVariantResponse]
+    provenance: dict[str, Any]
+
+
+class ComparisonCandidateResponse(BaseModel):
+    name: str
+    experiment_id: str
+    metrics: BacktestMetricsResponse
+    provenance: dict[str, Any]
+
+
+class ComparisonItemResponse(BaseModel):
+    reference_experiment_id: str
+    candidate_experiment_id: str
+    changed_inputs: list[str]
+
+
+class CompareResult(BaseModel):
+    candidates: list[ComparisonCandidateResponse]
+    items: list[ComparisonItemResponse]
+    metric_deltas: dict[str, dict[str, float | None]]
+    provenance: dict[str, Any]
+
+
+class RegimeComparisonItemResponse(BaseModel):
+    label: str
+    experiment_id: str
+    metrics: BacktestMetricsResponse
+    trades: list[ResearchTradeResponse]
+    provenance: dict[str, Any]
+
+
+class RegimeComparisonResult(BaseModel):
+    items: list[RegimeComparisonItemResponse]
+    comparison_matrix: dict[str, dict[str, float | int | None]]
+    provenance: dict[str, Any]
+
+
 class ExperimentError(BaseModel):
     code: str
     message: str
@@ -281,6 +373,24 @@ class BacktestExperimentResponse(ExperimentEnvelope):
     provenance: ResearchProvenanceResponse | None = None
 
 
+class ParameterSweepExperimentResponse(ExperimentEnvelope):
+    operation: Literal["parameter_sweep"]
+    request: ParameterSweepCreate
+    result: ParameterSweepResult | None = None
+
+
+class CompareExperimentResponse(ExperimentEnvelope):
+    operation: Literal["compare"]
+    request: CompareCreate
+    result: CompareResult | None = None
+
+
+class RegimeComparisonExperimentResponse(ExperimentEnvelope):
+    operation: Literal["regime_comparison"]
+    request: RegimeComparisonCreate
+    result: RegimeComparisonResult | None = None
+
+
 class PendingExperimentResponse(ExperimentEnvelope):
     """Stable shared envelope for stored operations awaiting their public schema."""
 
@@ -295,10 +405,16 @@ class PendingExperimentResponse(ExperimentEnvelope):
         return cls.model_validate(payload)
 
 
-# Keep the canonical polling contract explicitly discriminated even while v0.6
-# exposes only backtests. Task 6 replaces pending records with typed variants.
+# Keep the canonical polling contract explicitly discriminated. Pending remains
+# the safe representation for unknown future operations and old malformed rows.
 ExperimentResponse = Annotated[
-    Union[BacktestExperimentResponse, PendingExperimentResponse],
+    Union[
+        BacktestExperimentResponse,
+        ParameterSweepExperimentResponse,
+        CompareExperimentResponse,
+        RegimeComparisonExperimentResponse,
+        PendingExperimentResponse,
+    ],
     Field(discriminator="operation"),
 ]
 

@@ -49,7 +49,8 @@ def _error_response(
 @asynccontextmanager
 async def experiment_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Recover durable work before one in-process worker begins polling it."""
-    worker = ExperimentWorker(ExperimentStore(), experiment_operations())
+    store = ExperimentStore()
+    worker = ExperimentWorker(store, experiment_operations(store))
     worker.recover_incomplete()
     stop_event = threading.Event()
     worker_thread = threading.Thread(

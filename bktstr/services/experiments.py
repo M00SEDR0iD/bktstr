@@ -117,6 +117,7 @@ class ExperimentRecord:
     result: Mapping[str, Any] | None
     error: Mapping[str, Any] | None
     provenance: Mapping[str, Any] | None
+    parent_experiment_id: str | None = None
 
 
 def experiment_root() -> Path:
@@ -206,10 +207,19 @@ class ExperimentStore:
                     result_json TEXT,
                     error_json TEXT,
                     provenance_json TEXT,
-                    idempotency_key TEXT
+                    idempotency_key TEXT,
+                    parent_experiment_id TEXT
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(experiments)")
+            }
+            if "parent_experiment_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE experiments ADD COLUMN parent_experiment_id TEXT"
+                )
             connection.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS experiments_operation_idempotency_key
@@ -246,6 +256,7 @@ class ExperimentStore:
             result=_frozen_json(row["result_json"]),
             error=_frozen_json(row["error_json"]),
             provenance=_frozen_json(row["provenance_json"]),
+            parent_experiment_id=row["parent_experiment_id"],
         )
 
     @staticmethod
@@ -269,6 +280,7 @@ class ExperimentStore:
         request: Mapping[str, Any],
         execution: ExecutionMode | str = ExecutionMode.AUTO,
         idempotency_key: str | None = None,
+        parent_experiment_id: str | None = None,
     ) -> tuple[ExperimentRecord, bool]:
         if not operation:
             raise ValueError("Experiment operation is required.")
@@ -281,6 +293,8 @@ class ExperimentStore:
         try:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
+                if parent_experiment_id is not None:
+                    self._load_row(connection, parent_experiment_id)
                 if idempotency_key is not None:
                     existing = connection.execute(
                         "SELECT * FROM experiments WHERE operation = ? AND idempotency_key = ?",
@@ -296,8 +310,9 @@ class ExperimentStore:
                 connection.execute(
                     """
                     INSERT INTO experiments (
-                        experiment_id, operation, status, execution, created_at, request_json, idempotency_key
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        experiment_id, operation, status, execution, created_at, request_json,
+                        idempotency_key, parent_experiment_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         experiment_id,
@@ -307,6 +322,7 @@ class ExperimentStore:
                         _encode_timestamp(now),
                         request_json,
                         idempotency_key,
+                        parent_experiment_id,
                     ),
                 )
                 self._write_artifact(experiment_id, "request.json", request_json)
@@ -323,6 +339,7 @@ class ExperimentStore:
         request: Mapping[str, Any],
         execution: ExecutionMode | str = ExecutionMode.SYNC,
         idempotency_key: str | None = None,
+        parent_experiment_id: str | None = None,
     ) -> tuple[ExperimentRecord, bool]:
         """Atomically persist and reserve a synchronous experiment for its caller."""
         if not operation:
@@ -337,6 +354,8 @@ class ExperimentStore:
         experiment_id = f"exp_{uuid4().hex}"
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            if parent_experiment_id is not None:
+                self._load_row(connection, parent_experiment_id)
             if idempotency_key is not None:
                 existing = connection.execute(
                     "SELECT * FROM experiments WHERE operation = ? AND idempotency_key = ?",
@@ -352,8 +371,9 @@ class ExperimentStore:
             connection.execute(
                 """
                 INSERT INTO experiments (
-                    experiment_id, operation, status, execution, created_at, started_at, request_json, idempotency_key
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    experiment_id, operation, status, execution, created_at, started_at,
+                    request_json, idempotency_key, parent_experiment_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     experiment_id,
@@ -364,6 +384,7 @@ class ExperimentStore:
                     _encode_timestamp(now),
                     request_json,
                     idempotency_key,
+                    parent_experiment_id,
                 ),
             )
             self._write_artifact(experiment_id, "request.json", request_json)

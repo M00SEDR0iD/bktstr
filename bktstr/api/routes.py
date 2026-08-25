@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from pydantic import ValidationError
 
 from bktstr.server import CAPABILITIES, health_payload
-from bktstr.services.backtest import BacktestInput, run_backtest
+from bktstr.services.backtest import (
+    BacktestInput,
+    CompareInput,
+    NamedVariantInput,
+    ParameterSweepInput,
+    RegimeComparisonInput,
+    RegimeLabelInput,
+    compare_experiments,
+    run_backtest,
+    run_parameter_sweep,
+    run_regime_comparison,
+)
 from bktstr.services.experiments import (
     ExperimentNotFoundError,
     ExperimentRecord,
@@ -22,10 +34,20 @@ from .schemas import (
     BacktestExperimentResponse,
     BacktestResult,
     CapabilityResponse,
+    CompareCreate,
+    CompareExperimentResponse,
+    CompareResult,
     ErrorResponse,
     ExperimentResponse,
     HealthResponse,
+    NamedVariantCreate,
+    ParameterSweepCreate,
+    ParameterSweepExperimentResponse,
+    ParameterSweepResult,
     PendingExperimentResponse,
+    RegimeComparisonCreate,
+    RegimeComparisonExperimentResponse,
+    RegimeComparisonResult,
 )
 
 
@@ -90,9 +112,105 @@ def _execute_backtest_experiment(
     return payload, payload["provenance"]
 
 
-def experiment_operations() -> dict:
+def _parameter_sweep_input(request: ParameterSweepCreate) -> ParameterSweepInput:
+    return ParameterSweepInput(
+        base=_backtest_input(request.base),
+        grid=request.grid,
+        objective=request.objective,
+        execution=request.execution.value,
+    )
+
+
+def _compare_input(request: CompareCreate) -> CompareInput:
+    return CompareInput(
+        candidates=tuple(
+            NamedVariantInput(candidate.name, _backtest_input(candidate.backtest))
+            if isinstance(candidate, NamedVariantCreate)
+            else candidate
+            for candidate in request.candidates
+        ),
+        execution=request.execution.value,
+    )
+
+
+def _regime_comparison_input(
+    request: RegimeComparisonCreate,
+) -> RegimeComparisonInput:
+    return RegimeComparisonInput(
+        base=_backtest_input(request.base),
+        labels=tuple(
+            RegimeLabelInput(item.label, item.start, item.end, item.rule)
+            for item in request.labels
+        ),
+        disjoint_periods=request.disjoint_periods,
+        execution=request.execution.value,
+    )
+
+
+def _execute_parameter_sweep_experiment(
+    record: ExperimentRecord, store: ExperimentStore
+) -> tuple[dict, dict]:
+    request = ParameterSweepCreate.model_validate(record.request)
+    result = ParameterSweepResult.model_validate(
+        run_parameter_sweep(
+            _parameter_sweep_input(request),
+            store=store,
+            parent_experiment_id=record.experiment_id,
+        ),
+        from_attributes=True,
+    )
+    payload = result.model_dump(mode="json")
+    return payload, payload["provenance"]
+
+
+def _execute_compare_experiment(
+    record: ExperimentRecord, store: ExperimentStore
+) -> tuple[dict, dict]:
+    request = CompareCreate.model_validate(record.request)
+    result = CompareResult.model_validate(
+        compare_experiments(
+            _compare_input(request),
+            store=store,
+            parent_experiment_id=record.experiment_id,
+        ),
+        from_attributes=True,
+    )
+    payload = result.model_dump(mode="json")
+    return payload, payload["provenance"]
+
+
+def _execute_regime_comparison_experiment(
+    record: ExperimentRecord, store: ExperimentStore
+) -> tuple[dict, dict]:
+    request = RegimeComparisonCreate.model_validate(record.request)
+    result = RegimeComparisonResult.model_validate(
+        run_regime_comparison(
+            _regime_comparison_input(request),
+            store=store,
+            parent_experiment_id=record.experiment_id,
+        ),
+        from_attributes=True,
+    )
+    payload = result.model_dump(mode="json")
+    return payload, payload["provenance"]
+
+
+def experiment_operations(store: ExperimentStore | None = None) -> dict:
     """Return operation handlers shared by inline submission and the durable worker."""
-    return {"backtest": _execute_backtest_experiment}
+    operations = {"backtest": _execute_backtest_experiment}
+    if store is not None:
+        operations.update(
+            {
+                "parameter_sweep": lambda record: _execute_parameter_sweep_experiment(
+                    record, store
+                ),
+                "compare": lambda record: _execute_compare_experiment(record, store),
+                "regime_comparison": lambda record: _execute_regime_comparison_experiment(
+                    record, store
+                ),
+            }
+        )
+    return operations
 
 
 def _experiment_store(request: Request) -> ExperimentStore:
@@ -128,7 +246,7 @@ def create_backtest(
     canonical_request = body.model_dump(mode="json")
     record = submit(
         _experiment_store(request),
-        experiment_operations(),
+        experiment_operations(_experiment_store(request)),
         "backtest",
         canonical_request,
         execution=body.execution,
@@ -141,6 +259,136 @@ def create_backtest(
         else 200
     )
     return BacktestExperimentResponse.from_record(record)
+
+
+IdempotencyKey = Annotated[
+    str | None,
+    Header(
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[\x21-\x7e]+$",
+    ),
+]
+
+
+ResearchEnvelope = TypeVar(
+    "ResearchEnvelope",
+    ParameterSweepExperimentResponse,
+    CompareExperimentResponse,
+    RegimeComparisonExperimentResponse,
+)
+
+
+def _submit_research_operation(
+    *,
+    body: Any,
+    request: Request,
+    response: Response,
+    operation: str,
+    response_type: type[ResearchEnvelope],
+    idempotency_key: str | None,
+) -> ResearchEnvelope:
+    store = _experiment_store(request)
+    record = submit(
+        store,
+        experiment_operations(store),
+        operation,
+        body.model_dump(mode="json"),
+        execution=body.execution,
+        calendar_days=None,
+        idempotency_key=idempotency_key,
+    )
+    response.status_code = (
+        202
+        if record.status in {ExperimentStatus.QUEUED, ExperimentStatus.RUNNING}
+        else 200
+    )
+    return response_type.from_record(record)
+
+
+@api_router.post(
+    "/parameter-sweeps",
+    response_model=ParameterSweepExperimentResponse,
+    responses={
+        202: {"model": ParameterSweepExperimentResponse},
+        401: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+def create_parameter_sweep(
+    body: ParameterSweepCreate,
+    request: Request,
+    response: Response,
+    _: Annotated[None, Depends(require_api_key)],
+    idempotency_key: IdempotencyKey = None,
+) -> ParameterSweepExperimentResponse:
+    _parameter_sweep_input(body)
+    return _submit_research_operation(
+        body=body,
+        request=request,
+        response=response,
+        operation="parameter_sweep",
+        response_type=ParameterSweepExperimentResponse,
+        idempotency_key=idempotency_key,
+    )
+
+
+@api_router.post(
+    "/compare",
+    response_model=CompareExperimentResponse,
+    responses={
+        202: {"model": CompareExperimentResponse},
+        401: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+def create_comparison(
+    body: CompareCreate,
+    request: Request,
+    response: Response,
+    _: Annotated[None, Depends(require_api_key)],
+    idempotency_key: IdempotencyKey = None,
+) -> CompareExperimentResponse:
+    _compare_input(body)
+    return _submit_research_operation(
+        body=body,
+        request=request,
+        response=response,
+        operation="compare",
+        response_type=CompareExperimentResponse,
+        idempotency_key=idempotency_key,
+    )
+
+
+@api_router.post(
+    "/regime-comparison",
+    response_model=RegimeComparisonExperimentResponse,
+    responses={
+        202: {"model": RegimeComparisonExperimentResponse},
+        401: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+def create_regime_comparison(
+    body: RegimeComparisonCreate,
+    request: Request,
+    response: Response,
+    _: Annotated[None, Depends(require_api_key)],
+    idempotency_key: IdempotencyKey = None,
+) -> RegimeComparisonExperimentResponse:
+    _regime_comparison_input(body)
+    return _submit_research_operation(
+        body=body,
+        request=request,
+        response=response,
+        operation="regime_comparison",
+        response_type=RegimeComparisonExperimentResponse,
+        idempotency_key=idempotency_key,
+    )
 
 
 def _load_experiment(request: Request, experiment_id: str) -> ExperimentRecord:
@@ -174,8 +422,18 @@ def get_experiment(
     _: Annotated[None, Depends(require_api_key)],
 ) -> ExperimentResponse:
     record = _load_experiment(request, experiment_id)
-    if record.operation == "backtest":
-        return BacktestExperimentResponse.from_record(record)
+    response_types = {
+        "backtest": BacktestExperimentResponse,
+        "parameter_sweep": ParameterSweepExperimentResponse,
+        "compare": CompareExperimentResponse,
+        "regime_comparison": RegimeComparisonExperimentResponse,
+    }
+    response_type = response_types.get(record.operation)
+    if response_type is not None:
+        try:
+            return response_type.from_record(record)
+        except ValidationError:
+            pass
     return PendingExperimentResponse.from_record(record)
 
 

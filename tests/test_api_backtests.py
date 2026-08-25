@@ -305,11 +305,17 @@ def test_openapi_polling_discriminates_operations_and_types_reproducibility_fiel
         "propertyName": "operation",
         "mapping": {
             "backtest": "#/components/schemas/BacktestExperimentResponse",
+            "parameter_sweep": "#/components/schemas/ParameterSweepExperimentResponse",
+            "compare": "#/components/schemas/CompareExperimentResponse",
+            "regime_comparison": "#/components/schemas/RegimeComparisonExperimentResponse",
             "pending": "#/components/schemas/PendingExperimentResponse",
         },
     }
     assert canonical["oneOf"] == [
         {"$ref": "#/components/schemas/BacktestExperimentResponse"},
+        {"$ref": "#/components/schemas/ParameterSweepExperimentResponse"},
+        {"$ref": "#/components/schemas/CompareExperimentResponse"},
+        {"$ref": "#/components/schemas/RegimeComparisonExperimentResponse"},
         {"$ref": "#/components/schemas/PendingExperimentResponse"},
     ]
 

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import math
+import os
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import date, datetime
+from enum import Enum
+from itertools import product
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from bktstr import __version__
 from bktstr.build_info import runtime_build_info
@@ -15,6 +20,7 @@ from bktstr.service import BacktestRequest, execute_backtest
 from bktstr.strategies import ResolvedStrategy, baseline_strategy_registry
 
 from .data import normalize_market_request
+from .experiments import ExperimentStatus, ExperimentStore
 from .regimes import RegimeInput, normalize_regime_request
 
 
@@ -428,14 +434,555 @@ async def run_backtest(value: BacktestInput) -> BacktestResearchResult:
     return project_research_result(value, legacy_result)
 
 
+SWEEP_OBJECTIVES = frozenset(
+    {"ev_per_trade", "profit_factor", "sharpe", "max_drawdown", "total_pnl"}
+)
+
+
+def _canonical_scalar(value: ParameterValue) -> str:
+    if not isinstance(value, str | int | float | bool) and value is not None:
+        raise TypeError("sweep candidates must be JSON scalar values")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("sweep candidates must be finite")
+    return json.dumps(value, allow_nan=False, ensure_ascii=False, separators=(",", ":"))
+
+
+def _sweep_limit() -> int:
+    configured = os.getenv("BKTSTR_MAX_SWEEP_VARIANTS")
+    limit = int(configured) if configured is not None else 500
+    if limit < 1:
+        raise ValueError("BKTSTR_MAX_SWEEP_VARIANTS must be at least 1")
+    return limit
+
+
+@dataclass(frozen=True)
+class ParameterSweepInput:
+    base: BacktestInput
+    grid: Mapping[str, Sequence[ParameterValue]]
+    objective: str
+    execution: str = "auto"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.base, BacktestInput):
+            raise TypeError("base must be a BacktestInput")
+        if self.execution not in {"auto", "sync", "async"}:
+            raise ValueError("execution must be auto, sync, or async")
+        if self.objective not in SWEEP_OBJECTIVES:
+            raise ValueError(
+                f"objective must be one of {tuple(sorted(SWEEP_OBJECTIVES))!r}"
+            )
+        if not isinstance(self.grid, Mapping) or not self.grid:
+            raise ValueError("parameter sweep grid cannot be empty")
+
+        definitions = baseline_strategy_registry().require(
+            self.base.strategy_id, self.base.strategy_version
+        ).parameter_definitions
+        normalized: dict[str, tuple[ParameterValue, ...]] = {}
+        variant_count = 1
+        for name in sorted(self.grid):
+            definition = definitions.get(name)
+            if (
+                definition is None
+                or not definition.overridable
+                or name in _PROTECTED_PARAMETERS | _DIRECT_PARAMETERS | _REGIME_PARAMETERS
+            ):
+                raise ValueError(f"{name} is not a registered overridable sweep parameter")
+            candidates = tuple(self.grid[name])
+            if not candidates:
+                raise ValueError(f"grid candidates for {name} cannot be empty")
+            validated: list[tuple[str, ParameterValue]] = []
+            seen: set[str] = set()
+            for candidate in candidates:
+                canonical = _canonical_scalar(candidate)
+                if canonical in seen:
+                    raise ValueError(f"{name} has a duplicate canonical candidate")
+                seen.add(canonical)
+                validated.append((canonical, definition.validate(candidate)))
+            normalized[name] = tuple(
+                candidate for _, candidate in sorted(validated, key=lambda item: item[0])
+            )
+            variant_count *= len(candidates)
+
+        limit = _sweep_limit()
+        if variant_count > limit:
+            raise ValueError(f"parameter sweep may contain at most {limit} variants")
+        object.__setattr__(self, "grid", _immutable_mapping(normalized))
+
+
+@dataclass(frozen=True)
+class SweepVariantResult:
+    experiment_id: str
+    parameters: Mapping[str, ParameterValue]
+    score: float | None
+    metrics: BacktestMetrics
+
+
+@dataclass(frozen=True)
+class ParameterSweepResult:
+    objective: str
+    variants: tuple[SweepVariantResult, ...]
+    provenance: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class NamedVariantInput:
+    name: str
+    backtest: BacktestInput
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("variant name cannot be empty")
+        if not isinstance(self.backtest, BacktestInput):
+            raise TypeError("variant backtest must be a BacktestInput")
+        object.__setattr__(self, "name", self.name.strip())
+
+
+ComparisonCandidateInput = str | NamedVariantInput
+
+
+@dataclass(frozen=True)
+class CompareInput:
+    candidates: Sequence[ComparisonCandidateInput]
+    execution: str = "auto"
+
+    def __post_init__(self) -> None:
+        candidates = tuple(self.candidates)
+        if not 2 <= len(candidates) <= 20:
+            raise ValueError("compare requires two through twenty candidates")
+        if self.execution not in {"auto", "sync", "async"}:
+            raise ValueError("execution must be auto, sync, or async")
+        identities: list[str] = []
+        for candidate in candidates:
+            if isinstance(candidate, str):
+                if not candidate.startswith("exp_"):
+                    raise ValueError("comparison experiment IDs must start with exp_")
+                identities.append(candidate)
+            elif isinstance(candidate, NamedVariantInput):
+                identities.append(f"name:{candidate.name}")
+            else:
+                raise TypeError(
+                    "comparison candidates must be experiment IDs or named variants"
+                )
+        if len(set(identities)) != len(identities):
+            raise ValueError("comparison candidates must be unique")
+        object.__setattr__(self, "candidates", candidates)
+
+
+@dataclass(frozen=True)
+class ComparisonCandidate:
+    name: str
+    experiment_id: str
+    metrics: BacktestMetrics
+    provenance: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ComparisonItem:
+    reference_experiment_id: str
+    candidate_experiment_id: str
+    changed_inputs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CompareResult:
+    candidates: tuple[ComparisonCandidate, ...]
+    items: tuple[ComparisonItem, ...]
+    metric_deltas: Mapping[str, Mapping[str, float | None]]
+    provenance: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class RegimeLabelInput:
+    label: str
+    start: date
+    end: date
+    rule: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.label, str) or not self.label.strip():
+            raise ValueError("regime comparison label cannot be empty")
+        if not isinstance(self.start, date) or not isinstance(self.end, date):
+            raise TypeError("regime label dates must be date values")
+        if self.start > self.end:
+            raise ValueError("regime label start cannot be after end")
+        if self.rule is not None and (
+            not isinstance(self.rule, str) or not self.rule.strip()
+        ):
+            raise ValueError("regime label rule must be a non-empty string or None")
+        object.__setattr__(self, "label", self.label.strip())
+        object.__setattr__(self, "rule", self.rule.strip() if self.rule else None)
+
+
+@dataclass(frozen=True)
+class RegimeComparisonInput:
+    base: BacktestInput
+    labels: Sequence[RegimeLabelInput]
+    disjoint_periods: bool = False
+    execution: str = "auto"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.base, BacktestInput):
+            raise TypeError("base must be a BacktestInput")
+        labels = tuple(self.labels)
+        if not 2 <= len(labels) <= 12:
+            raise ValueError("regime comparison requires two through twelve labels")
+        if not all(isinstance(item, RegimeLabelInput) for item in labels):
+            raise TypeError("labels must contain RegimeLabelInput values")
+        if len({item.label for item in labels}) != len(labels):
+            raise ValueError("regime comparison labels must be unique")
+        if type(self.disjoint_periods) is not bool:
+            raise TypeError("disjoint_periods must be bool")
+        if self.execution not in {"auto", "sync", "async"}:
+            raise ValueError("execution must be auto, sync, or async")
+        if self.disjoint_periods:
+            by_start = sorted(labels, key=lambda item: (item.start, item.end, item.label))
+            if any(
+                current.start <= previous.end
+                for previous, current in zip(by_start, by_start[1:])
+            ):
+                raise ValueError("regime comparison periods cannot overlap")
+        for item in labels:
+            if item.rule is not None:
+                base_regime = self.base.regime or RegimeInput(enabled=True)
+                normalize_regime_request(replace(base_regime, enabled=True, rules=item.rule))
+        object.__setattr__(self, "labels", labels)
+
+
+@dataclass(frozen=True)
+class RegimeComparisonItem:
+    label: str
+    experiment_id: str
+    metrics: BacktestMetrics
+    trades: tuple[ResearchTrade, ...]
+    provenance: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class RegimeComparisonResult:
+    items: tuple[RegimeComparisonItem, ...]
+    comparison_matrix: Mapping[str, Mapping[str, float | int | None]]
+    provenance: Mapping[str, Any]
+
+
+def _json_value(value: Any) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {item.name: _json_value(getattr(value, item.name)) for item in fields(value)}
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, tuple | list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    return value
+
+
+def backtest_input_mapping(value: BacktestInput) -> Mapping[str, Any]:
+    regime = value.regime
+    return {
+        "strategy": {
+            "id": value.strategy_id,
+            "version": value.strategy_version,
+            "parameters": dict(value.parameters),
+        },
+        "market": {
+            "symbol": value.symbol,
+            "start": value.start.isoformat(),
+            "end": value.end.isoformat(),
+            "timeframe": value.timeframe,
+            "source": value.source,
+        },
+        "side": value.side,
+        "entry": value.entry,
+        "regime": (
+            None
+            if regime is None
+            else {
+                "enabled": regime.enabled,
+                "rules": regime.rules,
+                "benchmark": regime.benchmark,
+                "sentiment_enabled": regime.sentiment_enabled,
+                "sentiment_sector_benchmark": regime.sentiment_sector_benchmark,
+                "sentiment_market_benchmark": regime.sentiment_market_benchmark,
+                "sentiment_data_profile": regime.sentiment_data_profile,
+                "sentiment_sources": list(regime.sentiment_sources),
+            }
+        ),
+        "execution": value.execution,
+        "include_trades": True,
+    }
+
+
+def _execute_child_backtest(
+    value: BacktestInput,
+    *,
+    store: ExperimentStore,
+    parent_experiment_id: str | None,
+) -> tuple[str, BacktestResearchResult]:
+    child_input = replace(value, execution="sync")
+    record, created = store.create_and_claim_experiment(
+        "backtest",
+        backtest_input_mapping(child_input),
+        "sync",
+        None,
+        parent_experiment_id,
+    )
+    if not created:
+        raise RuntimeError("child backtests do not reuse idempotency records")
+    try:
+        result = asyncio.run(run_backtest(child_input))
+        payload = _json_value(result)
+        store.complete(record.experiment_id, payload, payload["provenance"])
+    except Exception:
+        store.fail(
+            record.experiment_id,
+            {
+                "code": "child_backtest_failed",
+                "message": "The linked child backtest failed.",
+                "details": {},
+            },
+        )
+        raise
+    return record.experiment_id, result
+
+
+def run_parameter_sweep(
+    value: ParameterSweepInput,
+    *,
+    store: ExperimentStore,
+    parent_experiment_id: str | None = None,
+) -> ParameterSweepResult:
+    if not isinstance(value, ParameterSweepInput):
+        raise TypeError("input must be a ParameterSweepInput")
+    names = tuple(value.grid)
+    variants: list[SweepVariantResult] = []
+    for candidates in product(*(value.grid[name] for name in names)):
+        parameters = dict(value.base.parameters)
+        parameters.update(zip(names, candidates))
+        child_id, result = _execute_child_backtest(
+            replace(value.base, parameters=parameters),
+            store=store,
+            parent_experiment_id=parent_experiment_id,
+        )
+        variants.append(
+            SweepVariantResult(
+                experiment_id=child_id,
+                parameters=_immutable_mapping(dict(zip(names, candidates))),
+                score=getattr(result.metrics, value.objective),
+                metrics=result.metrics,
+            )
+        )
+    provenance = _immutable_mapping(
+        {
+            "parent_experiment_id": parent_experiment_id,
+            "objective": value.objective,
+            "grid": {name: list(value.grid[name]) for name in names},
+            "child_experiment_ids": [item.experiment_id for item in variants],
+        }
+    )
+    return ParameterSweepResult(value.objective, tuple(variants), provenance)
+
+
+def _metrics_from_record_result(result: Mapping[str, Any]) -> BacktestMetrics:
+    metrics = result.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError("completed backtest result is missing typed metrics")
+    return BacktestMetrics(
+        total_pnl=_number(metrics.get("total_pnl")),
+        total_return=_number(metrics.get("total_return")),
+        ev_per_trade=_number(metrics.get("ev_per_trade")),
+        win_rate=_number(metrics.get("win_rate")),
+        profit_factor=_number(metrics.get("profit_factor")),
+        max_drawdown=_number(metrics.get("max_drawdown")),
+        sharpe=_number(metrics.get("sharpe")),
+        trade_count=(
+            metrics["trade_count"]
+            if isinstance(metrics.get("trade_count"), int)
+            and not isinstance(metrics.get("trade_count"), bool)
+            else 0
+        ),
+    )
+
+
+def _changed_paths(left: Any, right: Any, prefix: str = "") -> tuple[str, ...]:
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        paths: list[str] = []
+        for key in sorted(set(left) | set(right)):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if key not in left or key not in right:
+                paths.append(path)
+            else:
+                paths.extend(_changed_paths(left[key], right[key], path))
+        return tuple(paths)
+    if isinstance(left, (tuple, list)) and isinstance(right, (tuple, list)):
+        paths = []
+        for index in range(max(len(left), len(right))):
+            path = f"{prefix}[{index}]"
+            if index >= len(left) or index >= len(right):
+                paths.append(path)
+            else:
+                paths.extend(_changed_paths(left[index], right[index], path))
+        return tuple(paths)
+    return () if left == right else (prefix,)
+
+
+def compare_experiments(
+    value: CompareInput | Sequence[ComparisonCandidateInput],
+    *,
+    store: ExperimentStore,
+    parent_experiment_id: str | None = None,
+) -> CompareResult:
+    request = value if isinstance(value, CompareInput) else CompareInput(value)
+    resolved: list[tuple[str, Any]] = []
+    for candidate in request.candidates:
+        if isinstance(candidate, NamedVariantInput):
+            child_id, _ = _execute_child_backtest(
+                candidate.backtest,
+                store=store,
+                parent_experiment_id=parent_experiment_id,
+            )
+            resolved.append((candidate.name, store.load_experiment(child_id)))
+        else:
+            resolved.append((candidate, store.load_experiment(candidate)))
+
+    candidates: list[ComparisonCandidate] = []
+    for name, record in resolved:
+        if (
+            record.operation != "backtest"
+            or record.status is not ExperimentStatus.COMPLETED
+            or record.result is None
+        ):
+            raise ValueError("compare requires completed backtest experiments")
+        provenance = record.provenance or record.result.get("provenance") or {}
+        candidates.append(
+            ComparisonCandidate(
+                name=name,
+                experiment_id=record.experiment_id,
+                metrics=_metrics_from_record_result(record.result),
+                provenance=_immutable_mapping(provenance),
+            )
+        )
+
+    reference_record = resolved[0][1]
+    items = tuple(
+        ComparisonItem(
+            reference_experiment_id=reference_record.experiment_id,
+            candidate_experiment_id=record.experiment_id,
+            changed_inputs=_changed_paths(reference_record.request, record.request),
+        )
+        for _, record in resolved[1:]
+    )
+    metric_names = tuple(field.name for field in fields(BacktestMetrics))
+    metric_deltas: dict[str, Mapping[str, float | None]] = {}
+    reference_metrics = candidates[0].metrics
+    for metric_name in metric_names:
+        reference_value = getattr(reference_metrics, metric_name)
+        deltas: dict[str, float | None] = {}
+        for candidate in candidates[1:]:
+            candidate_value = getattr(candidate.metrics, metric_name)
+            deltas[candidate.experiment_id] = (
+                float(candidate_value) - float(reference_value)
+                if candidate_value is not None and reference_value is not None
+                else None
+            )
+        metric_deltas[metric_name] = _immutable_mapping(deltas)
+    provenance = _immutable_mapping(
+        {
+            "parent_experiment_id": parent_experiment_id,
+            "candidate_experiment_ids": [item.experiment_id for item in candidates],
+            "comparison_reference": candidates[0].experiment_id,
+        }
+    )
+    return CompareResult(
+        tuple(candidates), tuple(items), _immutable_mapping(metric_deltas), provenance
+    )
+
+
+def run_regime_comparison(
+    value: RegimeComparisonInput,
+    *,
+    store: ExperimentStore,
+    parent_experiment_id: str | None = None,
+) -> RegimeComparisonResult:
+    if not isinstance(value, RegimeComparisonInput):
+        raise TypeError("input must be a RegimeComparisonInput")
+    items: list[RegimeComparisonItem] = []
+    for label in value.labels:
+        regime = value.base.regime
+        if label.rule is not None:
+            regime = replace(regime or RegimeInput(enabled=True), enabled=True, rules=label.rule)
+        child_id, result = _execute_child_backtest(
+            replace(
+                value.base,
+                start=label.start,
+                end=label.end,
+                regime=regime,
+            ),
+            store=store,
+            parent_experiment_id=parent_experiment_id,
+        )
+        items.append(
+            RegimeComparisonItem(
+                label=label.label,
+                experiment_id=child_id,
+                metrics=result.metrics,
+                trades=result.trades,
+                provenance=_immutable_mapping(_json_value(result.provenance)),
+            )
+        )
+    comparison_matrix = {
+        metric.name: _immutable_mapping(
+            {item.label: getattr(item.metrics, metric.name) for item in items}
+        )
+        for metric in fields(BacktestMetrics)
+    }
+    label_provenance = [
+        {
+            "label": item.label,
+            "start": item.start.isoformat(),
+            "end": item.end.isoformat(),
+            "rule": item.rule,
+        }
+        for item in value.labels
+    ]
+    provenance = _immutable_mapping(
+        {
+            "parent_experiment_id": parent_experiment_id,
+            "labels": label_provenance,
+            "disjoint_periods": value.disjoint_periods,
+            "child_experiment_ids": [item.experiment_id for item in items],
+        }
+    )
+    return RegimeComparisonResult(
+        tuple(items), _immutable_mapping(comparison_matrix), provenance
+    )
+
+
 __all__ = [
     "BacktestConfiguration",
     "BacktestInput",
     "BacktestMetrics",
     "BacktestResearchResult",
+    "CompareInput",
+    "CompareResult",
+    "ComparisonCandidate",
+    "ComparisonItem",
+    "NamedVariantInput",
+    "ParameterSweepInput",
+    "ParameterSweepResult",
+    "RegimeComparisonInput",
+    "RegimeComparisonItem",
+    "RegimeComparisonResult",
+    "RegimeLabelInput",
     "ResearchProvenance",
     "ResearchTrade",
+    "SweepVariantResult",
+    "backtest_input_mapping",
+    "compare_experiments",
     "project_research_result",
     "run_backtest",
+    "run_parameter_sweep",
+    "run_regime_comparison",
     "to_legacy_request",
 ]
