@@ -6,7 +6,7 @@ from dataclasses import replace
 import pandas as pd
 
 from .engine import prepare_bars_for_backtest
-from .provenance import SOURCE_REGISTRY
+from .provenance import SOURCE_REGISTRY, resolve_sentiment_sources
 from .regime import attach_regime_to_intraday, build_daily_regime
 from .sentiment import attach_sentiment_to_intraday, build_daily_sentiment
 from .service import (
@@ -209,9 +209,14 @@ def compute_intraday_variables(
     timeframe: str,
     regular_hours_only: bool = True,
 ) -> VariableStoreResult:
-    return store.resolve(
+    definitions = (*source_definitions("subject"), *intraday_definitions())
+    prepared = prepare_bars_for_backtest(
+        raw_bars, regular_hours_only=regular_hours_only
+    )
+    columns = [item.column for item in definitions]
+    result = store.resolve(
         namespace="intraday_features",
-        definitions=(*source_definitions("subject"), *intraday_definitions()),
+        definitions=definitions,
         dimensions={
             "symbol": symbol,
             "timeframe": timeframe,
@@ -220,10 +225,9 @@ def compute_intraday_variables(
         },
         inputs={"raw": raw_bars},
         provenance=_provenance("price"),
-        compute=lambda: prepare_bars_for_backtest(
-            raw_bars, regular_hours_only=regular_hours_only
-        ),
+        compute=lambda: prepared[columns],
     )
+    return replace(result, legacy_frame=prepared.copy(deep=True))
 
 
 def compute_regime_variables(
@@ -263,6 +267,9 @@ def compute_sentiment_variables(
     data_profile: str = "clean",
     sources: tuple[str, ...] = ("price",),
 ) -> VariableStoreResult:
+    normalized_profile, normalized_sources = resolve_sentiment_sources(
+        data_profile, sources
+    )
     return store.resolve(
         namespace="daily_sentiment",
         definitions=sentiment_definitions(),
@@ -270,8 +277,8 @@ def compute_sentiment_variables(
             "subject": subject,
             "sector_benchmark": sector_benchmark,
             "market_benchmark": market_benchmark,
-            "data_profile": data_profile,
-            "sources": list(sources),
+            "data_profile": normalized_profile,
+            "sources": list(normalized_sources),
             "formula_version": SENTIMENT_FORMULA_VERSION,
         },
         inputs={
@@ -279,7 +286,7 @@ def compute_sentiment_variables(
             "sector": sector_daily,
             "market": market_daily,
         },
-        provenance=_provenance(*sources),
+        provenance=_provenance(*normalized_sources),
         compute=lambda: build_daily_sentiment(subject_daily, sector_daily, market_daily),
     )
 

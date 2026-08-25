@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from bktstr.engine import prepare_bars_for_backtest
 from bktstr.measurements import (
@@ -18,7 +19,7 @@ from bktstr.measurements import (
     sentiment_definitions,
     source_definitions,
 )
-from bktstr.provenance import capability_provenance
+from bktstr.provenance import SOURCE_REGISTRY, capability_provenance
 from bktstr.regime import attach_regime_to_intraday, build_daily_regime
 from bktstr.sentiment import attach_sentiment_to_intraday, build_daily_sentiment
 from bktstr.service import (
@@ -92,6 +93,22 @@ def test_intraday_adapter_preserves_existing_formula(tmp_path: Path):
     pd.testing.assert_frame_equal(actual, expected)
 
 
+def test_intraday_adapter_preserves_additional_source_columns(tmp_path: Path):
+    # Break caught: governed persistence could reject a valid delegated legacy frame.
+    raw_bars = intraday_fixture().assign(source_sequence=[10, 11, 12])
+    expected = prepare_bars_for_backtest(raw_bars, regular_hours_only=True)
+
+    actual = compute_intraday_variables(
+        store=_store(tmp_path),
+        raw_bars=raw_bars,
+        symbol="NVDA",
+        timeframe="1m",
+        regular_hours_only=True,
+    ).legacy_frame
+
+    pd.testing.assert_frame_equal(actual, expected)
+
+
 def test_regime_adapter_preserves_existing_formula(tmp_path: Path):
     # Break caught: the adapter could reimplement or omit a daily regime output.
     subject, benchmark, _ = _daily_inputs()
@@ -122,6 +139,50 @@ def test_sentiment_adapter_preserves_existing_formula(tmp_path: Path):
     ).legacy_frame
 
     pd.testing.assert_frame_equal(actual, expected)
+
+
+@pytest.mark.parametrize("source_id", ["options", "news", "social"])
+def test_sentiment_adapter_rejects_unavailable_source_claims(
+    tmp_path: Path, source_id: str
+):
+    # Break caught: Tier B price measurements could claim unavailable source lineage.
+    subject, sector, market = _daily_inputs()
+
+    with pytest.raises(ValueError, match=f"sentiment source '{source_id}' is not available"):
+        compute_sentiment_variables(
+            store=_store(tmp_path),
+            subject_daily=subject,
+            sector_daily=sector,
+            market_daily=market,
+            subject="NVDA",
+            sector_benchmark="SOXX",
+            market_benchmark="QQQ",
+            sources=(source_id,),
+        )
+
+
+@pytest.mark.parametrize("source_id", ["news", "social"])
+def test_sentiment_adapter_rejects_lower_tier_source_claims(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_id: str
+):
+    # Break caught: a newly available Tier C/D source could contaminate Tier B provenance.
+    subject, sector, market = _daily_inputs()
+    monkeypatch.setitem(SOURCE_REGISTRY[source_id], "available", True)
+
+    with pytest.raises(
+        ValueError,
+        match=f"sentiment source '{source_id}' tier [CD] is not allowed by profile 'clean'",
+    ):
+        compute_sentiment_variables(
+            store=_store(tmp_path),
+            subject_daily=subject,
+            sector_daily=sector,
+            market_daily=market,
+            subject="NVDA",
+            sector_benchmark="SOXX",
+            market_benchmark="QQQ",
+            sources=(source_id,),
+        )
 
 
 def test_attachment_adapters_preserve_strictly_prior_day_timing(tmp_path: Path):
