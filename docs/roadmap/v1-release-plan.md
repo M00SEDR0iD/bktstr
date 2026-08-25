@@ -4,8 +4,8 @@ This outcome-driven plan maps the standalone web-application roadmap to producti
 
 | Version | State | Milestone | Production outcome |
 | --- | --- | --- | --- |
-| v0.4.0 | Active planning | Baseline and documentation repair | Trustworthy docs, executable examples, professional delivery governance, and a frozen v0.3.5 baseline |
-| v0.5.0 | Planned | Strategy-neutral core | Stable domain contracts with equal normalized trading output |
+| v0.4.0 | Completed | Baseline and documentation repair | Trustworthy docs, executable examples, professional delivery governance, and a frozen v0.3.5 baseline |
+| v0.5.0 | Active | Strategy-neutral core | Stable domain contracts with equal normalized trading output |
 | v0.6.0 | Planned | FastAPI application foundation | Typed API, OpenAPI, compatibility routing, structured errors, and health contracts |
 | v0.7.0 | Planned | Persistence and single-owner authentication | Private owner access and durable research records |
 | v0.8.0 | Planned | Durable execution jobs | Worker jobs with idempotency, retries, cancellation, heartbeat, and recovery |

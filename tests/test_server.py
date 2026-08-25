@@ -18,6 +18,22 @@ def test_capabilities_v035_contract():
     assert CAPABILITIES["cache"]["derived"]["strategy_decisions_cached"] is False
 
 
+def test_capabilities_publish_registered_strategy_neutral_contracts():
+    research_variables = CAPABILITIES["research_variables"]
+    assert research_variables["tiers"]["B"]["immutable"] is True
+    assert set(research_variables["tiers"]["B"]["examples"]) >= {
+        "regime",
+        "sentiment",
+        "fragility",
+    }
+    assert research_variables["automatic_backfill"] is False
+    assert CAPABILITIES["strategies"]["baseline"]["id"] == "bktstr.bearish-regime-scalp"
+    assert (
+        CAPABILITIES["strategies"]["baseline"]["execution_model"]
+        == "bktstr.next-bar-open"
+    )
+
+
 def test_v035_release_metadata_contract():
     from bktstr.server import CAPABILITIES
 

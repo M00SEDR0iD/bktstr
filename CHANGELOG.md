@@ -7,6 +7,9 @@ All notable BKTSTR changes are recorded here. BKTSTR uses Semantic Versioning; r
 ### Added
 
 - GitHub-native delivery governance for the roadmap to v1.0.0.
+- Registered Tier A-D research-variable contracts with immutable definitions and snapshots, monotonic trust inheritance, deterministic missing-data suggestions, and no automatic backfill.
+- Strategy-neutral orchestration contracts for the immutable bearish-regime baseline, including explicit filter roles and confirmed degraded non-canonical forced runs.
+- Capability metadata built from registered variable and strategy definitions for future GUI clients.
 
 ## [0.3.5] - 2026-08-24
 

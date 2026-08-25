@@ -663,6 +663,30 @@ GitHub CI runs the full test suite, Python compile checks, a generated-file hygi
 
 When direct GitHub access from an agent is unavailable, the **GitHub-through-Supabase** recovery bridge in `ops/supabase/GITHUB_BRIDGE.md` uses `pg_net` to resolve an exact commit/tree and retrieve source bodies from GitHub's raw-content host. Every recovered source body is retained with its Git blob SHA so integrity can be verified. This bridge is operational tooling only and never enters the backtest execution path.
 
+## v0.5 strategy-neutral core contracts
+
+v0.5 publishes domain contracts for research-variable metadata and the existing baseline strategy. It does not change the v0.3.5 runtime version, trading formulas, execution behavior, legacy endpoint, or production-acceptance defaults.
+
+### Research variables and evidence tiers
+
+Every variable has a stable ID and semantic version. Tier A is immutable point-in-time source data; Tier B is immutable deterministic measurement data; Tier C is lower-trust model-derived evidence; and Tier D is experimental or difficult-to-reconstruct evidence. Current technical measurements, regime, sentiment, and fragility are Tier B variables that depend only on Tier A source variables.
+
+Definitions and snapshots are immutable variables: consumers receive read-only values, lineage, digests, coverage, deterministic suggestion policy, and optional GUI metadata. Monotonic inheritance means a derived variable cannot claim a higher trust tier than any of its inputs. Consequently Tier C or Tier D evidence cannot influence a Tier A or Tier B variable.
+
+`/api/v1/capabilities` builds `research_variables` metadata from registered definitions, including tiers, stable identities, dependencies, lineage, suggestion policy, and GUI metadata. This makes the registered contract—not a copied formula list—the source of truth for a future GUI.
+
+### Baseline strategy contract
+
+The existing baseline is the immutable `StrategyDefinition` `bktstr.bearish-regime-scalp`, executed by the strategy-neutral `bktstr.next-bar-open` execution model. Its registered parameter, variable-use, and filter metadata are published at `strategies.baseline` in `/api/v1/capabilities`; this publication does not add a second strategy or alter the legacy request payload.
+
+Strategy filters declare one of gate, rank, or annotate behavior and cannot mutate research variables. A strategy must explicitly opt into Tier C or Tier D evidence, and lower-trust evidence remains unable to change Tier A or Tier B measurements.
+
+### Missing data, suggestions, and forced runs
+
+Missing required evidence fails with an explanation and a deterministic suggestion. Suggestions are diagnostics only: they never modify source data or variable snapshots, and there is no automatic backfill. Optional missing evidence may be omitted only when its registered filter is both optional and forceable and the caller explicitly confirms a forced run. Such a forced run is degraded and non-canonical; it cannot be presented as a canonical result.
+
+The capability response exposes this behavior for GUI clients so they can show missing-data diagnostics, suggestion rationale, confirmation requirements, and non-canonical status without changing the underlying research data.
+
 ## Known limitations
 
 - v0.3.3 sentiment is price-implied, not literal investor-opinion measurement.

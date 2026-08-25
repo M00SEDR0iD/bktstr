@@ -31,3 +31,21 @@ def test_readme_and_status_describe_v035_release_workflow():
     assert "v0.3.5" in status and "49/49" in status
     assert "production_acceptance.py" in archive
     assert "git ls-files" in archive
+
+
+def test_manual_publishes_strategy_neutral_evidence_contracts():
+    manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text().lower()
+    for phrase in [
+        "tier a",
+        "tier b",
+        "tier c",
+        "tier d",
+        "regime, sentiment, and fragility are tier b",
+        "immutable variables",
+        "monotonic inheritance",
+        "no automatic backfill",
+        "deterministic suggestion",
+        "forced run",
+        "non-canonical",
+    ]:
+        assert phrase in manual
