@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import is_dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -19,6 +20,136 @@ from .service import (
 )
 from bktstr_cache.derived import CACHE_FORMAT_VERSION
 from .provenance import capability_provenance
+from .measurements import baseline_variable_registry
+from .strategies import baseline_strategy_registry
+from .variables import DataTier
+
+
+def _registered_variable_capabilities() -> dict:
+    definitions = tuple(baseline_variable_registry().definitions.values())
+
+    def definition_payload(definition) -> dict:
+        display = definition.display
+        return {
+            "id": definition.id,
+            "version": definition.version,
+            "kind": definition.kind.value,
+            "tier": definition.tier.value,
+            "column": definition.column,
+            "value_dtype": definition.value_dtype,
+            "frequency": definition.frequency,
+            "units": definition.units,
+            "inputs": [
+                {"id": item.id, "version": item.version, "tier": item.tier.value}
+                for item in definition.inputs
+            ],
+            "lineage": {
+                "plugin_id": definition.plugin_id,
+                "plugin_version": definition.plugin_version,
+                "formula_version": definition.formula_version,
+            },
+            "suggestion_policy": {
+                "method": definition.suggestion_policy.method,
+                "rationale": definition.suggestion_policy.rationale,
+            },
+            "gui": None
+            if display is None
+            else {
+                "label": display.label,
+                "description": display.description,
+                "category": display.category,
+                "preferred_chart": display.preferred_chart,
+                "color_hint": display.color_hint,
+                "strategy_owned": display.strategy_owned,
+            },
+        }
+
+    tiers = {}
+    for tier in DataTier:
+        tier_definitions = tuple(
+            definition for definition in definitions if definition.tier is tier
+        )
+        tiers[tier.value] = {
+            "immutable": all(
+                is_dataclass(definition)
+                and definition.__dataclass_params__.frozen
+                for definition in tier_definitions
+            ),
+            "examples": sorted(
+                {
+                    part
+                    for definition in tier_definitions
+                    for part in (
+                        definition.id.split(".", 1)[0],
+                        definition.id.rsplit(".", 1)[-1],
+                    )
+                }
+            ),
+            "definitions": [definition_payload(item) for item in tier_definitions],
+        }
+    return {
+        "tiers": tiers,
+        "automatic_backfill": False,
+        "missing_data": {
+            "behavior": "fail with a deterministic suggestion; source arrays are never changed",
+            "suggestions_applied": False,
+        },
+    }
+
+
+def _registered_baseline_strategy_capability() -> dict:
+    definition = next(iter(baseline_strategy_registry().definitions.values()))
+    return {
+        "id": definition.id,
+        "version": definition.version,
+        "schema_version": definition.schema_version,
+        "name": definition.name,
+        "description": definition.description,
+        "instrument_roles": list(definition.instrument_roles),
+        "timeframe": definition.timeframe,
+        "calendar": definition.calendar,
+        "timezone": definition.timezone,
+        "execution_model": definition.execution_model_id,
+        "execution_model_version": definition.execution_model_version,
+        "parameters": [
+            {
+                "name": parameter.name,
+                "type": parameter.value_type.__name__,
+                "default": parameter.default,
+                "minimum": parameter.minimum,
+                "maximum": parameter.maximum,
+                "choices": list(parameter.choices),
+                "overridable": parameter.overridable,
+                "allow_none": parameter.allow_none,
+                "ui_metadata": dict(parameter.ui_metadata),
+            }
+            for parameter in definition.parameters
+        ],
+        "variable_uses": [
+            {
+                "id": use.variable.id,
+                "version": use.variable.version,
+                "tier": use.variable.tier.value,
+                "role": use.role.value,
+                "rule": use.rule,
+                "forceable": use.forceable,
+            }
+            for use in definition.variable_uses
+        ],
+        "filters": [
+            {
+                "id": item.id,
+                "version": item.version,
+                "tier": item.tier.value,
+                "role": item.role.value,
+                "rule": item.rule,
+                "forceable": item.forceable,
+                "optional": item.optional,
+            }
+            for item in definition.filters
+        ],
+        "evidence_tier_opt_ins": [item.value for item in definition.evidence_tier_opt_ins],
+    }
 
 
 CAPABILITIES = {
@@ -178,6 +309,8 @@ CAPABILITIES = {
             "strategy_decisions_cached": False,
         },
     },
+    "research_variables": _registered_variable_capabilities(),
+    "strategies": {"baseline": _registered_baseline_strategy_capability()},
 }
 
 
