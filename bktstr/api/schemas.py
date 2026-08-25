@@ -34,15 +34,294 @@ class HealthResponse(BaseModel):
     build_time: str | None = None
 
 
-class CapabilityResponse(BaseModel):
-    """Registered public capabilities; unmodeled registry sections are preserved."""
+class CapabilityModel(BaseModel):
+    """Closed building block for the public discovery contract."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
+
+
+class BearerAuthenticationCapabilities(CapabilityModel):
+    scheme: Literal["bearer"]
+    header: Literal["Authorization"]
+
+
+class IntegerRangeCapabilities(CapabilityModel):
+    minimum: int
+    maximum: int
+
+
+class ApiLimitsCapabilities(CapabilityModel):
+    market_data_page_size: IntegerRangeCapabilities
+
+
+class ApiCapabilities(CapabilityModel):
+    openapi_url: str
+    authentication: BearerAuthenticationCapabilities
+    operations: list[str]
+    limits: ApiLimitsCapabilities
+
+
+class IdempotencyCapabilities(CapabilityModel):
+    header: Literal["Idempotency-Key"]
+    behavior: str
+
+
+class ExecutionPolicyCapabilities(CapabilityModel):
+    auto_inline: list[str]
+    auto_queues: list[str]
+    sync_max_calendar_days: int
+    sync_refusal_code: Literal["execution_not_available"]
+
+
+class ExperimentCapabilities(CapabilityModel):
+    states: list[ExperimentStatus]
+    execution_modes: list[ExecutionMode]
+    idempotency: IdempotencyCapabilities
+    execution_policy: ExecutionPolicyCapabilities
+
+
+class RuleSyntaxCapabilities(CapabilityModel):
+    examples: list[str]
+    combine: str
+    operators: list[str]
+
+
+class RegimeCapabilities(CapabilityModel):
+    parameter: str
+    benchmark_parameter: str
+    fields: list[str]
+    sentiment_fields_require: str
+    operators: list[str]
+    lookahead_guard: str
+
+
+class SentimentProfileCapabilities(CapabilityModel):
+    label: str
+    allowed_tiers: list[str]
+    default_sources: list[str]
+
+
+class TierDescriptionCapabilities(CapabilityModel):
+    label: str
+    description: str
+
+
+class ArtifactTierCapabilities(CapabilityModel):
+    tier: str
+    description: str
+
+
+class ProvenanceSourceCapabilities(CapabilityModel):
+    id: str
+    tier: str
+    description: str
+    point_in_time_safe: bool
+    model_derived: bool
+    available: bool
+
+
+class DataProfilesCapabilities(CapabilityModel):
+    default: str
+    available_profiles: dict[str, SentimentProfileCapabilities]
+    tiers: dict[str, TierDescriptionCapabilities]
+    artifact_tiers: dict[str, ArtifactTierCapabilities]
+    sources: dict[str, ProvenanceSourceCapabilities]
+
+
+class SentimentCapabilities(CapabilityModel):
+    enabled_parameter: str
+    sector_benchmark_parameter: str
+    market_benchmark_parameter: str
+    direction_range: list[float]
+    confidence_range: list[float]
+    momentum_range: list[float]
+    fragility_range: list[float]
+    multiplier_range: list[float]
+    raw_features: list[str]
+    component_scores: list[str]
+    outputs: list[str]
+    component_weights: dict[str, float]
+    multipliers_are_informational: bool
+    filterable_fields: list[str]
+    coverage_fields: list[str]
+    optional_warmup_behavior: str
+    data_profile_parameter: str
+    sources_parameter: str
+    data_profiles: DataProfilesCapabilities
+    lookahead_guard: str
+
+
+class ExecutionModelCapabilities(CapabilityModel):
+    entry: str
+    same_bar_stop_target: str
+    slippage: str
+    default_regular_hours_only: bool
+    default_same_day_only: bool
+    entry_window: str
+
+
+class ProviderCapabilities(CapabilityModel):
+    massive: str
+    yahoo: str
+
+
+class BuildCapabilities(CapabilityModel):
+    git_commit: str | None = None
+    git_branch: str | None = None
+    git_repo: str | None = None
+    deployment_id: str | None = None
+    build_time: str | None = None
+
+
+class ReleaseCapabilities(CapabilityModel):
+    build: BuildCapabilities
+    feature_formula_versions: dict[str, str]
+    derived_cache_format_version: str
+
+
+class RawCacheCapabilities(CapabilityModel):
+    type: str
+    persistent_when: str
+    default_path: str
+
+
+class DerivedCacheCapabilities(CapabilityModel):
+    type: str
+    namespaces: list[str]
+    toggle: str
+    default_enabled: bool
+    override_path_variable: str
+    strategy_decisions_cached: bool
+
+
+class CacheCapabilities(RawCacheCapabilities):
+    raw: RawCacheCapabilities
+    derived: DerivedCacheCapabilities
+
+
+class VariableReferenceCapabilities(CapabilityModel):
+    id: str
+    version: str
+    tier: str
+
+
+class VariableLineageCapabilities(CapabilityModel):
+    plugin_id: str | None = None
+    plugin_version: str | None = None
+    formula_version: str | None = None
+
+
+class SuggestionPolicyCapabilities(CapabilityModel):
+    method: str
+    rationale: str
+
+
+class VariableGuiCapabilities(CapabilityModel):
+    label: str
+    description: str
+    category: str
+    preferred_chart: str
+    color_hint: str | None = None
+    strategy_owned: bool
+
+
+class ResearchVariableDefinitionCapabilities(CapabilityModel):
+    id: str
+    version: str
+    kind: str
+    tier: str
+    column: str
+    value_dtype: str
+    frequency: str
+    units: str | None = None
+    inputs: list[VariableReferenceCapabilities]
+    lineage: VariableLineageCapabilities
+    suggestion_policy: SuggestionPolicyCapabilities
+    gui: VariableGuiCapabilities | None = None
+
+
+class ResearchVariableTierCapabilities(CapabilityModel):
+    immutable: bool
+    examples: list[str]
+    definitions: list[ResearchVariableDefinitionCapabilities]
+
+
+class MissingDataCapabilities(CapabilityModel):
+    behavior: str
+    suggestions_applied: bool
+
+
+class ResearchVariablesCapabilities(CapabilityModel):
+    tiers: dict[str, ResearchVariableTierCapabilities]
+    automatic_backfill: bool
+    missing_data: MissingDataCapabilities
+
+
+class StrategyParameterCapabilities(CapabilityModel):
+    name: str
+    type: str
+    default: Any
+    minimum: float | int | None = None
+    maximum: float | int | None = None
+    choices: list[Any]
+    overridable: bool
+    allow_none: bool
+    ui_metadata: dict[str, Any]
+
+
+class StrategyVariableUseCapabilities(CapabilityModel):
+    id: str
+    version: str
+    tier: str
+    role: str
+    rule: str | None = None
+    forceable: bool
+
+
+class StrategyFilterCapabilities(StrategyVariableUseCapabilities):
+    optional: bool
+
+
+class StrategyCapabilities(CapabilityModel):
+    id: str
+    version: str
+    schema_version: str
+    name: str
+    description: str
+    instrument_roles: list[str]
+    timeframe: str
+    calendar: str
+    timezone: str
+    execution_model: str
+    execution_model_version: str
+    parameters: list[StrategyParameterCapabilities]
+    variable_uses: list[StrategyVariableUseCapabilities]
+    filters: list[StrategyFilterCapabilities]
+    evidence_tier_opt_ins: list[str]
+
+
+class StrategiesCapabilities(CapabilityModel):
+    baseline: StrategyCapabilities
+
+
+class CapabilityResponse(CapabilityModel):
+    """Fully typed API and registered v0.5 capability discovery payload."""
 
     service: Literal["bktstr"]
     version: str
     timeframes: list[str]
     sides: list[str]
+    api: ApiCapabilities
+    experiments: ExperimentCapabilities
+    rule_syntax: RuleSyntaxCapabilities
+    regime: RegimeCapabilities
+    sentiment: SentimentCapabilities
+    execution_model: ExecutionModelCapabilities
+    providers: ProviderCapabilities
+    release: ReleaseCapabilities
+    cache: CacheCapabilities
+    research_variables: ResearchVariablesCapabilities
+    strategies: StrategiesCapabilities
 
 
 class MarketDataBarResponse(BaseModel):

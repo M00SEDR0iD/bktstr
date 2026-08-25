@@ -46,3 +46,47 @@ def test_capabilities_retain_registered_v05_contracts_and_publish_operations(mon
         "header": "Idempotency-Key",
         "behavior": "same canonical operation request returns the existing experiment",
     }
+
+
+def test_openapi_explicitly_types_capability_contracts(monkeypatch, tmp_path):
+    # Break caught: capability payloads could become undocumented additional-properties blobs.
+    monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
+    with TestClient(create_app()) as client:
+        schemas = client.get("/openapi.json").json()["components"]["schemas"]
+
+    capability = schemas["CapabilityResponse"]
+    assert capability["additionalProperties"] is False
+    for name in [
+        "api",
+        "experiments",
+        "rule_syntax",
+        "regime",
+        "sentiment",
+        "execution_model",
+        "providers",
+        "release",
+        "cache",
+        "research_variables",
+        "strategies",
+    ]:
+        assert capability["properties"][name]["$ref"].startswith("#/components/schemas/")
+
+    api = schemas["ApiCapabilities"]
+    assert api["properties"]["openapi_url"]["type"] == "string"
+    assert api["properties"]["authentication"]["$ref"].endswith(
+        "/BearerAuthenticationCapabilities"
+    )
+    assert api["properties"]["limits"]["$ref"].endswith("/ApiLimitsCapabilities")
+    experiments = schemas["ExperimentCapabilities"]
+    assert experiments["properties"]["execution_policy"]["$ref"].endswith(
+        "/ExecutionPolicyCapabilities"
+    )
+    assert experiments["properties"]["idempotency"]["$ref"].endswith(
+        "/IdempotencyCapabilities"
+    )
+    policy = schemas["ExecutionPolicyCapabilities"]
+    assert policy["properties"]["auto_queues"]["items"]["type"] == "string"
+    assert policy["properties"]["sync_max_calendar_days"]["type"] == "integer"
+    assert schemas["ResearchVariableDefinitionCapabilities"]["additionalProperties"] is False
+    assert schemas["StrategyCapabilities"]["additionalProperties"] is False
