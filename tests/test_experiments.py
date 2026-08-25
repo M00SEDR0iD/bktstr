@@ -166,6 +166,43 @@ def test_manifest_publication_cannot_overwrite_a_later_terminal_generation(
     assert dict(store.load_artifact_manifest(record.experiment_id)) == manifest
 
 
+def test_reconciliation_rebuilds_a_corrupted_existing_generation_from_sqlite(tmp_path):
+    # Break caught: a content-addressed directory could exist with corrupted files,
+    # causing reconciliation to republish a manifest that can never validate.
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment(
+        "backtest", {"symbol": "NVDA"}, "sync", None
+    )
+    completed = store.complete(
+        record.experiment_id,
+        {"metrics": {"trade_count": 1}},
+        {"source": "fixture"},
+    )
+    artifact_dir = tmp_path / "artifacts" / completed.experiment_id
+    manifest = json.loads((artifact_dir / "manifest.json").read_text("utf-8"))
+    result_path = (
+        artifact_dir / "generations" / manifest["generation"] / "result.json"
+    )
+    result_path.write_text('{"metrics":{"trade_count":999}}', encoding="utf-8")
+
+    assert store.reconcile_artifacts(completed.experiment_id) == 1
+    assert json.loads(result_path.read_text("utf-8")) == {
+        "metrics": {"trade_count": 1}
+    }
+    assert dict(store.load_artifact_manifest(completed.experiment_id))["generation"] == (
+        manifest["generation"]
+    )
+
+    result_path.write_text("corrupt", encoding="utf-8")
+    reopened = ExperimentStore(tmp_path)
+    assert dict(reopened.load_artifact_manifest(completed.experiment_id))["status"] == (
+        "completed"
+    )
+    assert json.loads(result_path.read_text("utf-8")) == {
+        "metrics": {"trade_count": 1}
+    }
+
+
 def test_failed_creation_transaction_publishes_no_artifact_generation(tmp_path, monkeypatch):
     """A creation transaction failure cannot leave an artifact a later reader could trust."""
     import sqlite3

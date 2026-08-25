@@ -290,6 +290,30 @@ class ExperimentStore:
             },
         }
 
+    def _generation_is_valid(self, row: sqlite3.Row) -> bool:
+        generation = row["artifact_generation"]
+        if not isinstance(generation, str) or not generation:
+            return False
+        generation_dir = (
+            self.artifacts_root
+            / row["experiment_id"]
+            / "generations"
+            / generation
+        )
+        files = self._artifact_files(row)
+        try:
+            entries = tuple(generation_dir.iterdir())
+            if {entry.name for entry in entries} != set(files):
+                return False
+            if any(not entry.is_file() for entry in entries):
+                return False
+            return all(
+                (generation_dir / filename).read_text(encoding="utf-8") == contents
+                for filename, contents in files.items()
+            )
+        except (OSError, UnicodeDecodeError):
+            return False
+
     def _validated_manifest(self, row: sqlite3.Row) -> Mapping[str, Any] | None:
         generation = row["artifact_generation"]
         if not isinstance(generation, str) or not generation:
@@ -301,10 +325,8 @@ class ExperimentStore:
             )
             if manifest != self._manifest_for(row):
                 return None
-            generation_dir = artifact_dir / "generations" / generation
-            for filename, contents in self._artifact_files(row).items():
-                if (generation_dir / filename).read_text(encoding="utf-8") != contents:
-                    return None
+            if not self._generation_is_valid(row):
+                return None
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return None
         return manifest
@@ -342,7 +364,29 @@ class ExperimentStore:
                     self._write_json(staging / filename, contents)
                 generation_dir = artifact_dir / "generations" / generation
                 generation_dir.parent.mkdir(parents=True, exist_ok=True)
-                if not generation_dir.exists():
+                if generation_dir.exists() and not self._generation_is_valid(row):
+                    replaced = generation_dir.with_name(
+                        f".{generation}.replaced.{uuid4().hex}"
+                    )
+                    os.replace(generation_dir, replaced)
+                    try:
+                        os.replace(staging, generation_dir)
+                    except Exception:
+                        os.replace(replaced, generation_dir)
+                        raise
+                    staging = None
+                    try:
+                        for child in sorted(replaced.rglob("*"), reverse=True):
+                            if child.is_file():
+                                child.unlink()
+                            elif child.is_dir():
+                                child.rmdir()
+                        replaced.rmdir()
+                    except OSError:
+                        # The valid generation is already atomically published;
+                        # stale replaced directories are never referenced.
+                        pass
+                elif not generation_dir.exists():
                     os.replace(staging, generation_dir)
                     staging = None
                 self._write_json(

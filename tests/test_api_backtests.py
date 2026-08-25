@@ -201,6 +201,76 @@ def test_completed_backtest_returns_typed_experiment(monkeypatch, tmp_path):
             },
             ["market.start", "market.end"],
         ),
+        (
+            {
+                **BACKTEST_BODY,
+                "market": {**BACKTEST_BODY["market"], "source": "manual"},
+            },
+            ["market.source"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "regime": {"rules": "relative_return20.lt:0", "benchmark": "bad symbol"},
+            },
+            ["regime.benchmark"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "regime": {"rules": "relative_return20.lt:0"},
+            },
+            ["regime.benchmark"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "regime": {"rules": "sentiment_fragility.gte:0.35"},
+            },
+            ["regime.sentiment_enabled"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "regime": {
+                    "rules": "day_close.cross_below:day_sma20",
+                },
+            },
+            ["regime.rules"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "regime": {
+                    "rules": "sentiment_fragility.gte:0.35",
+                    "sentiment_enabled": True,
+                },
+            },
+            [
+                "regime.sentiment_sector_benchmark",
+                "regime.sentiment_market_benchmark",
+            ],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "regime": {
+                    "rules": "day_close.lt:day_sma20",
+                    "sentiment_data_profile": "experimental",
+                },
+            },
+            ["regime.sentiment_data_profile"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "regime": {
+                    "rules": "day_close.lt:day_sma20",
+                    "sentiment_sources": ["news"],
+                },
+            },
+            ["regime.sentiment_sources"],
+        ),
     ],
 )
 def test_semantic_backtest_errors_return_exact_fields_before_persistence(

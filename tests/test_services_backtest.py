@@ -12,6 +12,7 @@ from bktstr.services.backtest import (
 )
 from bktstr.services.data import normalize_market_request
 from bktstr.services.regimes import RegimeInput, normalize_regime_request
+from bktstr.services.validation import SemanticValidationError
 
 
 BASE_INPUT = {
@@ -360,6 +361,53 @@ def test_market_and_regime_normalization_reuse_legacy_constraints():
         normalize_regime_request(
             RegimeInput(enabled=True, rules="relative_return20.lt:0")
         )
+
+
+@pytest.mark.parametrize(
+    ("regime", "fields"),
+    [
+        (
+            RegimeInput(rules="relative_return20.lt:0", benchmark="bad symbol"),
+            ("regime.benchmark",),
+        ),
+        (
+            RegimeInput(rules="relative_return20.lt:0"),
+            ("regime.benchmark",),
+        ),
+        (
+            RegimeInput(rules="sentiment_fragility.gte:0.35"),
+            ("regime.sentiment_enabled",),
+        ),
+        (
+            RegimeInput(rules="day_close.cross_below:day_sma20"),
+            ("regime.rules",),
+        ),
+        (
+            RegimeInput(
+                rules="sentiment_fragility.gte:0.35", sentiment_enabled=True
+            ),
+            (
+                "regime.sentiment_sector_benchmark",
+                "regime.sentiment_market_benchmark",
+            ),
+        ),
+        (
+            RegimeInput(sentiment_data_profile="experimental"),
+            ("regime.sentiment_data_profile",),
+        ),
+        (
+            RegimeInput(sentiment_sources=("news",)),
+            ("regime.sentiment_sources",),
+        ),
+    ],
+)
+def test_regime_normalization_reports_exact_structured_fields(regime, fields):
+    # Break caught: human-readable labels or a broad `regime` path could escape
+    # the typed service boundary and make API errors ambiguous.
+    with pytest.raises(SemanticValidationError) as raised:
+        normalize_regime_request(regime)
+
+    assert raised.value.fields == fields
 
 
 def test_legacy_request_mapping_preserves_registered_execution_parameters():

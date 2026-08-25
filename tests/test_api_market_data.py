@@ -111,6 +111,39 @@ def test_market_data_validates_page_bounds_and_openapi_contract(monkeypatch, tmp
         assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
 
+@pytest.mark.parametrize(
+    ("overrides", "fields"),
+    [
+        ({"symbol": "bad symbol"}, ["symbol"]),
+        ({"start": "2026-08-18", "end": "2026-08-17"}, ["start", "end"]),
+        ({"timeframe": "2m"}, ["timeframe"]),
+        ({"source": "manual"}, ["source"]),
+    ],
+)
+def test_market_data_semantic_errors_use_flat_query_paths(
+    monkeypatch, tmp_path, overrides, fields
+):
+    # Break caught: a shared nested-market normalizer could leak `market.*`
+    # paths into the flat /market-data query contract.
+    monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
+    query = {
+        "symbol": "NVDA",
+        "start": "2026-08-17",
+        "end": "2026-08-17",
+        "timeframe": "1m",
+        "source": "auto",
+        "limit": 2,
+        **overrides,
+    }
+
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/market-data", params=query, headers=AUTH)
+
+    assert response.status_code == 400
+    assert response.json()["error"]["details"]["fields"] == fields
+
+
 def test_market_data_service_uses_cached_bars_and_binds_cursors_to_identity(monkeypatch):
     # Break caught: a new data path could bypass the cache contract or reuse a cursor for another symbol.
     from bktstr.services import data

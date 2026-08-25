@@ -48,16 +48,19 @@ class MarketDataInspection:
     next_cursor: str | None
 
 
-def normalize_symbol(value: str, *, label: str = "symbol") -> str:
+def normalize_symbol(
+    value: str, *, label: str = "symbol", field_path: str | None = None
+) -> str:
+    field = field_path or label
     if not isinstance(value, str):
-        raise SemanticValidationError(f"{label} must be a string", (label,))
+        raise SemanticValidationError(f"{label} must be a string", (field,))
     normalized = value.strip().upper()
     if not _SYMBOL.fullmatch(normalized):
-        raise SemanticValidationError(f"invalid {label}", (label,))
+        raise SemanticValidationError(f"invalid {label}", (field,))
     return normalized
 
 
-def _normalize_date(value: date | str, *, label: str) -> date:
+def _normalize_date(value: date | str, *, label: str, field_path: str) -> date:
     if type(value) is date:
         return value
     if isinstance(value, str):
@@ -65,11 +68,9 @@ def _normalize_date(value: date | str, *, label: str) -> date:
             return date.fromisoformat(value)
         except ValueError as exc:
             raise SemanticValidationError(
-                f"{label} must be an ISO date", (f"market.{label}",)
+                f"{label} must be an ISO date", (field_path,)
             ) from exc
-    raise SemanticValidationError(
-        f"{label} must be a date", (f"market.{label}",)
-    )
+    raise SemanticValidationError(f"{label} must be a date", (field_path,))
 
 
 def normalize_market_request(
@@ -79,34 +80,40 @@ def normalize_market_request(
     end: date | str,
     timeframe: str,
     source: str = "auto",
+    field_prefix: str | None = "market",
 ) -> MarketInput:
     """Normalize the public market request without selecting a second data path."""
 
-    normalized_start = _normalize_date(start, label="start")
-    normalized_end = _normalize_date(end, label="end")
+    def field(name: str) -> str:
+        return f"{field_prefix}.{name}" if field_prefix else name
+
+    normalized_start = _normalize_date(
+        start, label="start", field_path=field("start")
+    )
+    normalized_end = _normalize_date(end, label="end", field_path=field("end"))
     if normalized_end < normalized_start:
         raise SemanticValidationError(
-            "end must be on or after start", ("market.start", "market.end")
+            "end must be on or after start", (field("start"), field("end"))
         )
     if (normalized_end - normalized_start).days > 730:
         raise SemanticValidationError(
-            "date range cannot exceed 730 days", ("market.start", "market.end")
+            "date range cannot exceed 730 days", (field("start"), field("end"))
         )
     if timeframe not in _ALLOWED_TIMEFRAMES:
         raise SemanticValidationError(
             f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}",
-            ("market.timeframe",),
+            (field("timeframe"),),
         )
     if not isinstance(source, str):
-        raise SemanticValidationError("source must be a string", ("market.source",))
+        raise SemanticValidationError("source must be a string", (field("source"),))
     normalized_source = source.strip().lower()
     if normalized_source not in _AVAILABLE_SOURCES:
         raise SemanticValidationError(
             f"source must be one of {sorted(_AVAILABLE_SOURCES)}; provider selection remains automatic",
-            ("market.source",),
+            (field("source"),),
         )
     return MarketInput(
-        symbol=normalize_symbol(symbol, label="market.symbol"),
+        symbol=normalize_symbol(symbol, field_path=field("symbol")),
         start=normalized_start,
         end=normalized_end,
         timeframe=timeframe,
@@ -209,7 +216,12 @@ async def inspect_market_data(
             "limit must be between 1 and 1000", ("limit",)
         )
     market = normalize_market_request(
-        symbol=symbol, start=start, end=end, timeframe=timeframe, source=source
+        symbol=symbol,
+        start=start,
+        end=end,
+        timeframe=timeframe,
+        source=source,
+        field_prefix=None,
     )
     identity = _canonical_identity(market)
     after = _decode_cursor(cursor, identity=identity) if cursor is not None else None
