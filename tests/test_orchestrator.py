@@ -450,6 +450,20 @@ def test_contract_failure_attributes_definition_named_in_error_details(
             "1.0.0",
             VariableRef("technical.rsi14", "1.0.0", DataTier.C),
         ),
+        (
+            {
+                "variable_id": "strategy.bktstr.bearish-regime-scalp.filter.variable-id-unregistered",
+                "version": "9.9.9",
+                "tier": "C",
+            },
+            "strategy.bktstr.bearish-regime-scalp.filter.variable-id-unregistered",
+            "9.9.9",
+            VariableRef(
+                "strategy.bktstr.bearish-regime-scalp.filter.variable-id-unregistered",
+                "9.9.9",
+                DataTier.C,
+            ),
+        ),
     ),
 )
 def test_contract_failure_preserves_unregistered_structured_identity(
@@ -552,6 +566,47 @@ def test_contract_failure_prefers_exact_version_from_ambiguous_details(
         "tier": "B",
         "registered": True,
     }
+
+
+def test_contract_failure_from_variable_store_details_prefers_exact_registered_ref(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Break caught: VariableSnapshotStore's undeclared-input identity lost its sibling version/tier.
+    registry = baseline_variable_registry()
+    first = registry.require("technical.rsi14")
+    registry.register(replace(first, version="2.0.0"))
+
+    def fail_with_variable_store_identity(*args, **kwargs):
+        raise VariableContractError(
+            "snapshot input is not declared by an output definition",
+            code="undeclared_input",
+            details={
+                "variable_id": "technical.rsi14",
+                "version": "2.0.0",
+                "tier": "B",
+            },
+        )
+
+    monkeypatch.setattr(
+        VariableSnapshotStore, "resolve", fail_with_variable_store_identity
+    )
+    with pytest.raises(StrategyRunError) as raised:
+        _run(
+            _request(),
+            _dependencies(tmp_path, FixtureProvider(), variable_registry=registry),
+        )
+
+    diagnostic = raised.value.diagnostics[0]
+    assert diagnostic.code == "undeclared_input"
+    assert diagnostic.variable_id == "technical.rsi14"
+    assert diagnostic.variable == VariableRef("technical.rsi14", "2.0.0", DataTier.B)
+    assert diagnostic.details["attribution"] == {
+        "id": "technical.rsi14",
+        "version": "2.0.0",
+        "tier": "B",
+        "registered": True,
+    }
+    assert diagnostic.forceable is False
 
 
 def test_all_tier_a_acquisitions_finish_before_first_tier_b_adapter_call(

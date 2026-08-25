@@ -420,7 +420,14 @@ def _reference_from_contract_details(
             detail_tier = detail_tier or details.get("variable_tier")
         if key == "dependency":
             detail_tier = detail_tier or details.get("dependency_tier")
-        identity = identity_from_value(details.get(key), fallback_tier=detail_tier)
+        value = details.get(key)
+        if key == "variable_id" and isinstance(value, str):
+            value = {
+                "id": value,
+                "version": details.get("version"),
+                "tier": details.get("tier"),
+            }
+        identity = identity_from_value(value, fallback_tier=detail_tier)
         if identity is not None:
             return identity
     cycle = details.get("cycle")
