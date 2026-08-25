@@ -176,10 +176,6 @@ class ReplicationSuggestionPolicy:
         return cls(method="historical_median", rationale=rationale)
 
     @classmethod
-    def reference(cls, reference: str, rationale: str) -> "ReplicationSuggestionPolicy":
-        return cls(method="reference", reference=reference, rationale=rationale)
-
-    @classmethod
     def no_safe_suggestion(
         cls, rationale: str = "No safe deterministic suggestion is available"
     ) -> "ReplicationSuggestionPolicy":
@@ -214,6 +210,17 @@ class ReplicationSuggestionPolicy:
         )
 
 
+def _reference_suggestion_policy(
+    cls: type[ReplicationSuggestionPolicy], reference: str, rationale: str
+) -> ReplicationSuggestionPolicy:
+    return cls(method="reference", reference=reference, rationale=rationale)
+
+
+# Keep ``reference`` as the public policy constructor without replacing the
+# dataclass field before its ``None`` default has been captured.
+ReplicationSuggestionPolicy.reference = classmethod(_reference_suggestion_policy)  # type: ignore[method-assign]
+
+
 @dataclass(frozen=True)
 class ResearchVariableDefinition:
     id: str
@@ -242,6 +249,11 @@ class ResearchVariableDefinition:
             raise VariableContractError("kind must be a VariableKind", code="invalid_kind")
         if not isinstance(self.tier, DataTier):
             raise VariableContractError("tier must be a DataTier", code="invalid_tier")
+        if self.tier is DataTier.A and self.kind is not VariableKind.SOURCE:
+            raise VariableContractError(
+                "Tier A is reserved for source variables",
+                code="illegal_tier_definition",
+            )
         if not isinstance(self.column, str) or not self.column.strip():
             raise VariableContractError("column must be non-empty", code="invalid_column")
         if not isinstance(self.value_dtype, str) or not self.value_dtype.strip():

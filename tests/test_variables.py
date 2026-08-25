@@ -59,4 +59,34 @@ def test_neutral_suggestion_is_deterministic_and_never_applied():
     policy = ReplicationSuggestionPolicy.neutral(0.0, "Use a neutral score for review only")
     diagnostic = policy.suggest(variable_id="sentiment.direction", start="2026-08-01", end="2026-08-02")
     assert diagnostic.suggested_value == 0.0
+    assert diagnostic.suggested_reference is None
     assert diagnostic.applied is False
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected_reference"),
+    [
+        (ReplicationSuggestionPolicy.neutral(0.0, "Neutral"), None),
+        (ReplicationSuggestionPolicy.last_valid("Last valid"), None),
+        (ReplicationSuggestionPolicy.historical_median("Median"), None),
+        (ReplicationSuggestionPolicy.reference("market.reference.close", "Reference"), "market.reference.close"),
+        (ReplicationSuggestionPolicy.no_safe_suggestion("No suggestion"), None),
+    ],
+)
+def test_suggestion_policy_constructors_emit_only_declared_references(policy, expected_reference):
+    diagnostic = policy.suggest(variable_id="sentiment.direction")
+    assert diagnostic.suggested_reference == expected_reference
+
+
+@pytest.mark.parametrize("kind", (VariableKind.MEASUREMENT, VariableKind.FILTER))
+def test_tier_a_rejects_non_source_definitions(kind):
+    with pytest.raises(ValueError, match="Tier A is reserved for source variables"):
+        ResearchVariableDefinition(
+            id="technical.invalid",
+            version="1.0.0",
+            kind=kind,
+            tier=DataTier.A,
+            column="invalid",
+            value_dtype="float64",
+            frequency="1d",
+        )
