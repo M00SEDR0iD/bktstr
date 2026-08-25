@@ -1,7 +1,7 @@
 # BKTSTR System Manual
 
-**Release:** v0.3.5  
-**Behavioral baseline:** v0.3.3 trading semantics preserved; v0.3.4 adds integrated deterministic derived caching and v0.3.5 adds development/release reproducibility  
+**Current release:** v0.6.0
+**Behavioral baseline:** v0.3.3 trading semantics are preserved; v0.3.4 added deterministic derived caching, v0.3.5 added release reproducibility, and v0.6 adds the typed research API
 **Purpose:** architecture reference, research-methodology white paper, API/user manual, and future GUI implementation guide.
 
 BKTSTR is a read-only historical market-research service. It separates slow background context from intermediate market regime and fast technical entries so that each layer can be tested independently and combined without hiding assumptions. It never places brokerage orders.
@@ -474,40 +474,54 @@ Missing required-period data remains a hard failure. Cache hits must preserve ex
 Some execution environments cannot reliably reach the Railway hostname directly. The proven agent path is:
 
 ```text
-ChatGPT → Supabase.execute_sql → pg_net net.http_get → Railway BKTSTR → net._http_response → ChatGPT
+ChatGPT → Supabase.execute_sql → pg_net HTTP request → Railway BKTSTR → net._http_response → ChatGPT
 ```
 
-See `AGENT_BACKTEST_RUNBOOK.md` for exact SQL, timeout/polling discipline, frozen NVDA parameters, percentage semantics, and standard QQQ/SOXX controls.
+See `AGENT_BACKTEST_RUNBOOK.md` for bearer-authenticated SQL, timeout/polling discipline, typed request bodies, percentage semantics, and standard QQQ/SOXX controls.
 
 ## API examples
 
-### Sentiment only
+### Typed regime + sentiment backtest
 
-```text
-GET /api/v1/backtest?
-symbol=NVDA&
-start=2026-06-01&
-end=2026-08-21&
-timeframe=1m&
-side=short&
-entry=close.cross_below%3Avwap%2Crsi14.lt%3A50%2Cvolume_ratio20.gt%3A1.1&
-sentiment=true&
-sentiment_sector_benchmark=SOXX&
-sentiment_market_benchmark=QQQ&
-sentiment_data_profile=clean&
-sentiment_sources=price
+Authenticate every research request with `Authorization: Bearer <BKTSTR_API_KEY>`
+and submit a JSON body to `POST /api/v1/backtests`:
+
+```json
+{
+  "strategy": {
+    "id": "bktstr.bearish-regime-scalp",
+    "version": "1.0.0",
+    "parameters": {"stop_pct": 1.0, "target_pct": 3.0}
+  },
+  "market": {
+    "symbol": "NVDA",
+    "start": "2026-06-01",
+    "end": "2026-08-21",
+    "timeframe": "1m",
+    "source": "auto"
+  },
+  "side": "short",
+  "entry": "close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10",
+  "regime": {
+    "enabled": true,
+    "rules": "day_sma20_slope5.lt:0,relative_return20.lt:0",
+    "benchmark": "SOXX",
+    "sentiment_enabled": true,
+    "sentiment_sector_benchmark": "SOXX",
+    "sentiment_market_benchmark": "QQQ",
+    "sentiment_data_profile": "clean",
+    "sentiment_sources": ["price"]
+  },
+  "execution": "async",
+  "include_trades": true
+}
 ```
 
-### Regime + sentiment
-
-```text
-regime=day_sma20_slope5.lt:0,relative_return20.lt:0
-benchmark=SOXX
-sentiment=true
-sentiment_sector_benchmark=SOXX
-sentiment_market_benchmark=QQQ
-sentiment_data_profile=clean
-```
+This long request returns `202 Accepted` with an immutable experiment envelope
+whose `status` is `queued`. Poll `GET /api/v1/experiments/{experiment_id}` with
+the same bearer key until `status` is `completed` or `failed`. A completed
+envelope carries `result.metrics`, `result.trades`, `result.configuration`, and
+`result.provenance`; it does not expose the retired query-string payload.
 
 The regime remains a hard trade filter. Sentiment outputs remain research metadata unless a later release explicitly introduces validated sizing behavior.
 
@@ -640,7 +654,7 @@ The following findings guide future experiments but are not production trade rul
 
 Treat the heavily explored NVDA 2025 and Jun-Aug 2026 samples as discovery data. New claims require untouched periods and cross-symbol validation.
 
-## v0.3.5 release identity and development workflow
+## Historical v0.3.5 release identity and development workflow
 
 v0.3.5 does not change trading formulas. It adds an explicit release identity so a production result can be tied back to the source and deterministic formula/cache contract that produced it. `/health` reports `version` plus `git_commit`, `git_branch`, `git_repo`, `deployment_id`, and optional `build_time`. Railway-sourced identity comes from `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_GIT_BRANCH`, `RAILWAY_GIT_REPO_OWNER`, `RAILWAY_GIT_REPO_NAME`, and `RAILWAY_DEPLOYMENT_ID`; local verification may override commit/build time with `BKTSTR_GIT_COMMIT` and `BKTSTR_BUILD_TIME`.
 
@@ -777,9 +791,6 @@ Set `BKTSTR_API_KEY` as the single bearer credential. Set
 and immutable artifacts survive a deployment. `BKTSTR_SYNC_MAX_CALENDAR_DAYS`
 sets the inclusive maximum span for an inline sync backtest (default `31`), and
 `BKTSTR_MAX_SWEEP_VARIANTS` caps parameter sweeps (default `500`).
-`BKTSTR_LEGACY_BACKTEST_SUNSET` is migration metadata for clients of the
-removed endpoint; it does not re-enable the old threaded server or a second
-execution path.
 
 ## Known limitations
 

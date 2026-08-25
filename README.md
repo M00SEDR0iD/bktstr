@@ -137,6 +137,5 @@ Railway uses `Dockerfile` and `railway.json`. Set `MASSIVE_API_KEY` and `BKTSTR_
 - `BKTSTR_EXPERIMENT_DIR` — durable SQLite records and immutable experiment artifacts; place it on the Railway volume.
 - `BKTSTR_SYNC_MAX_CALENDAR_DAYS` — maximum inclusive calendar span for an inline `sync` backtest (default `31`).
 - `BKTSTR_MAX_SWEEP_VARIANTS` — maximum generated parameter-sweep variants (default `500`).
-- `BKTSTR_LEGACY_BACKTEST_SUNSET` — migration metadata for the removed `GET /api/v1/backtest` endpoint; it remains a documented `410` response and never restores a second HTTP engine.
 
 See [`docs/BKTSTR_SYSTEM_MANUAL.md`](docs/BKTSTR_SYSTEM_MANUAL.md) for the complete architecture, research discipline, look-ahead rules, provenance system, and GUI contract.
