@@ -1,0 +1,169 @@
+import asyncio
+from datetime import date, datetime
+
+from fastapi.testclient import TestClient
+import pandas as pd
+import pytest
+
+import bktstr.api.routes as api_routes
+from bktstr.api.app import create_app
+
+
+AUTH = {"Authorization": "Bearer test-key"}
+QUERY = (
+    "/api/v1/market-data?symbol=NVDA&start=2026-08-17&end=2026-08-17"
+    "&timeframe=1m&limit=2"
+)
+
+
+def _market_page(*, cursor: str | None = None) -> dict:
+    bars = [
+        {
+            "timestamp": datetime(2026, 8, 17, 13, 30),
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+            "volume": 1_000.0,
+        },
+        {
+            "timestamp": datetime(2026, 8, 17, 13, 31),
+            "open": 100.5,
+            "high": 102.0,
+            "low": 100.0,
+            "close": 101.5,
+            "volume": 1_200.0,
+        },
+    ]
+    return {
+        "symbol": "NVDA",
+        "start": "2026-08-17",
+        "end": "2026-08-17",
+        "timeframe": "1m",
+        "source": "fixture",
+        "bars": bars if cursor is None else [],
+        "next_cursor": "fixture-next" if cursor is None else None,
+    }
+
+
+def test_market_data_is_normalized_paginated_and_secret_free(monkeypatch, tmp_path):
+    # Break caught: the inspection route could disappear or leak provider-shaped data.
+    monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
+
+    async def fixture_market_data(**kwargs):
+        return _market_page(cursor=kwargs["cursor"])
+
+    monkeypatch.setattr(
+        api_routes, "inspect_market_data", fixture_market_data, raising=False
+    )
+    with TestClient(create_app()) as client:
+        response = client.get(QUERY, headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {"timestamp", "open", "high", "low", "close", "volume"} <= set(
+        body["bars"][0]
+    )
+    assert body["next_cursor"] == "fixture-next"
+    assert "api_key" not in response.text.lower()
+
+
+def test_market_data_rejects_cursor_for_different_canonical_request(monkeypatch, tmp_path):
+    # Break caught: a cursor for one data identity could silently page another market range.
+    monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
+
+    async def fixture_market_data(**kwargs):
+        if kwargs["cursor"] == "wrong-identity":
+            raise ValueError("cursor does not match the requested market data")
+        return _market_page(cursor=kwargs["cursor"])
+
+    monkeypatch.setattr(
+        api_routes, "inspect_market_data", fixture_market_data, raising=False
+    )
+    with TestClient(create_app()) as client:
+        response = client.get(f"{QUERY}&cursor=wrong-identity", headers=AUTH)
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_market_data_validates_page_bounds_and_openapi_contract(monkeypatch, tmp_path):
+    # Break caught: unbounded inspection pages could exhaust a service worker or typed clients.
+    monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
+    with TestClient(create_app()) as client:
+        invalid = client.get(QUERY.replace("limit=2", "limit=1001"), headers=AUTH)
+        document = client.get("/openapi.json").json()
+
+    assert invalid.status_code == 422
+    operation = document["paths"]["/api/v1/market-data"]["get"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/MarketDataResponse")
+
+
+def test_market_data_service_uses_cached_bars_and_binds_cursors_to_identity(monkeypatch):
+    # Break caught: a new data path could bypass the cache contract or reuse a cursor for another symbol.
+    from bktstr.services import data
+
+    class CachedBars:
+        provider_name = "fixture"
+
+        async def fetch_bars(self, symbol, start, end, timeframe):
+            assert (symbol, start, end, timeframe) == (
+                "NVDA",
+                date(2026, 8, 17),
+                date(2026, 8, 17),
+                "1m",
+            )
+            index = pd.DatetimeIndex(
+                ["2026-08-17 09:30:00", "2026-08-17 09:31:00", "2026-08-17 09:32:00"],
+                tz="America/New_York",
+            )
+            return pd.DataFrame(
+                {
+                    "open": [100.0, 101.0, 102.0],
+                    "high": [101.0, 102.0, 103.0],
+                    "low": [99.0, 100.0, 101.0],
+                    "close": [100.5, 101.5, 102.5],
+                    "volume": [1000.0, 1100.0, 1200.0],
+                },
+                index=index,
+            )
+
+    monkeypatch.setattr(data, "_cached_provider_for_market", lambda market: CachedBars())
+    first = asyncio.run(
+        data.inspect_market_data(
+            symbol="NVDA",
+            start="2026-08-17",
+            end="2026-08-17",
+            timeframe="1m",
+            limit=2,
+        )
+    )
+    second = asyncio.run(
+        data.inspect_market_data(
+            symbol="NVDA",
+            start="2026-08-17",
+            end="2026-08-17",
+            timeframe="1m",
+            limit=2,
+            cursor=first.next_cursor,
+        )
+    )
+
+    assert [bar.close for bar in first.bars] == [100.5, 101.5]
+    assert [bar.close for bar in second.bars] == [102.5]
+    with pytest.raises(ValueError, match="cursor does not match"):
+        asyncio.run(
+            data.inspect_market_data(
+                symbol="AMD",
+                start="2026-08-17",
+                end="2026-08-17",
+                timeframe="1m",
+                limit=2,
+                cursor=first.next_cursor,
+            )
+        )

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from typing import Annotated, Any, TypeVar
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 
-from bktstr.server import CAPABILITIES, health_payload
+from bktstr.server import capabilities_payload, health_payload
 from bktstr.services.backtest import (
     BacktestInput,
     CompareInput,
@@ -27,6 +28,7 @@ from bktstr.services.experiments import (
     submit,
 )
 from bktstr.services.regimes import RegimeInput
+from bktstr.services.data import inspect_market_data
 
 from .auth import require_api_key
 from .schemas import (
@@ -40,6 +42,7 @@ from .schemas import (
     ErrorResponse,
     ExperimentResponse,
     HealthResponse,
+    MarketDataResponse,
     NamedVariantCreate,
     ParameterSweepCreate,
     ParameterSweepExperimentResponse,
@@ -65,7 +68,34 @@ def versioned_health() -> dict:
     responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
 def capabilities(_: Annotated[None, Depends(require_api_key)]) -> dict:
-    return CAPABILITIES
+    return capabilities_payload()
+
+
+@api_router.get(
+    "/market-data",
+    response_model=MarketDataResponse,
+    responses={401: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def get_market_data(
+    symbol: Annotated[str, Query(min_length=1, max_length=15)],
+    start: date,
+    end: date,
+    timeframe: str = "1m",
+    source: str = "auto",
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+    _: Annotated[None, Depends(require_api_key)] = None,
+) -> MarketDataResponse:
+    page = await inspect_market_data(
+        symbol=symbol,
+        start=start,
+        end=end,
+        timeframe=timeframe,
+        source=source,
+        limit=limit,
+        cursor=cursor,
+    )
+    return MarketDataResponse.model_validate(page, from_attributes=True)
 
 
 def _backtest_input(request: BacktestCreate) -> BacktestInput:

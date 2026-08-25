@@ -17,6 +17,7 @@ from .provenance import capability_provenance
 from .measurements import baseline_variable_registry
 from .strategies import baseline_strategy_registry
 from .variables import DataTier
+from .services.experiments import ExecutionPolicy, ExperimentStatus
 
 
 def _registered_variable_capabilities() -> dict:
@@ -151,6 +152,32 @@ CAPABILITIES = {
     "version": __version__,
     "timeframes": ["1m", "5m", "15m", "1h", "1d"],
     "sides": ["long", "short"],
+    "api": {
+        "openapi_url": "/openapi.json",
+        "authentication": {"scheme": "bearer", "header": "Authorization"},
+        "operations": [
+            "backtest",
+            "parameter_sweep",
+            "compare",
+            "regime_comparison",
+            "market_data",
+        ],
+        "limits": {"market_data_page_size": {"minimum": 1, "maximum": 1000}},
+    },
+    "experiments": {
+        "states": [item.value for item in ExperimentStatus],
+        "execution_modes": ["auto", "sync", "async"],
+        "idempotency": {
+            "header": "Idempotency-Key",
+            "behavior": "same canonical operation request returns the existing experiment",
+        },
+        "execution_policy": {
+            "auto_inline": ["backtest"],
+            "auto_queues": ["parameter_sweep", "compare", "regime_comparison"],
+            "sync_max_calendar_days": 31,
+            "sync_refusal_code": "execution_not_available",
+        },
+    },
     "rule_syntax": {
         "examples": [
             "close.cross_below:vwap",
@@ -306,6 +333,22 @@ CAPABILITIES = {
     "research_variables": _registered_variable_capabilities(),
     "strategies": {"baseline": _registered_baseline_strategy_capability()},
 }
+
+
+def capabilities_payload() -> dict:
+    """Render public discovery data without mutating registered v0.5 contracts."""
+    policy = ExecutionPolicy.from_environment()
+    return {
+        **CAPABILITIES,
+        "api": {**CAPABILITIES["api"], "limits": dict(CAPABILITIES["api"]["limits"])},
+        "experiments": {
+            **CAPABILITIES["experiments"],
+            "execution_policy": {
+                **CAPABILITIES["experiments"]["execution_policy"],
+                "sync_max_calendar_days": policy.sync_max_calendar_days,
+            },
+        },
+    }
 
 
 def health_payload() -> dict:

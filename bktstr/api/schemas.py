@@ -45,6 +45,33 @@ class CapabilityResponse(BaseModel):
     sides: list[str]
 
 
+class MarketDataBarResponse(BaseModel):
+    """One provider-independent normalized OHLCV bar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class MarketDataResponse(BaseModel):
+    """A bounded page of safe raw market data inspection output."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    symbol: str
+    start: date
+    end: date
+    timeframe: str
+    source: str
+    bars: list[MarketDataBarResponse]
+    next_cursor: str | None = None
+
+
 class StrategyCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
