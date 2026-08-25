@@ -1203,11 +1203,20 @@ async def execute_strategy_run(
     if subject is None:
         raise ValueError("strategy run requires a subject instrument")
     needs_regime = bool(regime_rules and regime_uses_market_fields(regime_rules))
-    # The compatibility adapter preserves the legacy distinction: a sentiment
-    # sector is not a regime benchmark unless the request explicitly supplies one.
-    benchmark = request.instruments.get("benchmark")
     sector = request.instruments.get("sector")
     market = request.instruments.get("market")
+    benchmark = request.instruments.get("benchmark")
+    benchmark_regime_ids = {
+        "regime.benchmark_return20",
+        "regime.relative_return20",
+    }
+    if benchmark is None and benchmark_regime_ids.intersection(
+        _regime_variable_ids(regime_rules)
+    ):
+        # The domain strategy declares sector rather than the legacy-only
+        # benchmark role. Legacy requests that reference benchmark fields are
+        # already required to supply that explicit binding before adaptation.
+        benchmark = sector
     if sentiment_enabled and (not sector or not market):
         raise ValueError("sentiment strategy run requires sector and market instruments")
 

@@ -23,6 +23,7 @@ from bktstr.service import BacktestRequest
 from bktstr.strategies import (
     StrategyFilterDefinition,
     StrategyRegistry,
+    StrategyRunRequest,
     baseline_strategy_definition,
 )
 from bktstr.variable_store import VariableSnapshotStore
@@ -160,6 +161,28 @@ def test_baseline_run_resolves_exact_strategy_and_records_tiered_dependency_trac
     )
     assert result.variables["technical.vwap"].tier is DataTier.B
     assert result.variables["technical.vwap"].series.index.equals(intraday_fixture().index)
+
+
+def test_direct_baseline_run_uses_declared_sector_for_benchmark_regime_fields(
+    tmp_path: Path,
+):
+    # Break caught: the direct contract's declared subject/sector/market roles could
+    # leave the baseline's default relative-return regime variable unmaterialized.
+    request = StrategyRunRequest(
+        strategy_id="bktstr.bearish-regime-scalp",
+        strategy_version="1.0.0",
+        instruments={"subject": "NVDA", "sector": "SOXX", "market": "QQQ"},
+        start=date(2026, 8, 17),
+        end=date(2026, 8, 17),
+        timeframe="1m",
+        overrides={"entry_rules": "close.lt:1000", "sentiment": False},
+    )
+
+    result = _run(request, _dependencies(tmp_path, FixtureProvider()))
+
+    assert result.canonical is True
+    assert result.data["regime"]["benchmark"] == "SOXX"
+    assert "regime.relative_return20" in result.variables
 
 
 def test_trace_records_actual_tier_a_artifacts_with_coverage_and_cache(
