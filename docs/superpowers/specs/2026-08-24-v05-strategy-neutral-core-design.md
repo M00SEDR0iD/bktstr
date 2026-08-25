@@ -42,6 +42,8 @@ The design also formalizes BKTSTR's research hierarchy. Tier A and Tier B data a
 
 ## Non-goals
 
+Here, a non-goal is an outcome deliberately excluded from v0.5 acceptance. It is not automatically rejected forever, and it is not automatically a committed future deliverable. The second-strategy, production C/D, import, persistence, API, and GUI items below are deferred candidates: v0.5 preserves stable contract seams for them without implementing speculative workflow or infrastructure. The compatibility, formula, baseline-value, and position-sizing items are protected boundaries for this milestone and must remain unchanged.
+
 - Adding a second strategy family
 - Enabling Tier C or Tier D production sources
 - Uploading arbitrary data or executable Python
