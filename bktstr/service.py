@@ -14,6 +14,7 @@ from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
 from .provenance import resolve_sentiment_sources
 from .regime import validate_regime_rules
 from .rules import parse_rules
+from .services.data import normalize_market_request
 
 
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
@@ -83,17 +84,17 @@ class BacktestRequest:
         sentiment_data_profile: str = "clean",
         sentiment_sources: str | tuple[str, ...] | None = None,
     ) -> "BacktestRequest":
-        symbol = symbol.strip().upper()
-        if not _SYMBOL.match(symbol):
-            raise ValueError("invalid symbol")
-        start_date = date.fromisoformat(start)
-        end_date = date.fromisoformat(end)
-        if end_date < start_date:
-            raise ValueError("end must be on or after start")
-        if (end_date - start_date).days > 730:
-            raise ValueError("date range cannot exceed 730 days")
-        if timeframe not in _ALLOWED_TIMEFRAMES:
-            raise ValueError(f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}")
+        market = normalize_market_request(
+            symbol=symbol,
+            start=start,
+            end=end,
+            timeframe=timeframe,
+            source="auto",
+        )
+        symbol = market.symbol
+        start_date = market.start
+        end_date = market.end
+        timeframe = market.timeframe
         if side not in {"long", "short"}:
             raise ValueError("side must be long or short")
         _validate_entry_window(entry_start_time, entry_end_time)
