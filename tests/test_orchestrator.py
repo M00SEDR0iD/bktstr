@@ -73,6 +73,19 @@ class ExplodingProvider(FixtureProvider):
         raise RuntimeError(f"provider rejected request with credential {self.secret}")
 
 
+class SymbolExplodingProvider(FixtureProvider):
+    def __init__(self, failed_symbol: str) -> None:
+        super().__init__()
+        self.failed_symbol = failed_symbol
+
+    async def fetch_bars(
+        self, symbol: str, start: date, end: date, timeframe: str = "1m"
+    ) -> pd.DataFrame:
+        if symbol == self.failed_symbol and timeframe == "1d":
+            raise RuntimeError(f"provider rejected {symbol}")
+        return await super().fetch_bars(symbol, start, end, timeframe)
+
+
 def _daily_bars(symbol: str, start: date, end: date) -> pd.DataFrame:
     """Return the same date-indexed provider history regardless of fetch chunking."""
     frame = daily_fixture(
@@ -865,3 +878,48 @@ def test_provider_secrets_never_appear_in_diagnostics_or_provenance(tmp_path: Pa
 
     assert secret not in str(raised.value)
     assert all(secret not in repr(item) for item in raised.value.diagnostics)
+
+
+@pytest.mark.parametrize(
+    ("failed_symbol", "expected_variable_id"),
+    (
+        ("SOXX", "market.sector.close"),
+        ("QQQ", "market.market.close"),
+    ),
+)
+def test_sentiment_provider_failure_preserves_exact_source_identity(
+    tmp_path: Path,
+    failed_symbol: str,
+    expected_variable_id: str,
+):
+    # Break caught: sector and market sentiment fetch errors could both be
+    # mislabeled as a failure of the subject's Tier A close variable.
+    legacy_request = BacktestRequest.from_values(
+        symbol="NVDA",
+        start="2026-08-17",
+        end="2026-08-17",
+        timeframe="1m",
+        side="short",
+        entry="close.lt:1000",
+        regime="sentiment_direction.gt:-999",
+        sentiment=True,
+        sentiment_sector_benchmark="SOXX",
+        sentiment_market_benchmark="QQQ",
+    )
+
+    with pytest.raises(StrategyRunError) as raised:
+        _run(
+            legacy_request_to_strategy_run(legacy_request),
+            _dependencies(tmp_path, SymbolExplodingProvider(failed_symbol)),
+        )
+
+    diagnostic = raised.value.diagnostics[0]
+    assert diagnostic.code == "provider_failure"
+    assert diagnostic.variable_id == expected_variable_id
+    assert diagnostic.variable == VariableRef(
+        expected_variable_id,
+        "1.0.0",
+        DataTier.A,
+    )
+    assert diagnostic.affected_rules == ("sentiment_direction.gt:-999",)
+    assert diagnostic.forceable is False

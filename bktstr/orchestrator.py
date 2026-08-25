@@ -857,6 +857,35 @@ async def _fetch_sentiment_daily(
     }
 
 
+async def _fetch_sentiment_tier_a(
+    *,
+    dependencies: OrchestratorDependencies,
+    variable_id: str,
+    symbol: str,
+    requested_start: date,
+    required_start: date,
+    end: date,
+    affected_rules: tuple[str, ...],
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    try:
+        return await _fetch_sentiment_daily(
+            dependencies.provider,
+            symbol,
+            requested_start,
+            required_start,
+            end,
+        )
+    except Exception as error:
+        _provider_failure(
+            registry=dependencies.variable_registry,
+            variable_id=variable_id,
+            required_start=requested_start,
+            required_end=end,
+            affected_rules=affected_rules,
+            provider_cause=error,
+        )
+
+
 def _merge_variables(*variable_sets: VariableSet) -> VariableSet:
     snapshots = {}
     for variable_set in variable_sets:
@@ -1324,37 +1353,34 @@ async def execute_strategy_run(
     sentiment_coverages = None
     if sentiment_enabled:
         sentiment_warmup_start = request.start - timedelta(days=460)
-        try:
-            sentiment_subject_daily, subject_coverage = await _fetch_sentiment_daily(
-                dependencies.provider,
-                subject,
-                sentiment_warmup_start,
-                request.start,
-                request.end,
-            )
-            sentiment_sector_daily, sector_coverage = await _fetch_sentiment_daily(
-                dependencies.provider,
-                sector,
-                sentiment_warmup_start,
-                request.start,
-                request.end,
-            )
-            sentiment_market_daily, market_coverage = await _fetch_sentiment_daily(
-                dependencies.provider,
-                market,
-                sentiment_warmup_start,
-                request.start,
-                request.end,
-            )
-        except Exception as error:
-            _provider_failure(
-                registry=dependencies.variable_registry,
-                variable_id="market.subject.close",
-                required_start=sentiment_warmup_start,
-                required_end=request.end,
-                affected_rules=(regime_rules or "sentiment",),
-                provider_cause=error,
-            )
+        sentiment_rules = (regime_rules or "sentiment",)
+        sentiment_subject_daily, subject_coverage = await _fetch_sentiment_tier_a(
+            dependencies=dependencies,
+            variable_id="market.subject.close",
+            symbol=subject,
+            requested_start=sentiment_warmup_start,
+            required_start=request.start,
+            end=request.end,
+            affected_rules=sentiment_rules,
+        )
+        sentiment_sector_daily, sector_coverage = await _fetch_sentiment_tier_a(
+            dependencies=dependencies,
+            variable_id="market.sector.close",
+            symbol=sector,
+            requested_start=sentiment_warmup_start,
+            required_start=request.start,
+            end=request.end,
+            affected_rules=sentiment_rules,
+        )
+        sentiment_market_daily, market_coverage = await _fetch_sentiment_tier_a(
+            dependencies=dependencies,
+            variable_id="market.market.close",
+            symbol=market,
+            requested_start=sentiment_warmup_start,
+            required_start=request.start,
+            end=request.end,
+            affected_rules=sentiment_rules,
+        )
         daily_sets = (
             ("market.subject.close", sentiment_subject_daily),
             ("market.sector.close", sentiment_sector_daily),
