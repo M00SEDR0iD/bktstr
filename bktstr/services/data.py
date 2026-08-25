@@ -10,6 +10,8 @@ from typing import Any
 
 import pandas as pd
 
+from .validation import SemanticValidationError
+
 
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 _ALLOWED_TIMEFRAMES = frozenset({"1m", "5m", "15m", "1h", "1d"})
@@ -48,10 +50,10 @@ class MarketDataInspection:
 
 def normalize_symbol(value: str, *, label: str = "symbol") -> str:
     if not isinstance(value, str):
-        raise TypeError(f"{label} must be a string")
+        raise SemanticValidationError(f"{label} must be a string", (label,))
     normalized = value.strip().upper()
     if not _SYMBOL.fullmatch(normalized):
-        raise ValueError(f"invalid {label}")
+        raise SemanticValidationError(f"invalid {label}", (label,))
     return normalized
 
 
@@ -62,8 +64,12 @@ def _normalize_date(value: date | str, *, label: str) -> date:
         try:
             return date.fromisoformat(value)
         except ValueError as exc:
-            raise ValueError(f"{label} must be an ISO date") from exc
-    raise TypeError(f"{label} must be a date")
+            raise SemanticValidationError(
+                f"{label} must be an ISO date", (f"market.{label}",)
+            ) from exc
+    raise SemanticValidationError(
+        f"{label} must be a date", (f"market.{label}",)
+    )
 
 
 def normalize_market_request(
@@ -79,20 +85,28 @@ def normalize_market_request(
     normalized_start = _normalize_date(start, label="start")
     normalized_end = _normalize_date(end, label="end")
     if normalized_end < normalized_start:
-        raise ValueError("end must be on or after start")
+        raise SemanticValidationError(
+            "end must be on or after start", ("market.start", "market.end")
+        )
     if (normalized_end - normalized_start).days > 730:
-        raise ValueError("date range cannot exceed 730 days")
+        raise SemanticValidationError(
+            "date range cannot exceed 730 days", ("market.start", "market.end")
+        )
     if timeframe not in _ALLOWED_TIMEFRAMES:
-        raise ValueError(f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}")
+        raise SemanticValidationError(
+            f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}",
+            ("market.timeframe",),
+        )
     if not isinstance(source, str):
-        raise TypeError("source must be a string")
+        raise SemanticValidationError("source must be a string", ("market.source",))
     normalized_source = source.strip().lower()
     if normalized_source not in _AVAILABLE_SOURCES:
-        raise ValueError(
-            f"source must be one of {sorted(_AVAILABLE_SOURCES)}; provider selection remains automatic"
+        raise SemanticValidationError(
+            f"source must be one of {sorted(_AVAILABLE_SOURCES)}; provider selection remains automatic",
+            ("market.source",),
         )
     return MarketInput(
-        symbol=normalize_symbol(symbol),
+        symbol=normalize_symbol(symbol, label="market.symbol"),
         start=normalized_start,
         end=normalized_end,
         timeframe=timeframe,
@@ -125,19 +139,21 @@ def _encode_cursor(identity: str, timestamp: datetime) -> str:
 
 def _decode_cursor(cursor: str, *, identity: str) -> datetime:
     if not cursor or len(cursor) > 2048:
-        raise ValueError("invalid cursor")
+        raise SemanticValidationError("invalid cursor", ("cursor",))
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         payload: Any = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
         if not isinstance(payload, dict) or payload.get("identity") != identity:
-            raise ValueError("cursor does not match the requested market data")
+            raise SemanticValidationError(
+                "cursor does not match the requested market data", ("cursor",)
+            )
         timestamp = datetime.fromisoformat(payload["timestamp"])
+    except SemanticValidationError:
+        raise
     except (KeyError, TypeError, ValueError, UnicodeDecodeError) as exc:
-        if isinstance(exc, ValueError) and str(exc) == "cursor does not match the requested market data":
-            raise
-        raise ValueError("invalid cursor") from exc
+        raise SemanticValidationError("invalid cursor", ("cursor",)) from exc
     if timestamp.tzinfo is None:
-        raise ValueError("invalid cursor")
+        raise SemanticValidationError("invalid cursor", ("cursor",))
     return timestamp
 
 
@@ -189,7 +205,9 @@ async def inspect_market_data(
 ) -> MarketDataInspection:
     """Return a safe, normalized, cache-backed inspection page of raw OHLCV bars."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
-        raise ValueError("limit must be between 1 and 1000")
+        raise SemanticValidationError(
+            "limit must be between 1 and 1000", ("limit",)
+        )
     market = normalize_market_request(
         symbol=symbol, start=start, end=end, timeframe=timeframe, source=source
     )

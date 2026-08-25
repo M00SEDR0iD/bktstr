@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 import pytest
 import httpx
@@ -139,3 +140,80 @@ def test_worker_terminalizes_result_persistence_errors_and_keeps_processing(tmp_
     assert completed.status is ExperimentStatus.COMPLETED
     assert store.load_experiment(bad.experiment_id).status is ExperimentStatus.FAILED
     assert store.load_experiment(good.experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_worker_survives_completed_projection_failure_and_repairs_on_next_iteration(
+    tmp_path, monkeypatch
+):
+    # Break caught: a post-commit manifest failure could make fail() attack an
+    # immutable completed row and terminate the polling loop before later work.
+    store = ExperimentStore(tmp_path)
+    first, _ = store.create_experiment(
+        "backtest", {"ordinal": 1}, "async", None
+    )
+    second, _ = store.create_experiment(
+        "backtest", {"ordinal": 2}, "async", None
+    )
+    original_publish = store._publish_artifact_generation
+    interrupted = False
+
+    def interrupt_first_completion(experiment_id):
+        nonlocal interrupted
+        current = store.load_experiment(experiment_id)
+        if (
+            experiment_id == first.experiment_id
+            and current.status is ExperimentStatus.COMPLETED
+            and not interrupted
+        ):
+            interrupted = True
+            raise OSError("simulated completed projection failure")
+        original_publish(experiment_id)
+
+    monkeypatch.setattr(
+        store, "_publish_artifact_generation", interrupt_first_completion
+    )
+    stop_event = threading.Event()
+
+    def execute(record):
+        if record.experiment_id == second.experiment_id:
+            stop_event.set()
+        return {"ordinal": record.request["ordinal"]}, {"source": "fixture"}
+
+    worker_thread = threading.Thread(
+        target=ExperimentWorker(store, {"backtest": execute}).run_forever,
+        args=(stop_event,),
+    )
+    worker_thread.start()
+    worker_thread.join(3)
+
+    assert not worker_thread.is_alive()
+    assert store.load_experiment(first.experiment_id).status is ExperimentStatus.COMPLETED
+    assert store.load_experiment(second.experiment_id).status is ExperimentStatus.COMPLETED
+    assert dict(store.load_artifact_manifest(first.experiment_id))["status"] == "completed"
+
+
+def test_inline_completion_returns_committed_result_when_projection_fails(
+    tmp_path, monkeypatch
+):
+    # Break caught: a bounded inline request could return an error even though its
+    # authoritative result had already committed successfully.
+    store = ExperimentStore(tmp_path)
+    original_publish = store._publish_artifact_generation
+
+    def interrupt_completion(experiment_id):
+        if store.load_experiment(experiment_id).status is ExperimentStatus.COMPLETED:
+            raise OSError("simulated inline projection failure")
+        original_publish(experiment_id)
+
+    monkeypatch.setattr(store, "_publish_artifact_generation", interrupt_completion)
+    record = submit(
+        store,
+        {"backtest": lambda _: ({"metric": 1}, {"source": "fixture"})},
+        "backtest",
+        {"symbol": "NVDA"},
+        execution=ExecutionMode.SYNC,
+        calendar_days=1,
+    )
+
+    assert record.status is ExperimentStatus.COMPLETED
+    assert record.result == {"metric": 1}

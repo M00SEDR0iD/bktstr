@@ -15,6 +15,8 @@ from uuid import uuid4
 
 import httpx
 
+from .validation import SemanticValidationError
+
 
 class ExperimentStatus(StrEnum):
     QUEUED = "queued"
@@ -233,7 +235,7 @@ class ExperimentStore:
                 WHERE idempotency_key IS NOT NULL
                 """
             )
-        self._reconcile_artifacts()
+        self.reconcile_artifacts()
 
     @staticmethod
     def _write_json(destination: Path, canonical_json: str) -> None:
@@ -276,6 +278,37 @@ class ExperimentStore:
         # Windows development volumes; the manifest still records file digests.
         return digest
 
+    @classmethod
+    def _manifest_for(cls, row: sqlite3.Row) -> dict[str, Any]:
+        files = cls._artifact_files(row)
+        return {
+            "generation": row["artifact_generation"],
+            "status": row["status"],
+            "files": {
+                name: hashlib.sha256(contents.encode("utf-8")).hexdigest()
+                for name, contents in sorted(files.items())
+            },
+        }
+
+    def _validated_manifest(self, row: sqlite3.Row) -> Mapping[str, Any] | None:
+        generation = row["artifact_generation"]
+        if not isinstance(generation, str) or not generation:
+            return None
+        artifact_dir = self.artifacts_root / row["experiment_id"]
+        try:
+            manifest = json.loads(
+                (artifact_dir / "manifest.json").read_text(encoding="utf-8")
+            )
+            if manifest != self._manifest_for(row):
+                return None
+            generation_dir = artifact_dir / "generations" / generation
+            for filename, contents in self._artifact_files(row).items():
+                if (generation_dir / filename).read_text(encoding="utf-8") != contents:
+                    return None
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        return manifest
+
     def _set_artifact_generation(
         self, connection: sqlite3.Connection, experiment_id: str
     ) -> sqlite3.Row:
@@ -288,40 +321,37 @@ class ExperimentStore:
         return self._load_row(connection, experiment_id)
 
     def _publish_artifact_generation(self, experiment_id: str) -> None:
-        """Publish only a fully committed generation, then atomically move its manifest."""
-        with self._connect() as connection:
-            row = self._load_row(connection, experiment_id)
-        generation = row["artifact_generation"]
-        if not isinstance(generation, str) or not generation:
-            return
-        files = self._artifact_files(row)
-        artifact_dir = self.artifacts_root / experiment_id
-        staging = self.artifacts_root / ".staging" / f"{experiment_id}.{uuid4().hex}"
+        """Publish the authoritative generation while serializing lifecycle writers."""
+        staging: Path | None = None
         try:
-            for filename, contents in files.items():
-                self._write_json(staging / filename, contents)
-            generation_dir = artifact_dir / "generations" / generation
-            generation_dir.parent.mkdir(parents=True, exist_ok=True)
-            if not generation_dir.exists():
-                os.replace(staging, generation_dir)
-            manifest = {
-                "generation": generation,
-                "status": row["status"],
-                "files": {
-                    name: hashlib.sha256(contents.encode("utf-8")).hexdigest()
-                    for name, contents in sorted(files.items())
-                },
-            }
-            # A later state transition may have committed while this generation
-            # was staged. It may remain as an unreferenced immutable directory,
-            # but can never replace the current manifest.
             with self._connect() as connection:
-                current = self._load_row(connection, experiment_id)
-            if current["artifact_generation"] != generation:
-                return
-            self._write_json(artifact_dir / "manifest.json", _canonical_json(manifest))
+                connection.execute("BEGIN IMMEDIATE")
+                row = self._load_row(connection, experiment_id)
+                generation = row["artifact_generation"]
+                if not isinstance(generation, str) or not generation:
+                    connection.execute("COMMIT")
+                    return
+                files = self._artifact_files(row)
+                artifact_dir = self.artifacts_root / experiment_id
+                staging = (
+                    self.artifacts_root
+                    / ".staging"
+                    / f"{experiment_id}.{uuid4().hex}"
+                )
+                for filename, contents in files.items():
+                    self._write_json(staging / filename, contents)
+                generation_dir = artifact_dir / "generations" / generation
+                generation_dir.parent.mkdir(parents=True, exist_ok=True)
+                if not generation_dir.exists():
+                    os.replace(staging, generation_dir)
+                    staging = None
+                self._write_json(
+                    artifact_dir / "manifest.json",
+                    _canonical_json(self._manifest_for(row)),
+                )
+                connection.execute("COMMIT")
         finally:
-            if staging.exists():
+            if staging is not None and staging.exists():
                 for child in sorted(staging.rglob("*"), reverse=True):
                     if child.is_file():
                         child.unlink()
@@ -329,14 +359,46 @@ class ExperimentStore:
                         child.rmdir()
                 staging.rmdir()
 
-    def _reconcile_artifacts(self) -> None:
-        """Rebuild any missing manifest from committed SQLite state at startup."""
+    def _best_effort_publish(self, experiment_id: str) -> bool:
+        try:
+            self._publish_artifact_generation(experiment_id)
+        except Exception:
+            return False
+        return True
+
+    def reconcile_artifacts(self, experiment_id: str | None = None) -> int:
+        """Repair stale projections from SQLite without re-running experiments."""
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT experiment_id FROM experiments WHERE artifact_generation IS NOT NULL"
-            ).fetchall()
+            if experiment_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM experiments WHERE artifact_generation IS NOT NULL"
+                ).fetchall()
+            else:
+                rows = [self._load_row(connection, experiment_id)]
+        repaired = 0
         for row in rows:
-            self._publish_artifact_generation(row["experiment_id"])
+            if self._validated_manifest(row) is None and self._best_effort_publish(
+                row["experiment_id"]
+            ):
+                with self._connect() as connection:
+                    current = self._load_row(connection, row["experiment_id"])
+                if self._validated_manifest(current) is not None:
+                    repaired += 1
+        return repaired
+
+    def load_artifact_manifest(self, experiment_id: str) -> Mapping[str, Any]:
+        """Return only a manifest validated against authoritative SQLite state."""
+        self.reconcile_artifacts(experiment_id)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._load_row(connection, experiment_id)
+            manifest = self._validated_manifest(row)
+            connection.execute("COMMIT")
+        if manifest is None:
+            raise OSError(
+                f"Artifact projection for experiment {experiment_id} is unavailable."
+            )
+        return _freeze(dict(manifest))
 
     @staticmethod
     def _record(row: sqlite3.Row) -> ExperimentRecord:
@@ -423,7 +485,7 @@ class ExperimentStore:
                 )
                 row = self._set_artifact_generation(connection, experiment_id)
                 connection.execute("COMMIT")
-            self._publish_artifact_generation(experiment_id)
+            self._best_effort_publish(experiment_id)
             return self._record(row), True
         except Exception:
             # A failed transaction must not leave this connection holding a lock.
@@ -485,7 +547,7 @@ class ExperimentStore:
             )
             record = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-        self._publish_artifact_generation(experiment_id)
+        self._best_effort_publish(experiment_id)
         return self._record(record), True
 
     def load_experiment(self, experiment_id: str) -> ExperimentRecord:
@@ -509,7 +571,7 @@ class ExperimentStore:
             )
             claimed = self._set_artifact_generation(connection, row["experiment_id"])
             connection.execute("COMMIT")
-        self._publish_artifact_generation(claimed["experiment_id"])
+        self._best_effort_publish(claimed["experiment_id"])
         return self._record(claimed)
 
     def claim(self, experiment_id: str) -> ExperimentRecord:
@@ -526,7 +588,7 @@ class ExperimentStore:
             )
             claimed = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-        self._publish_artifact_generation(experiment_id)
+        self._best_effort_publish(experiment_id)
         return self._record(claimed)
 
     def recover_incomplete(self) -> int:
@@ -548,7 +610,7 @@ class ExperimentStore:
                 self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
         for experiment_id in running_ids:
-            self._publish_artifact_generation(experiment_id)
+            self._best_effort_publish(experiment_id)
         return cursor.rowcount
 
     def complete(
@@ -587,7 +649,7 @@ class ExperimentStore:
             )
             completed = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-        self._publish_artifact_generation(experiment_id)
+        self._best_effort_publish(experiment_id)
         return self._record(completed)
 
     def fail(self, experiment_id: str, error: Mapping[str, Any]) -> ExperimentRecord:
@@ -611,7 +673,7 @@ class ExperimentStore:
             )
             failed = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
-        self._publish_artifact_generation(experiment_id)
+        self._best_effort_publish(experiment_id)
         return self._record(failed)
 
 
@@ -686,6 +748,15 @@ class ExperimentWorker:
                 record.experiment_id,
                 {"code": exc.code, "message": str(exc), "details": exc.details},
             )
+        except SemanticValidationError as exc:
+            return self.store.fail(
+                record.experiment_id,
+                {
+                    "code": "invalid_request",
+                    "message": str(exc),
+                    "details": {"fields": list(exc.fields)},
+                },
+            )
         except ValueError as exc:
             return self.store.fail(
                 record.experiment_id,
@@ -722,6 +793,7 @@ class ExperimentWorker:
             )
 
     def run_one(self) -> ExperimentRecord | None:
+        self.store.reconcile_artifacts()
         record = self.store.claim_next()
         return None if record is None else self._execute(record)
 

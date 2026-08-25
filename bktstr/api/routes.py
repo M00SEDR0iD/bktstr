@@ -28,6 +28,7 @@ from bktstr.services.experiments import (
     submit,
 )
 from bktstr.services.regimes import RegimeInput
+from bktstr.services.validation import SemanticValidationError
 from bktstr.services.data import inspect_market_data
 
 from .auth import require_api_key
@@ -147,38 +148,53 @@ def _execute_backtest_experiment(
 
 
 def _parameter_sweep_input(request: ParameterSweepCreate) -> ParameterSweepInput:
-    return ParameterSweepInput(
-        base=_backtest_input(request.base),
-        grid=request.grid,
-        objective=request.objective,
-        execution=request.execution.value,
-    )
+    try:
+        return ParameterSweepInput(
+            base=_backtest_input(request.base),
+            grid=request.grid,
+            objective=request.objective,
+            execution=request.execution.value,
+        )
+    except SemanticValidationError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise SemanticValidationError(str(exc), ("grid",)) from exc
 
 
 def _compare_input(request: CompareCreate) -> CompareInput:
-    return CompareInput(
-        candidates=tuple(
-            NamedVariantInput(candidate.name, _backtest_input(candidate.backtest))
-            if isinstance(candidate, NamedVariantCreate)
-            else candidate
-            for candidate in request.candidates
-        ),
-        execution=request.execution.value,
-    )
+    try:
+        return CompareInput(
+            candidates=tuple(
+                NamedVariantInput(candidate.name, _backtest_input(candidate.backtest))
+                if isinstance(candidate, NamedVariantCreate)
+                else candidate
+                for candidate in request.candidates
+            ),
+            execution=request.execution.value,
+        )
+    except SemanticValidationError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise SemanticValidationError(str(exc), ("candidates",)) from exc
 
 
 def _regime_comparison_input(
     request: RegimeComparisonCreate,
 ) -> RegimeComparisonInput:
-    return RegimeComparisonInput(
-        base=_backtest_input(request.base),
-        labels=tuple(
-            RegimeLabelInput(item.label, item.start, item.end, item.rule)
-            for item in request.labels
-        ),
-        disjoint_periods=request.disjoint_periods,
-        execution=request.execution.value,
-    )
+    try:
+        return RegimeComparisonInput(
+            base=_backtest_input(request.base),
+            labels=tuple(
+                RegimeLabelInput(item.label, item.start, item.end, item.rule)
+                for item in request.labels
+            ),
+            disjoint_periods=request.disjoint_periods,
+            execution=request.execution.value,
+        )
+    except SemanticValidationError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise SemanticValidationError(str(exc), ("labels",)) from exc
 
 
 def _execute_parameter_sweep_experiment(

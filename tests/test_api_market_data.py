@@ -7,6 +7,7 @@ import pytest
 
 import bktstr.api.routes as api_routes
 from bktstr.api.app import create_app
+from bktstr.services.validation import SemanticValidationError
 
 
 AUTH = {"Authorization": "Bearer test-key"}
@@ -76,7 +77,9 @@ def test_market_data_rejects_cursor_for_different_canonical_request(monkeypatch,
 
     async def fixture_market_data(**kwargs):
         if kwargs["cursor"] == "wrong-identity":
-            raise ValueError("cursor does not match the requested market data")
+            raise SemanticValidationError(
+                "cursor does not match the requested market data", ("cursor",)
+            )
         return _market_page(cursor=kwargs["cursor"])
 
     monkeypatch.setattr(
@@ -99,6 +102,7 @@ def test_market_data_validates_page_bounds_and_openapi_contract(monkeypatch, tmp
         document = client.get("/openapi.json").json()
 
     assert invalid.status_code == 422
+    assert invalid.json()["error"]["details"]["fields"] == ["limit"]
     operation = document["paths"]["/api/v1/market-data"]["get"]
     assert operation["responses"]["200"]["content"]["application/json"]["schema"][
         "$ref"

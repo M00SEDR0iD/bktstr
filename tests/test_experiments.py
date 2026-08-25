@@ -85,24 +85,85 @@ def test_failed_artifact_publish_never_surfaces_an_uncommitted_terminal_generati
     def interrupted(*_args, **_kwargs):
         raise OSError("simulated publish interruption")
 
+    publish = store._publish_artifact_generation
     monkeypatch.setattr(store, "_publish_artifact_generation", interrupted)
-    with pytest.raises(OSError, match="publish interruption"):
-        store.complete(record.experiment_id, {"metrics": {"trade_count": 1}}, {"source": "fixture"})
+    completed = store.complete(
+        record.experiment_id,
+        {"metrics": {"trade_count": 1}},
+        {"source": "fixture"},
+    )
 
     # SQLite is authoritative and the last manifest is still explicitly nonterminal.
+    assert completed.status is ExperimentStatus.COMPLETED
     assert store.load_experiment(record.experiment_id).status is ExperimentStatus.COMPLETED
     assert json.loads(
         (tmp_path / "artifacts" / record.experiment_id / "manifest.json").read_text("utf-8")
     ) == previous_manifest
 
-    reopened = ExperimentStore(tmp_path)
-    manifest = json.loads(
-        (tmp_path / "artifacts" / record.experiment_id / "manifest.json").read_text("utf-8")
-    )
+    monkeypatch.setattr(store, "_publish_artifact_generation", publish)
+    assert store.reconcile_artifacts(record.experiment_id) == 1
+    manifest = dict(store.load_artifact_manifest(record.experiment_id))
     assert manifest["status"] == "completed"
     generation = tmp_path / "artifacts" / record.experiment_id / "generations" / manifest["generation"]
     assert json.loads((generation / "result.json").read_text("utf-8")) == {"metrics": {"trade_count": 1}}
-    assert reopened.load_experiment(record.experiment_id).status is ExperimentStatus.COMPLETED
+    assert store.load_experiment(record.experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_manifest_publication_cannot_overwrite_a_later_terminal_generation(
+    tmp_path, monkeypatch
+):
+    # Break caught: an older running publication could pass its generation check,
+    # pause, and overwrite the completed manifest after the terminal transition.
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment(
+        "backtest", {"symbol": "NVDA"}, "async", None
+    )
+    original_write = store._write_json
+    running_manifest_ready = Event()
+    allow_running_manifest = Event()
+    completed_manifest_published = Event()
+    delayed_once = False
+
+    def delay_running_manifest(destination, canonical_json):
+        nonlocal delayed_once
+        payload = json.loads(canonical_json)
+        if (
+            destination.name == "manifest.json"
+            and payload["status"] == "running"
+            and not delayed_once
+        ):
+            delayed_once = True
+            running_manifest_ready.set()
+            assert allow_running_manifest.wait(2)
+        original_write(destination, canonical_json)
+        if destination.name == "manifest.json" and payload["status"] == "completed":
+            completed_manifest_published.set()
+
+    monkeypatch.setattr(store, "_write_json", delay_running_manifest)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claim_future = executor.submit(store.claim, record.experiment_id)
+        assert running_manifest_ready.wait(2)
+        complete_future = executor.submit(
+            store.complete,
+            record.experiment_id,
+            {"metrics": {"trade_count": 1}},
+            {"source": "fixture"},
+        )
+        assert not completed_manifest_published.wait(0.25)
+        allow_running_manifest.set()
+        assert claim_future.result().status is ExperimentStatus.RUNNING
+        assert complete_future.result().status is ExperimentStatus.COMPLETED
+
+    manifest = json.loads(
+        (
+            tmp_path / "artifacts" / record.experiment_id / "manifest.json"
+        ).read_text("utf-8")
+    )
+    assert manifest["status"] == "completed"
+    assert dict(store.load_artifact_manifest(record.experiment_id)) == manifest
 
 
 def test_failed_creation_transaction_publishes_no_artifact_generation(tmp_path, monkeypatch):

@@ -94,6 +94,9 @@ def _research_result(value) -> BacktestResearchResult:
                     "coverage": {
                         "requested_start": value.start.isoformat(),
                         "requested_end": value.end.isoformat(),
+                        "available_start": value.start.isoformat(),
+                        "available_end": value.end.isoformat(),
+                        "observations": 3,
                         "bars": 3,
                     },
                     "cache": {"hit_days": 0, "miss_days": 1, "fetched_ranges": 1},
@@ -140,8 +143,77 @@ def test_completed_backtest_returns_typed_experiment(monkeypatch, tmp_path):
     assert market_data["coverage"] == {
         "requested_start": "2026-08-17",
         "requested_end": "2026-08-17",
+        "available_start": "2026-08-17",
+        "available_end": "2026-08-17",
+        "observations": 3,
         "bars": 3,
     }
+
+
+@pytest.mark.parametrize(
+    ("body", "fields"),
+    [
+        ({**BACKTEST_BODY, "side": "flat"}, ["side"]),
+        (
+            {
+                **BACKTEST_BODY,
+                "strategy": {**BACKTEST_BODY["strategy"], "id": "unknown.strategy"},
+            },
+            ["strategy.id"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "strategy": {**BACKTEST_BODY["strategy"], "version": "9.9.9"},
+            },
+            ["strategy.version"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "strategy": {
+                    **BACKTEST_BODY["strategy"],
+                    "parameters": {"execution_model": "other"},
+                },
+            },
+            ["strategy.parameters.execution_model"],
+        ),
+        (
+            {
+                **BACKTEST_BODY,
+                "strategy": {
+                    **BACKTEST_BODY["strategy"],
+                    "parameters": {"mystery": 1},
+                },
+            },
+            ["strategy.parameters.mystery"],
+        ),
+        ({**BACKTEST_BODY, "entry": ""}, ["entry"]),
+        ({**BACKTEST_BODY, "entry": "not-a-rule"}, ["entry"]),
+        (
+            {
+                **BACKTEST_BODY,
+                "market": {
+                    **BACKTEST_BODY["market"],
+                    "start": "2026-08-18",
+                    "end": "2026-08-17",
+                },
+            },
+            ["market.start", "market.end"],
+        ),
+    ],
+)
+def test_semantic_backtest_errors_return_exact_fields_before_persistence(
+    monkeypatch, tmp_path, body, fields
+):
+    # Break caught: a valid semantic rejection could lose its typed field path
+    # and still enter the durable experiment queue.
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post("/api/v1/backtests", json=body, headers=AUTH)
+        assert client.app.state.experiment_store.claim_next() is None
+
+    assert response.status_code == 400
+    assert response.json()["error"]["details"]["fields"] == fields
 
 
 def test_async_idempotent_submission_can_be_polled(monkeypatch, tmp_path):

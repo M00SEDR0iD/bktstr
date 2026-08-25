@@ -23,6 +23,7 @@ from bktstr.strategies import ResolvedStrategy, baseline_strategy_registry
 from .data import normalize_market_request
 from .experiments import ExperimentStatus, ExperimentStore
 from .regimes import RegimeInput, normalize_regime_request
+from .validation import SemanticValidationError
 
 
 ParameterValue = float | int | str | bool | None
@@ -88,23 +89,73 @@ class BacktestInput:
             source=self.source,
         )
         if self.execution not in {"auto", "sync", "async"}:
-            raise ValueError("execution must be auto, sync, or async")
+            raise SemanticValidationError(
+                "execution must be auto, sync, or async", ("execution",)
+            )
         if not isinstance(self.parameters, Mapping):
-            raise TypeError("parameters must be a mapping")
+            raise SemanticValidationError(
+                "parameters must be a mapping", ("strategy.parameters",)
+            )
         protected = sorted(set(self.parameters) & _PROTECTED_PARAMETERS)
         if protected:
-            raise ValueError(f"{protected[0]} is not overridable")
+            raise SemanticValidationError(
+                f"{protected[0]} is not overridable",
+                (f"strategy.parameters.{protected[0]}",),
+            )
         ambiguous = sorted(set(self.parameters) & (_DIRECT_PARAMETERS | _REGIME_PARAMETERS))
         if ambiguous:
-            raise ValueError(
-                f"{ambiguous[0]} must use its dedicated typed request field"
+            raise SemanticValidationError(
+                f"{ambiguous[0]} must use its dedicated typed request field",
+                (f"strategy.parameters.{ambiguous[0]}",),
             )
 
-        definition = baseline_strategy_registry().require(
-            self.strategy_id, self.strategy_version
-        )
+        registry = baseline_strategy_registry()
+        definition = registry.get(self.strategy_id, self.strategy_version)
+        if definition is None:
+            field_path = (
+                "strategy.version"
+                if any(identity[0] == self.strategy_id for identity in registry.definitions)
+                else "strategy.id"
+            )
+            raise SemanticValidationError(
+                f"unknown strategy {self.strategy_id!r} version {self.strategy_version!r}",
+                (field_path,),
+            )
+        definitions = definition.parameter_definitions
+        unknown = sorted(set(self.parameters) - set(definitions))
+        if unknown:
+            raise SemanticValidationError(
+                f"undeclared strategy parameter: {unknown[0]}",
+                (f"strategy.parameters.{unknown[0]}",),
+            )
+        for name, parameter_value in self.parameters.items():
+            parameter = definitions[name]
+            if not parameter.overridable:
+                raise SemanticValidationError(
+                    f"{name} is not overridable",
+                    (f"strategy.parameters.{name}",),
+                )
+            try:
+                parameter.validate(parameter_value)
+            except (TypeError, ValueError) as exc:
+                raise SemanticValidationError(
+                    str(exc), (f"strategy.parameters.{name}",)
+                ) from exc
+        try:
+            definitions["side"].validate(self.side)
+        except (TypeError, ValueError) as exc:
+            raise SemanticValidationError(str(exc), ("side",)) from exc
+        try:
+            parse_rules(self.entry)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise SemanticValidationError(str(exc), ("entry",)) from exc
         default_rules = definition.parameter_definitions["regime_rules"].default
-        regime = normalize_regime_request(self.regime, default_rules=default_rules)
+        try:
+            regime = normalize_regime_request(self.regime, default_rules=default_rules)
+        except SemanticValidationError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise SemanticValidationError(str(exc), ("regime",)) from exc
         overrides = dict(self.parameters)
         overrides.update(
             {
@@ -342,6 +393,102 @@ def _regime_configuration(value: RegimeInput | None) -> Mapping[str, Any]:
     )
 
 
+def _subject_intraday_materializations(
+    value: BacktestInput, dependency_trace: Any
+) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(dependency_trace, tuple | list):
+        return ()
+    selected: list[Mapping[str, Any]] = []
+    for dependency in dependency_trace:
+        if not isinstance(dependency, Mapping):
+            continue
+        materializations = dependency.get("materializations", ())
+        if not isinstance(materializations, tuple | list):
+            continue
+        for materialization in materializations:
+            if not isinstance(materialization, Mapping):
+                continue
+            definition = materialization.get("definition")
+            scope = materialization.get("scope")
+            if not isinstance(definition, Mapping) or not isinstance(scope, Mapping):
+                continue
+            if (
+                definition.get("kind") != "source"
+                or definition.get("tier") != "A"
+                or scope.get("purpose") != "intraday"
+                or scope.get("role") != "subject"
+                or scope.get("symbol") != value.symbol
+                or scope.get("timeframe") != value.timeframe
+                or not isinstance(materialization.get("digest"), str)
+            ):
+                continue
+            selected.append(materialization)
+    return tuple(
+        sorted(
+            selected,
+            key=lambda item: (
+                str(item["definition"].get("id")),
+                str(item["definition"].get("version")),
+            ),
+        )
+    )
+
+
+def _market_materialization_identity(
+    materializations: tuple[Mapping[str, Any], ...],
+) -> tuple[Mapping[str, Any], ...]:
+    definition_keys = (
+        "id",
+        "version",
+        "kind",
+        "tier",
+        "plugin_id",
+        "plugin_version",
+        "formula_version",
+    )
+    scope_keys = ("purpose", "role", "symbol", "timeframe")
+    return tuple(
+        {
+            "definition": {
+                key: item["definition"].get(key) for key in definition_keys
+            },
+            "digest": item["digest"],
+            "scope": {key: item["scope"].get(key) for key in scope_keys},
+        }
+        for item in materializations
+    )
+
+
+def _actual_market_coverage(
+    materializations: tuple[Mapping[str, Any], ...], *, bars: int
+) -> Mapping[str, Any]:
+    preferred = next(
+        (
+            item
+            for item in materializations
+            if item["definition"].get("id") == "market.subject.close"
+        ),
+        materializations[0] if materializations else None,
+    )
+    coverage = preferred.get("coverage") if preferred is not None else None
+    if not isinstance(coverage, Mapping):
+        return {
+            "available_start": None,
+            "available_end": None,
+            "observations": bars,
+        }
+    observations = coverage.get("observations")
+    return {
+        "available_start": coverage.get("available_start"),
+        "available_end": coverage.get("available_end"),
+        "observations": (
+            observations
+            if isinstance(observations, int) and not isinstance(observations, bool)
+            else bars
+        ),
+    }
+
+
 def project_research_result(
     value: BacktestInput,
     legacy_result: Mapping[str, Any],
@@ -427,19 +574,22 @@ def project_research_result(
     governed = execution_provenance or {}
     dependency_trace = governed.get("dependency_trace", ())
     attachments = governed.get("attachments", {})
+    subject_materializations = _subject_intraday_materializations(
+        value, dependency_trace
+    )
+    actual_coverage = _actual_market_coverage(subject_materializations, bars=bars)
     identity = {
-        "provider": provider,
-        "provider_version": data.get("version") or data.get("data_version"),
-        "market": {
+        "source": {
+            "provider": provider,
+            "version": data.get("version") or data.get("data_version"),
+        },
+        "scope": {
             "symbol": value.symbol,
             "start": value.start.isoformat(),
             "end": value.end.isoformat(),
             "timeframe": value.timeframe,
         },
-        "coverage": {"bars": bars},
-        "cache": cache,
-        "dependency_trace": dependency_trace,
-        "attachments": attachments,
+        "materializations": _market_materialization_identity(subject_materializations),
     }
     provenance = ResearchProvenance(
         strategy=configuration.strategy,
@@ -452,6 +602,7 @@ def project_research_result(
                 "coverage": {
                     "requested_start": value.start.isoformat(),
                     "requested_end": value.end.isoformat(),
+                    **actual_coverage,
                     "bars": bars,
                 },
                 "cache": cache,

@@ -20,6 +20,7 @@ from bktstr.services.experiments import (
     ExperimentWorker,
     IdempotencyConflictError,
 )
+from bktstr.services.validation import SemanticValidationError
 
 from .routes import api_router, experiment_operations
 from .schemas import ApiError, ErrorResponse, HealthResponse
@@ -46,24 +47,18 @@ def _error_response(
     return JSONResponse(status_code=status_code, content={"error": error.model_dump()}, headers=headers)
 
 
-def _value_error_fields(exc: ValueError) -> list[str]:
-    """Map service-level semantic validation back to stable request field paths."""
-    message = str(exc).lower()
-    for marker, fields in (
-        ("cursor", ["cursor"]),
-        ("grid", ["grid"]),
-        ("candidate", ["candidates"]),
-        ("label", ["labels"]),
-        ("execution", ["execution"]),
-        ("idempotency", ["Idempotency-Key"]),
-        ("benchmark", ["regime", "benchmark"]),
-        ("source", ["market", "source"]),
-        ("timeframe", ["market", "timeframe"]),
-        ("symbol", ["market", "symbol"]),
-    ):
-        if marker in message:
-            return fields
-    return []
+def _validation_error_fields(exc: RequestValidationError) -> list[str]:
+    fields: list[str] = []
+    for error in exc.errors():
+        location = tuple(
+            str(part)
+            for part in error.get("loc", ())
+            if part not in {"body", "query", "path", "header"}
+        )
+        path = ".".join(location)
+        if path and path not in fields:
+            fields.append(path)
+    return fields or ["request"]
 
 
 @asynccontextmanager
@@ -119,7 +114,23 @@ def create_app() -> FastAPI:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         return _error_response(
-            request, 422, "validation_error", "Request validation failed.", {"fields": exc.errors()}
+            request,
+            422,
+            "validation_error",
+            "Request validation failed.",
+            {"fields": _validation_error_fields(exc)},
+        )
+
+    @app.exception_handler(SemanticValidationError)
+    async def handle_semantic_validation_error(
+        request: Request, exc: SemanticValidationError
+    ) -> JSONResponse:
+        return _error_response(
+            request,
+            400,
+            "invalid_request",
+            str(exc),
+            {"fields": list(exc.fields)},
         )
 
     @app.exception_handler(ValueError)
@@ -129,7 +140,7 @@ def create_app() -> FastAPI:
             400,
             "invalid_request",
             str(exc),
-            {"fields": _value_error_fields(exc)},
+            {"fields": ["request"]},
         )
 
     @app.exception_handler(IdempotencyConflictError)

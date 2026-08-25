@@ -98,6 +98,77 @@ def _one_trade_legacy_result() -> dict:
     }
 
 
+def _governed_subject_provenance(
+    *,
+    digest: str = "a" * 64,
+    available_start: str = "2026-08-17",
+    available_end: str = "2026-08-17",
+    observations: int = 3,
+    cache: dict | None = None,
+    elapsed_seconds: float = 0.01,
+) -> dict:
+    return {
+        "dependency_trace": (
+            {
+                "id": "market.subject.close",
+                "tier": "A",
+                "materializations": (
+                    {
+                        "artifact_id": (
+                            "market.subject.close@intraday:subject:1m:"
+                            "2026-08-17:2026-08-18"
+                        ),
+                        "definition": {
+                            "id": "market.subject.close",
+                            "version": "1.0.0",
+                            "kind": "source",
+                            "tier": "A",
+                            "column": "close",
+                        },
+                        "digest": digest,
+                        "coverage": {
+                            "requested_start": "2026-08-17",
+                            "requested_end": "2026-08-18",
+                            "available_start": available_start,
+                            "available_end": available_end,
+                            "observations": observations,
+                        },
+                        "cache": cache
+                        or {"hit_days": 0, "miss_days": 1, "fetched_ranges": 1},
+                        "scope": {
+                            "purpose": "intraday",
+                            "role": "subject",
+                            "symbol": "NVDA",
+                            "timeframe": "1m",
+                        },
+                    },
+                ),
+            },
+            {
+                "id": "technical.vwap",
+                "tier": "B",
+                "materializations": (
+                    {
+                        "digest": "b" * 64,
+                        "cache": {"hit": True, "elapsed_seconds": elapsed_seconds},
+                        "scope": {
+                            "purpose": "intraday_features",
+                            "role": "subject",
+                            "symbol": "NVDA",
+                            "timeframe": "1m",
+                        },
+                    },
+                ),
+            },
+        ),
+        "attachments": {
+            "regime": {
+                "cache": {"hit": True, "elapsed_seconds": elapsed_seconds}
+            }
+        },
+    }
+
+
 def test_typed_backtest_projects_research_fields_and_calls_legacy_once(monkeypatch):
     # Break caught: the service could re-run execution or omit reproducible trade context.
     calls = []
@@ -128,6 +199,9 @@ def test_typed_backtest_projects_research_fields_and_calls_legacy_once(monkeypat
     assert result.provenance.market_data["coverage"] == {
         "requested_start": "2026-08-17",
         "requested_end": "2026-08-17",
+        "available_start": None,
+        "available_end": None,
+        "observations": 3,
         "bars": 3,
     }
     assert result.provenance.market_data["cache"] == {
@@ -179,6 +253,73 @@ def test_zero_trade_projection_returns_empty_trades_and_explicit_null_metrics():
     assert result.metrics.trade_count == 0
     assert result.metrics.profit_factor is None
     assert result.metrics.sharpe is None
+
+
+def test_market_snapshot_identity_ignores_cache_timing_and_attachments():
+    # Break caught: cache hits or timing diagnostics could identify executions
+    # instead of the immutable subject intraday market data.
+    value = BacktestInput(
+        **{**BASE_INPUT, "start": date(2026, 8, 17), "end": date(2026, 8, 18)}
+    )
+    miss = project_research_result(
+        value,
+        _one_trade_legacy_result(),
+        execution_provenance=_governed_subject_provenance(
+            cache={"hit_days": 0, "miss_days": 1, "fetched_ranges": 1},
+            elapsed_seconds=0.01,
+        ),
+    )
+    hit = project_research_result(
+        value,
+        _one_trade_legacy_result(),
+        execution_provenance=_governed_subject_provenance(
+            cache={"hit_days": 1, "miss_days": 0, "fetched_ranges": 0},
+            elapsed_seconds=99.0,
+        ),
+    )
+    changed = project_research_result(
+        value,
+        _one_trade_legacy_result(),
+        execution_provenance=_governed_subject_provenance(
+            digest="c" * 64,
+            cache={"hit_days": 1, "miss_days": 0, "fetched_ranges": 0},
+            elapsed_seconds=99.0,
+        ),
+    )
+
+    assert miss.provenance.market_data["snapshot_id"] == hit.provenance.market_data[
+        "snapshot_id"
+    ]
+    assert miss.provenance.market_data["snapshot_id"] != changed.provenance.market_data[
+        "snapshot_id"
+    ]
+
+
+def test_market_coverage_uses_governed_subject_intraday_materialization():
+    # Break caught: requested bounds or legacy counters could masquerade as the
+    # actual governed market observations available to the experiment.
+    value = BacktestInput(
+        **{**BASE_INPUT, "start": date(2026, 8, 17), "end": date(2026, 8, 18)}
+    )
+
+    result = project_research_result(
+        value,
+        _one_trade_legacy_result(),
+        execution_provenance=_governed_subject_provenance(
+            available_start="2026-08-17",
+            available_end="2026-08-17",
+            observations=3,
+        ),
+    )
+
+    assert result.provenance.market_data["coverage"] == {
+        "requested_start": "2026-08-17",
+        "requested_end": "2026-08-18",
+        "available_start": "2026-08-17",
+        "available_end": "2026-08-17",
+        "observations": 3,
+        "bars": 3,
+    }
 
 
 def test_non_overridable_strategy_parameter_is_rejected():

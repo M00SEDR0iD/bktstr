@@ -527,6 +527,9 @@ class MarketDataCoverageResponse(BaseModel):
 
     requested_start: date
     requested_end: date
+    available_start: date | None
+    available_end: date | None
+    observations: int
     bars: int
 
 
