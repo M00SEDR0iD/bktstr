@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from uuid import uuid4
+
+import httpx
 
 
 class ExperimentStatus(StrEnum):
@@ -37,12 +40,76 @@ class ExperimentNotFoundError(KeyError):
     """Raised when an experiment identifier is not present in this store."""
 
 
+class ExecutionNotAvailableError(ValueError):
+    """Raised when a client requests inline execution outside the safe policy."""
+
+    code = "execution_not_available"
+
+    def __init__(self, message: str = "This operation cannot run synchronously.") -> None:
+        super().__init__(message)
+
+
+class ExperimentOperationError(RuntimeError):
+    """An expected operation failure safe to persist in an experiment envelope."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.details = dict(details or {})
+
+
+@dataclass(frozen=True)
+class ExecutionPolicy:
+    """Select synchronous execution only for bounded individual backtests."""
+
+    sync_max_calendar_days: int = 31
+
+    def __post_init__(self) -> None:
+        if self.sync_max_calendar_days < 1:
+            raise ValueError("sync_max_calendar_days must be at least 1.")
+
+    @classmethod
+    def from_environment(cls) -> "ExecutionPolicy":
+        configured = os.getenv("BKTSTR_SYNC_MAX_CALENDAR_DAYS")
+        return cls(sync_max_calendar_days=int(configured) if configured is not None else 31)
+
+    def choose(
+        self,
+        operation: str,
+        execution: ExecutionMode | str,
+        *,
+        calendar_days: int | None,
+    ) -> ExecutionMode:
+        try:
+            requested = ExecutionMode(execution)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported execution mode: {execution!r}") from exc
+
+        can_run_inline = (
+            operation == "backtest"
+            and calendar_days is not None
+            and 0 <= calendar_days <= self.sync_max_calendar_days
+        )
+        if requested is ExecutionMode.ASYNC:
+            return ExecutionMode.ASYNC
+        if requested is ExecutionMode.SYNC:
+            if can_run_inline:
+                return ExecutionMode.SYNC
+            raise ExecutionNotAvailableError()
+        return ExecutionMode.SYNC if can_run_inline else ExecutionMode.ASYNC
+
+
 @dataclass(frozen=True)
 class ExperimentRecord:
     experiment_id: str
     operation: str
     status: ExperimentStatus
-    execution: str
+    execution: ExecutionMode
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -171,7 +238,7 @@ class ExperimentStore:
             experiment_id=row["experiment_id"],
             operation=row["operation"],
             status=ExperimentStatus(row["status"]),
-            execution=row["execution"],
+            execution=ExecutionMode(row["execution"]),
             created_at=_decode_timestamp(row["created_at"]),  # type: ignore[arg-type]
             started_at=_decode_timestamp(row["started_at"]),
             completed_at=_decode_timestamp(row["completed_at"]),
@@ -273,6 +340,33 @@ class ExperimentStore:
             connection.execute("COMMIT")
             return self._record(claimed)
 
+    def claim(self, experiment_id: str) -> ExperimentRecord:
+        """Claim one particular queued row for synchronous execution."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._load_row(connection, experiment_id)
+            if ExperimentStatus(row["status"]) is not ExperimentStatus.QUEUED:
+                raise ExperimentStateError(f"Experiment {experiment_id} is not queued.")
+            now = _timestamp()
+            connection.execute(
+                "UPDATE experiments SET status = ?, started_at = ? WHERE experiment_id = ?",
+                (ExperimentStatus.RUNNING.value, _encode_timestamp(now), experiment_id),
+            )
+            claimed = self._load_row(connection, experiment_id)
+            connection.execute("COMMIT")
+            return self._record(claimed)
+
+    def recover_incomplete(self) -> int:
+        """Return records abandoned by a prior process to the durable queue."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                "UPDATE experiments SET status = ?, started_at = NULL WHERE status = ?",
+                (ExperimentStatus.QUEUED.value, ExperimentStatus.RUNNING.value),
+            )
+            connection.execute("COMMIT")
+            return cursor.rowcount
+
     def complete(
         self,
         experiment_id: str,
@@ -367,3 +461,106 @@ def fail(
     store: ExperimentStore | None = None,
 ) -> ExperimentRecord:
     return (store or ExperimentStore()).fail(experiment_id, error)
+
+
+OperationHandler = Callable[[ExperimentRecord], tuple[Mapping[str, Any], Mapping[str, Any]]]
+
+
+class ExperimentWorker:
+    """Execute durable experiments from SQLite without making HTTP the lifecycle authority."""
+
+    def __init__(
+        self,
+        store: ExperimentStore,
+        operations: Mapping[str, OperationHandler],
+        *,
+        poll_interval_seconds: float = 0.1,
+    ) -> None:
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be positive.")
+        self.store = store
+        self.operations = dict(operations)
+        self.poll_interval_seconds = poll_interval_seconds
+
+    def recover_incomplete(self) -> int:
+        return self.store.recover_incomplete()
+
+    def _execute(self, record: ExperimentRecord) -> ExperimentRecord:
+        operation = self.operations.get(record.operation)
+        if operation is None:
+            return self.store.fail(
+                record.experiment_id,
+                {
+                    "code": "operation_not_registered",
+                    "message": "No handler is registered for this experiment operation.",
+                    "details": {"operation": record.operation},
+                },
+            )
+        try:
+            result, provenance = operation(record)
+        except ExperimentOperationError as exc:
+            return self.store.fail(
+                record.experiment_id,
+                {"code": exc.code, "message": str(exc), "details": exc.details},
+            )
+        except ValueError as exc:
+            return self.store.fail(
+                record.experiment_id,
+                {"code": "invalid_request", "message": str(exc), "details": {}},
+            )
+        except httpx.HTTPError:
+            return self.store.fail(
+                record.experiment_id,
+                {
+                    "code": "market_data_http_error",
+                    "message": "Market-data provider request failed.",
+                    "details": {},
+                },
+            )
+        except Exception:
+            return self.store.fail(
+                record.experiment_id,
+                {
+                    "code": "operation_failed",
+                    "message": "The experiment operation failed.",
+                    "details": {},
+                },
+            )
+        return self.store.complete(record.experiment_id, result, provenance)
+
+    def run_one(self) -> ExperimentRecord | None:
+        record = self.store.claim_next()
+        return None if record is None else self._execute(record)
+
+    def run(self, experiment_id: str) -> ExperimentRecord:
+        return self._execute(self.store.claim(experiment_id))
+
+    def run_forever(self, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
+            if self.run_one() is None:
+                stop_event.wait(self.poll_interval_seconds)
+
+
+def submit(
+    store: ExperimentStore,
+    operations: Mapping[str, OperationHandler],
+    operation: str,
+    request: Mapping[str, Any],
+    *,
+    execution: ExecutionMode | str = ExecutionMode.AUTO,
+    calendar_days: int | None,
+    idempotency_key: str | None = None,
+    policy: ExecutionPolicy | None = None,
+) -> ExperimentRecord:
+    """Create an experiment, completing only a safely bounded one inline."""
+    selected = (policy or ExecutionPolicy.from_environment()).choose(
+        operation, execution, calendar_days=calendar_days
+    )
+    record, created = store.create_experiment(operation, request, selected, idempotency_key)
+    if selected is ExecutionMode.SYNC and created:
+        return ExperimentWorker(store, operations).run(record.experiment_id)
+    return record
+
+
+def recover_incomplete(*, store: ExperimentStore | None = None) -> int:
+    return (store or ExperimentStore()).recover_incomplete()

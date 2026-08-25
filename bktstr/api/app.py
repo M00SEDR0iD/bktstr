@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import threading
+from contextlib import asynccontextmanager
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, AsyncIterator
 from uuid import uuid4
 
 import httpx
@@ -11,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from bktstr import __version__
 from bktstr.server import health_payload
+from bktstr.services.experiments import ExperimentStore, ExperimentWorker
 
 from .routes import api_router
 from .schemas import ApiError, HealthResponse
@@ -37,8 +40,31 @@ def _error_response(
     return JSONResponse(status_code=status_code, content={"error": error.model_dump()}, headers=headers)
 
 
+@asynccontextmanager
+async def experiment_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Recover durable work before one in-process worker begins polling it."""
+    worker = ExperimentWorker(ExperimentStore(), {})
+    worker.recover_incomplete()
+    stop_event = threading.Event()
+    worker_thread = threading.Thread(
+        target=worker.run_forever,
+        args=(stop_event,),
+        daemon=True,
+        name="bktstr-experiment-worker",
+    )
+    app.state.experiment_store = worker.store
+    app.state.experiment_worker = worker
+    app.state.experiment_worker_stop_event = stop_event
+    worker_thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        worker_thread.join()
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="BKTSTR Research API", version=__version__)
+    app = FastAPI(title="BKTSTR Research API", version=__version__, lifespan=experiment_lifespan)
 
     @app.middleware("http")
     async def assign_request_id(
