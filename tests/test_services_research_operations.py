@@ -172,6 +172,10 @@ def test_parameter_sweep_is_deterministic_and_persists_linked_children(
         {"stop_pct": 2.0, "target_pct": 4.0},
     ]
     assert [item.score for item in result.variants] == [2.0, 2.0, 3.0, 3.0]
+    assert all(
+        item.provenance.strategy["id"] == "bktstr.bearish-regime-scalp"
+        for item in result.variants
+    )
     for item in result.variants:
         child = store.load_experiment(item.experiment_id)
         assert child.status is ExperimentStatus.COMPLETED

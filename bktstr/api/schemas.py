@@ -284,6 +284,18 @@ class SweepVariantResponse(BaseModel):
     parameters: dict[str, ParameterValue]
     score: float | None
     metrics: BacktestMetricsResponse
+    provenance: ResearchProvenanceResponse
+
+
+class ParameterSweepProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parent_experiment_id: str | None
+    objective: Literal[
+        "ev_per_trade", "profit_factor", "sharpe", "max_drawdown", "total_pnl"
+    ]
+    grid: dict[str, list[ParameterValue]]
+    child_experiment_ids: list[str]
 
 
 class ParameterSweepResult(BaseModel):
@@ -291,14 +303,14 @@ class ParameterSweepResult(BaseModel):
         "ev_per_trade", "profit_factor", "sharpe", "max_drawdown", "total_pnl"
     ]
     variants: list[SweepVariantResponse]
-    provenance: dict[str, Any]
+    provenance: ParameterSweepProvenanceResponse
 
 
 class ComparisonCandidateResponse(BaseModel):
     name: str
     experiment_id: str
     metrics: BacktestMetricsResponse
-    provenance: dict[str, Any]
+    provenance: ResearchProvenanceResponse
 
 
 class ComparisonItemResponse(BaseModel):
@@ -307,11 +319,19 @@ class ComparisonItemResponse(BaseModel):
     changed_inputs: list[str]
 
 
+class CompareProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parent_experiment_id: str | None
+    candidate_experiment_ids: list[str]
+    comparison_reference: str
+
+
 class CompareResult(BaseModel):
     candidates: list[ComparisonCandidateResponse]
     items: list[ComparisonItemResponse]
     metric_deltas: dict[str, dict[str, float | None]]
-    provenance: dict[str, Any]
+    provenance: CompareProvenanceResponse
 
 
 class RegimeComparisonItemResponse(BaseModel):
@@ -319,13 +339,31 @@ class RegimeComparisonItemResponse(BaseModel):
     experiment_id: str
     metrics: BacktestMetricsResponse
     trades: list[ResearchTradeResponse]
-    provenance: dict[str, Any]
+    provenance: ResearchProvenanceResponse
+
+
+class RegimeLabelProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    start: date
+    end: date
+    rule: str | None
+
+
+class RegimeComparisonProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parent_experiment_id: str | None
+    labels: list[RegimeLabelProvenanceResponse]
+    disjoint_periods: bool
+    child_experiment_ids: list[str]
 
 
 class RegimeComparisonResult(BaseModel):
     items: list[RegimeComparisonItemResponse]
     comparison_matrix: dict[str, dict[str, float | int | None]]
-    provenance: dict[str, Any]
+    provenance: RegimeComparisonProvenanceResponse
 
 
 class ExperimentError(BaseModel):
@@ -377,18 +415,21 @@ class ParameterSweepExperimentResponse(ExperimentEnvelope):
     operation: Literal["parameter_sweep"]
     request: ParameterSweepCreate
     result: ParameterSweepResult | None = None
+    provenance: ParameterSweepProvenanceResponse | None = None
 
 
 class CompareExperimentResponse(ExperimentEnvelope):
     operation: Literal["compare"]
     request: CompareCreate
     result: CompareResult | None = None
+    provenance: CompareProvenanceResponse | None = None
 
 
 class RegimeComparisonExperimentResponse(ExperimentEnvelope):
     operation: Literal["regime_comparison"]
     request: RegimeComparisonCreate
     result: RegimeComparisonResult | None = None
+    provenance: RegimeComparisonProvenanceResponse | None = None
 
 
 class PendingExperimentResponse(ExperimentEnvelope):

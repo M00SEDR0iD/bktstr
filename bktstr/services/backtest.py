@@ -515,6 +515,7 @@ class SweepVariantResult:
     parameters: Mapping[str, ParameterValue]
     score: float | None
     metrics: BacktestMetrics
+    provenance: ResearchProvenance
 
 
 @dataclass(frozen=True)
@@ -771,6 +772,7 @@ def run_parameter_sweep(
                 parameters=_immutable_mapping(dict(zip(names, candidates))),
                 score=getattr(result.metrics, value.objective),
                 metrics=result.metrics,
+                provenance=result.provenance,
             )
         )
     provenance = _immutable_mapping(

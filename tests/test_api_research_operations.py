@@ -151,3 +151,43 @@ def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
         "regime_comparison",
         "pending",
     }
+
+    schemas = document["components"]["schemas"]
+    assert schemas["SweepVariantResponse"]["properties"]["provenance"] == {
+        "$ref": "#/components/schemas/ResearchProvenanceResponse"
+    }
+    assert schemas["ComparisonCandidateResponse"]["properties"]["provenance"] == {
+        "$ref": "#/components/schemas/ResearchProvenanceResponse"
+    }
+    assert schemas["RegimeComparisonItemResponse"]["properties"]["provenance"] == {
+        "$ref": "#/components/schemas/ResearchProvenanceResponse"
+    }
+    for result_name, provenance_name in (
+        ("ParameterSweepResult", "ParameterSweepProvenanceResponse"),
+        ("CompareResult", "CompareProvenanceResponse"),
+        ("RegimeComparisonResult", "RegimeComparisonProvenanceResponse"),
+    ):
+        assert schemas[result_name]["properties"]["provenance"] == {
+            "$ref": f"#/components/schemas/{provenance_name}"
+        }
+
+    assert set(schemas["ParameterSweepProvenanceResponse"]["properties"]) == {
+        "parent_experiment_id",
+        "objective",
+        "grid",
+        "child_experiment_ids",
+    }
+    assert set(schemas["CompareProvenanceResponse"]["properties"]) == {
+        "parent_experiment_id",
+        "candidate_experiment_ids",
+        "comparison_reference",
+    }
+    assert set(schemas["RegimeComparisonProvenanceResponse"]["properties"]) == {
+        "parent_experiment_id",
+        "labels",
+        "disjoint_periods",
+        "child_experiment_ids",
+    }
+    assert schemas["RegimeComparisonProvenanceResponse"]["properties"]["labels"][
+        "items"
+    ] == {"$ref": "#/components/schemas/RegimeLabelProvenanceResponse"}
