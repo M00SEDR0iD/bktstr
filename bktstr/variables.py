@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field, fields as dataclass_fields, is_dataclass
 from datetime import date, time, timedelta
 from enum import Enum
-from numbers import Number
+from numbers import Number, Rational, Real
 from pathlib import PurePath
 from types import MappingProxyType
 from typing import Any
@@ -114,6 +115,21 @@ def _require_version(value: str) -> None:
             "version must be a semantic version",
             code="invalid_version",
             details={"version": value},
+        )
+
+
+def _require_expected_bound(value: Any, *, label: str) -> None:
+    if value is None:
+        return
+    valid_real = not isinstance(value, bool) and isinstance(value, Real)
+    finite = valid_real and (
+        isinstance(value, Rational) or math.isfinite(value)
+    )
+    if not finite:
+        raise VariableContractError(
+            f"{label} must be a finite real number",
+            code="invalid_expected_range",
+            details={"field": label, "provided_type": type(value).__name__},
         )
 
 
@@ -300,6 +316,8 @@ class ResearchVariableDefinition:
             raise VariableContractError("inputs must have unique variable IDs", code="duplicate_input")
         object.__setattr__(self, "inputs", inputs)
 
+        _require_expected_bound(self.expected_min, label="expected_min")
+        _require_expected_bound(self.expected_max, label="expected_max")
         if self.expected_min is not None and self.expected_max is not None and self.expected_min > self.expected_max:
             raise VariableContractError(
                 "expected_min cannot exceed expected_max",

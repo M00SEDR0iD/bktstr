@@ -57,6 +57,60 @@ def test_tier_b_definition_rejects_lower_trust_inputs():
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    (
+        ("expected_min", True),
+        ("expected_min", "0"),
+        ("expected_min", float("nan")),
+        ("expected_min", float("inf")),
+        ("expected_max", False),
+        ("expected_max", "1"),
+        ("expected_max", float("nan")),
+        ("expected_max", float("-inf")),
+    ),
+)
+def test_expected_range_rejects_each_invalid_one_sided_bound(
+    field: str, invalid_value: object
+):
+    # Break caught: validating only paired bounds could let one-sided booleans,
+    # strings, NaN, or infinities enter an immutable variable definition.
+    with pytest.raises(ValueError, match=f"{field} must be a finite real number") as raised:
+        ResearchVariableDefinition(
+            id="technical.range-check",
+            version="1.0.0",
+            kind=VariableKind.MEASUREMENT,
+            tier=DataTier.B,
+            column="range_check",
+            value_dtype="float64",
+            frequency="1d",
+            **{field: invalid_value},
+        )
+
+    assert raised.value.code == "invalid_expected_range"
+
+
+@pytest.mark.parametrize(
+    ("field", "valid_value"),
+    (("expected_min", -1), ("expected_max", 1.5)),
+)
+def test_expected_range_accepts_finite_one_sided_real_bound(
+    field: str, valid_value: float
+):
+    definition = ResearchVariableDefinition(
+        id="technical.range-check",
+        version="1.0.0",
+        kind=VariableKind.MEASUREMENT,
+        tier=DataTier.B,
+        column="range_check",
+        value_dtype="float64",
+        frequency="1d",
+        **{field: valid_value},
+    )
+
+    assert getattr(definition, field) == valid_value
+
+
 def test_snapshot_returns_a_defensive_series_copy():
     definition = ResearchVariableDefinition.source(
         id="market.subject.close",
