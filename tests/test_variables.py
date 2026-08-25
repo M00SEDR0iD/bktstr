@@ -1,0 +1,62 @@
+import pandas as pd
+import pytest
+
+from bktstr.variables import (
+    DataTier,
+    ReplicationSuggestionPolicy,
+    ResearchVariableDefinition,
+    ResearchVariableSnapshot,
+    VariableKind,
+    VariableRef,
+    inherited_tier,
+)
+
+
+def test_tier_inheritance_never_improves_trust():
+    assert inherited_tier((DataTier.A,), method_floor=DataTier.B) is DataTier.B
+    assert inherited_tier((DataTier.B, DataTier.C), method_floor=DataTier.B) is DataTier.C
+    assert inherited_tier((DataTier.A, DataTier.D), method_floor=DataTier.B) is DataTier.D
+
+
+def test_tier_b_definition_rejects_lower_trust_inputs():
+    with pytest.raises(ValueError, match="Tier B cannot depend on Tier C or Tier D"):
+        ResearchVariableDefinition(
+            id="sentiment.invalid",
+            version="1.0.0",
+            kind=VariableKind.MEASUREMENT,
+            tier=DataTier.B,
+            column="sentiment_invalid",
+            value_dtype="float64",
+            frequency="1d",
+            inputs=(VariableRef("evidence.news", "1.0.0", DataTier.C),),
+            plugin_id="invalid",
+            plugin_version="1.0.0",
+            formula_version="invalid-v1",
+        )
+
+
+def test_snapshot_returns_a_defensive_series_copy():
+    definition = ResearchVariableDefinition.source(
+        id="market.subject.close",
+        version="1.0.0",
+        tier=DataTier.A,
+        column="close",
+        value_dtype="float64",
+        frequency="1m",
+    )
+    snapshot = ResearchVariableSnapshot.create(
+        definition,
+        pd.Series([100.0, 101.0], index=pd.date_range("2026-08-17", periods=2, freq="min", tz="UTC")),
+        input_digests=(),
+        provenance={"provider": "fixture"},
+    )
+    copy = snapshot.series
+    copy.iloc[0] = -1.0
+    assert snapshot.series.iloc[0] == 100.0
+
+
+def test_neutral_suggestion_is_deterministic_and_never_applied():
+    policy = ReplicationSuggestionPolicy.neutral(0.0, "Use a neutral score for review only")
+    diagnostic = policy.suggest(variable_id="sentiment.direction", start="2026-08-01", end="2026-08-02")
+    assert diagnostic.suggested_value == 0.0
+    assert diagnostic.applied is False
