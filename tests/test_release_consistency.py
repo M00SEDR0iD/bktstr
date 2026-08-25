@@ -3,9 +3,25 @@ import subprocess
 import sys
 
 from scripts import check_release_consistency as module
+from bktstr import __version__
+from bktstr.api.app import create_app
 
 
 ROOT = Path(__file__).parents[1]
+
+
+def test_v060_release_metadata_requires_fastapi_research_contract():
+    assert __version__ == "0.6.0"
+    schema = create_app().openapi()
+    expected = {
+        "/api/v1/backtests",
+        "/api/v1/parameter-sweeps",
+        "/api/v1/compare",
+        "/api/v1/regime-comparison",
+        "/api/v1/experiments/{experiment_id}",
+        "/api/v1/market-data",
+    }
+    assert expected <= set(schema["paths"])
 
 
 def test_extract_python_version_reads_literal_assignment(tmp_path):

@@ -696,8 +696,8 @@ contract is available at `GET /openapi.json`.
 
 ### Authentication and discovery
 
-`GET /health` is the unauthenticated deployment probe. Every `/api/v1/*` route,
-including `/api/v1/health`, requires one service bearer key:
+`GET /health` and `GET /api/v1/health` are unauthenticated deployment probes.
+Every other `/api/v1/*` route requires one service bearer key:
 
 ```text
 Authorization: Bearer <BKTSTR_API_KEY>
@@ -769,6 +769,17 @@ The former `GET /api/v1/backtest` endpoint is intentionally removed in v0.6 to
 avoid a second execution path. It returns `410 legacy_endpoint_removed`, a
 `Link: </openapi.json>; rel="alternate"` header, and a migration target of
 `POST /api/v1/backtests`.
+
+### Railway configuration
+
+Set `BKTSTR_API_KEY` as the single bearer credential. Set
+`BKTSTR_EXPERIMENT_DIR` to a directory on the Railway volume so SQLite records
+and immutable artifacts survive a deployment. `BKTSTR_SYNC_MAX_CALENDAR_DAYS`
+sets the inclusive maximum span for an inline sync backtest (default `31`), and
+`BKTSTR_MAX_SWEEP_VARIANTS` caps parameter sweeps (default `500`).
+`BKTSTR_LEGACY_BACKTEST_SUNSET` is migration metadata for clients of the
+removed endpoint; it does not re-enable the old threaded server or a second
+execution path.
 
 ## Known limitations
 

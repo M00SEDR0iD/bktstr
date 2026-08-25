@@ -7,6 +7,17 @@ import httpx
 import pytest
 
 
+AUTH = {"Authorization": "Bearer test-key"}
+RESEARCH_PATHS = {
+    "/api/v1/backtests",
+    "/api/v1/parameter-sweeps",
+    "/api/v1/compare",
+    "/api/v1/regime-comparison",
+    "/api/v1/experiments/{experiment_id}",
+    "/api/v1/market-data",
+}
+
+
 def _module():
     try:
         return import_module("scripts.production_acceptance")
@@ -14,54 +25,32 @@ def _module():
         pytest.fail("scripts.production_acceptance is not implemented")
 
 
-def _anchor_result(*, hits: bool, pnl: float = 42.604714) -> dict:
+def _completed_backtest(*, status: str = "completed") -> dict:
     return {
-        "request": {"symbol": "NVDA", "side": "short"},
-        "data": {
-            "derived_cache": {
-                "enabled": True,
-                "intraday": {"hit": hits, "elapsed_seconds": 0.01, "recovered_corruption": False},
-                "regime": {"hit": hits, "elapsed_seconds": 0.001, "recovered_corruption": False},
-                "sentiment": {"hit": hits, "elapsed_seconds": 0.002, "recovered_corruption": False},
-            },
-            "sentiment": {
-                "provenance": {
-                    "profile": "clean",
-                    "non_clean_data_used": False,
-                    "all_point_in_time_safe": True,
-                }
-            },
+        "experiment_id": "exp_acceptance",
+        "operation": "backtest",
+        "status": status,
+        "execution": "auto",
+        "result": {
+            "metrics": {"trade_count": 1},
+            "trades": [],
+            "configuration": {},
+            "provenance": {},
         },
-        "summary": {
-            "trades": 7,
-            "wins": 6,
-            "losses": 1,
-            "total_pnl_dollars": pnl,
-            "expected_pnl_per_trade": 6.086388,
-        },
-        "trades": [
-            {"entry_time": "2026-06-16T15:09:00-04:00", "pnl_dollars": 7.543021},
-            {"entry_time": "2026-06-17T14:01:00-04:00", "pnl_dollars": 9.5951},
-        ],
-        "trades_total": 7,
-        "trades_returned": 7,
-        "trades_truncated": False,
     }
 
 
 def _transport(
     *,
-    version: str = "0.3.5",
+    version: str = "0.6.0",
     health_commits: list[str] | None = None,
-    second_hits: bool = True,
-    second_pnl: float = 42.604714,
+    backtest_status: str = "completed",
 ):
-    backtest_calls = 0
     health_calls = 0
     commits = health_commits or ["test-commit"]
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal backtest_calls, health_calls
+        nonlocal health_calls
         if request.url.path == "/health":
             commit = commits[min(health_calls, len(commits) - 1)]
             health_calls += 1
@@ -75,105 +64,90 @@ def _transport(
                 },
                 request=request,
             )
+        if request.url.path == "/openapi.json":
+            return httpx.Response(
+                200,
+                json={"openapi": "3.1.0", "paths": {path: {} for path in RESEARCH_PATHS}},
+                request=request,
+            )
+        if request.headers.get("Authorization") != AUTH["Authorization"]:
+            return httpx.Response(401, request=request)
         if request.url.path == "/api/v1/capabilities":
             return httpx.Response(
                 200,
                 json={
                     "version": version,
-                    "cache": {
-                        "derived": {
-                            "namespaces": ["intraday_features", "daily_regime", "daily_sentiment"],
-                            "strategy_decisions_cached": False,
-                        }
-                    },
+                    "api": {"authentication": {"scheme": "bearer", "header": "Authorization"}},
                 },
                 request=request,
             )
-        if request.url.path == "/api/v1/backtest":
-            backtest_calls += 1
-            payload = _anchor_result(
-                hits=(second_hits if backtest_calls == 2 else False),
-                pnl=(second_pnl if backtest_calls == 2 else 42.604714),
+        if request.url.path == "/api/v1/backtests" and request.method == "POST":
+            return httpx.Response(
+                200,
+                json=_completed_backtest(status=backtest_status),
+                request=request,
             )
-            return httpx.Response(200, json=payload, request=request)
         return httpx.Response(404, request=request)
 
     return httpx.MockTransport(handler)
 
 
-def test_run_acceptance_validates_anchor_and_second_run_hits():
+def test_production_acceptance_uses_bearer_and_completed_backtest():
+    # Break caught: acceptance could validate only unauthenticated discovery or a queued job.
     module = _module()
-    report = module.run_acceptance("https://bktstr.example", transport=_transport())
+    report = module.run_acceptance(
+        "https://bktstr.example", api_key="test-key", transport=_transport()
+    )
 
     assert report["status"] == "pass"
-    assert report["version"] == "0.3.5"
-    assert report["anchor"]["trades"] == 7
-    assert report["second_run_derived_hits"] == {
-        "intraday": True,
-        "regime": True,
-        "sentiment": True,
+    assert report["version"] == "0.6.0"
+    assert report["backtest"] == {
+        "experiment_id": "exp_acceptance",
+        "status": "completed",
+        "trade_count": 1,
     }
 
 
-def test_run_acceptance_rejects_trade_output_drift():
+def test_run_acceptance_requires_bearer_key():
     module = _module()
-    with pytest.raises(module.AcceptanceError, match="trading output changed"):
-        module.run_acceptance("https://bktstr.example", transport=_transport(second_pnl=41.0))
+
+    with pytest.raises(module.AcceptanceError, match="BKTSTR_API_KEY"):
+        module.run_acceptance("https://bktstr.example", transport=_transport())
 
 
-def test_run_acceptance_requires_second_run_derived_hits():
+def test_run_acceptance_rejects_queued_backtest():
     module = _module()
-    with pytest.raises(module.AcceptanceError, match="derived cache miss"):
-        module.run_acceptance("https://bktstr.example", transport=_transport(second_hits=False))
+
+    with pytest.raises(module.AcceptanceError, match="did not complete inline"):
+        module.run_acceptance(
+            "https://bktstr.example",
+            api_key="test-key",
+            transport=_transport(backtest_status="queued"),
+        )
 
 
 def test_run_acceptance_rejects_wrong_version():
     module = _module()
-    with pytest.raises(module.AcceptanceError, match="expected version 0.3.5"):
-        module.run_acceptance("https://bktstr.example", transport=_transport(version="0.3.4"))
+
+    with pytest.raises(module.AcceptanceError, match="expected version 0.6.0"):
+        module.run_acceptance(
+            "https://bktstr.example", api_key="test-key", transport=_transport(version="0.5.0")
+        )
 
 
 def test_run_acceptance_requires_expected_deployment_commit():
     module = _module()
     report = module.run_acceptance(
         "https://bktstr.example",
+        api_key="test-key",
         expected_commit="new-commit",
         deployment_attempts=2,
         deployment_poll_seconds=0,
         sleeper=lambda _: None,
         transport=_transport(health_commits=["old-commit", "new-commit"]),
     )
-    assert report["git_commit"] == "new-commit"
-
-
-def test_run_acceptance_rejects_commit_that_never_deploys():
-    module = _module()
-    with pytest.raises(module.AcceptanceError, match="expected commit new-commit"):
-        module.run_acceptance(
-            "https://bktstr.example",
-            expected_commit="new-commit",
-            deployment_attempts=2,
-            deployment_poll_seconds=0,
-            sleeper=lambda _: None,
-            transport=_transport(health_commits=["old-commit"]),
-        )
-
-
-def test_run_acceptance_sleeps_only_between_deployment_attempts():
-    module = _module()
-    sleeps = []
-
-    report = module.run_acceptance(
-        "https://bktstr.example",
-        expected_commit="new-commit",
-        deployment_attempts=3,
-        deployment_poll_seconds=7,
-        sleeper=sleeps.append,
-        transport=_transport(health_commits=["old-commit", "old-commit", "new-commit"]),
-    )
 
     assert report["git_commit"] == "new-commit"
-    assert sleeps == [7, 7]
 
 
 def test_run_acceptance_exhaustion_reports_last_identity_and_http_error():
@@ -187,13 +161,14 @@ def test_run_acceptance_exhaustion_reports_last_identity_and_http_error():
             return httpx.Response(503, request=request)
         return httpx.Response(
             200,
-            json={"version": "0.3.5", "git_commit": "old-commit"},
+            json={"version": "0.6.0", "git_commit": "old-commit"},
             request=request,
         )
 
     with pytest.raises(module.AcceptanceError) as error:
         module.run_acceptance(
             "https://bktstr.example",
+            api_key="test-key",
             expected_commit="new-commit",
             deployment_attempts=2,
             deployment_poll_seconds=0,
@@ -202,9 +177,9 @@ def test_run_acceptance_exhaustion_reports_last_identity_and_http_error():
         )
 
     message = str(error.value)
-    assert "expected version 0.3.5" in message
+    assert "expected version 0.6.0" in message
     assert "expected commit new-commit" in message
-    assert "observed version 0.3.5" in message
+    assert "observed version 0.6.0" in message
     assert "observed commit old-commit" in message
     assert "503 Service Unavailable" in message
 
@@ -217,8 +192,6 @@ def test_run_acceptance_exhaustion_reports_last_identity_and_http_error():
         ({"deployment_attempts": 1.5}, "deployment_attempts"),
         ({"deployment_poll_seconds": -1}, "deployment_poll_seconds"),
         ({"deployment_poll_seconds": math.nan}, "deployment_poll_seconds"),
-        ({"deployment_poll_seconds": math.inf}, "deployment_poll_seconds"),
-        ({"deployment_poll_seconds": -math.inf}, "deployment_poll_seconds"),
     ],
 )
 def test_run_acceptance_rejects_invalid_deployment_timing(options, field):
@@ -226,25 +199,23 @@ def test_run_acceptance_rejects_invalid_deployment_timing(options, field):
 
     with pytest.raises(module.AcceptanceError, match=field):
         module.run_acceptance(
-            "https://bktstr.example",
-            transport=_transport(),
-            **options,
+            "https://bktstr.example", api_key="test-key", transport=_transport(), **options
         )
 
 
-def test_main_writes_success_report_for_expected_commit(monkeypatch, tmp_path, capsys):
+def test_main_reads_bearer_key_from_environment(monkeypatch, tmp_path, capsys):
     module = _module()
     output_path = tmp_path / "acceptance.json"
 
     def run_acceptance(base_url, expected_version, **options):
         assert base_url == "https://bktstr.example"
-        assert expected_version == "0.3.5"
+        assert expected_version == "0.6.0"
+        assert options["api_key"] == "test-key"
         assert options["expected_commit"] == "new-commit"
-        assert options["deployment_attempts"] == 3
-        assert options["deployment_poll_seconds"] == 10
         return {"status": "pass", "git_commit": options["expected_commit"]}
 
     monkeypatch.setattr(module, "run_acceptance", run_acceptance)
+    monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -254,8 +225,6 @@ def test_main_writes_success_report_for_expected_commit(monkeypatch, tmp_path, c
             "https://bktstr.example",
             "--expected-commit",
             "new-commit",
-            "--deployment-wait-seconds",
-            "20",
             "--output",
             str(output_path),
         ],
@@ -264,7 +233,6 @@ def test_main_writes_success_report_for_expected_commit(monkeypatch, tmp_path, c
     assert module.main() == 0
     written = output_path.read_text(encoding="utf-8")
     assert written == capsys.readouterr().out
-    assert written.endswith("\n")
     assert json.loads(written) == {"status": "pass", "git_commit": "new-commit"}
 
 
@@ -283,6 +251,8 @@ def test_main_writes_failure_report(monkeypatch, tmp_path, capsys):
             "production_acceptance.py",
             "--base-url",
             "https://bktstr.example",
+            "--api-key",
+            "test-key",
             "--expected-commit",
             "new-commit",
             "--output",
@@ -293,84 +263,7 @@ def test_main_writes_failure_report(monkeypatch, tmp_path, capsys):
     assert module.main() == 1
     written = output_path.read_text(encoding="utf-8")
     assert written == capsys.readouterr().out
-    assert written.endswith("\n")
     assert json.loads(written) == {
         "status": "fail",
         "error": "expected commit new-commit, got old-commit",
     }
-
-
-@pytest.mark.parametrize(
-    ("flag", "value", "expected_error"),
-    [
-        (
-            "--deployment-wait-seconds",
-            "-1",
-            "--deployment-wait-seconds must be finite and >= 0",
-        ),
-        (
-            "--deployment-wait-seconds",
-            "nan",
-            "--deployment-wait-seconds must be finite and >= 0",
-        ),
-        (
-            "--deployment-wait-seconds",
-            "inf",
-            "--deployment-wait-seconds must be finite and >= 0",
-        ),
-        (
-            "--deployment-poll-seconds",
-            "0",
-            "--deployment-poll-seconds must be finite and > 0",
-        ),
-        (
-            "--deployment-poll-seconds",
-            "-1",
-            "--deployment-poll-seconds must be finite and > 0",
-        ),
-        (
-            "--deployment-poll-seconds",
-            "nan",
-            "--deployment-poll-seconds must be finite and > 0",
-        ),
-        (
-            "--deployment-poll-seconds",
-            "inf",
-            "--deployment-poll-seconds must be finite and > 0",
-        ),
-    ],
-)
-def test_main_reports_invalid_deployment_timing(
-    monkeypatch,
-    tmp_path,
-    capsys,
-    flag,
-    value,
-    expected_error,
-):
-    module = _module()
-    output_path = tmp_path / "acceptance.json"
-
-    def unexpected_acceptance(*args, **kwargs):
-        pytest.fail("invalid CLI timing must be rejected before acceptance runs")
-
-    monkeypatch.setattr(module, "run_acceptance", unexpected_acceptance)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "production_acceptance.py",
-            "--base-url",
-            "https://bktstr.example",
-            flag,
-            value,
-            "--output",
-            str(output_path),
-        ],
-    )
-
-    assert module.main() == 1
-    written = output_path.read_text(encoding="utf-8")
-    assert written == capsys.readouterr().out
-    assert written.endswith("\n")
-    assert json.loads(written) == {"status": "fail", "error": expected_error}

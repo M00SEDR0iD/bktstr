@@ -5,7 +5,7 @@ ROOT = Path(__file__).parents[1]
 RELEASE_ROWS = {
     "v0.4.0": "Baseline and documentation repair",
     "v0.5.0": "Strategy-neutral core",
-    "v0.6.0": "FastAPI application foundation",
+    "v0.6.0": "API-first research interface",
     "v0.7.0": "Persistence and single-owner authentication",
     "v0.8.0": "Durable execution jobs",
     "v0.9.0": "React research workspace",

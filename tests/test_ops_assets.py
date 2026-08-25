@@ -301,7 +301,7 @@ def _assert_production_acceptance_workflow_contract(text: str) -> None:
     assert _scalar_mapping(inputs["expected_version"], 8) == {
         "description": "Version expected from production health and capabilities",
         "required": "true",
-        "default": "'0.3.5'",
+        "default": "'0.6.0'",
         "type": "string",
     }
     assert _scalar_mapping(inputs["expected_commit"], 8) == {
@@ -317,7 +317,6 @@ def _assert_production_acceptance_workflow_contract(text: str) -> None:
     }
 
     assert _scalar_mapping(_top_level_block(text, "permissions"), 2) == {"contents": "read"}
-    assert "secrets." not in text
 
     jobs = _mapping_blocks(_top_level_block(text, "jobs"), 2)
     assert set(jobs) == {"production_acceptance"}
@@ -334,7 +333,7 @@ def _assert_production_acceptance_workflow_contract(text: str) -> None:
             {"name", "uses", "with"},
             {"name", "uses", "with"},
             {"name", "run"},
-            {"name", "run"},
+            {"name", "env", "run"},
             {"name", "if", "uses", "with"},
         ],
         strict=True,
@@ -361,6 +360,8 @@ def _assert_production_acceptance_workflow_contract(text: str) -> None:
     ]
     assert _named_step(steps, "Run production acceptance") == [
         "      - name: Run production acceptance",
+        "        env:",
+        "          BKTSTR_API_KEY: ${{ secrets.BKTSTR_API_KEY }}",
         "        run: >-",
         "          python scripts/production_acceptance.py",
         '          --base-url "${{ inputs.base_url }}"',
