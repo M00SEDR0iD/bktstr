@@ -13,9 +13,15 @@ from fastapi.responses import JSONResponse
 
 from bktstr import __version__
 from bktstr.server import health_payload
-from bktstr.services.experiments import ExperimentStore, ExperimentWorker
+from bktstr.services.experiments import (
+    ExecutionNotAvailableError,
+    ExperimentNotFoundError,
+    ExperimentStore,
+    ExperimentWorker,
+    IdempotencyConflictError,
+)
 
-from .routes import api_router
+from .routes import api_router, experiment_operations
 from .schemas import ApiError, HealthResponse
 
 
@@ -43,7 +49,7 @@ def _error_response(
 @asynccontextmanager
 async def experiment_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Recover durable work before one in-process worker begins polling it."""
-    worker = ExperimentWorker(ExperimentStore(), {})
+    worker = ExperimentWorker(ExperimentStore(), experiment_operations())
     worker.recover_incomplete()
     stop_event = threading.Event()
     worker_thread = threading.Thread(
@@ -98,6 +104,26 @@ def create_app() -> FastAPI:
     @app.exception_handler(ValueError)
     async def handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
         return _error_response(request, 400, "invalid_request", str(exc))
+
+    @app.exception_handler(IdempotencyConflictError)
+    async def handle_idempotency_conflict(
+        request: Request, exc: IdempotencyConflictError
+    ) -> JSONResponse:
+        return _error_response(request, 409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(ExecutionNotAvailableError)
+    async def handle_execution_refusal(
+        request: Request, exc: ExecutionNotAvailableError
+    ) -> JSONResponse:
+        return _error_response(request, 409, exc.code, str(exc))
+
+    @app.exception_handler(ExperimentNotFoundError)
+    async def handle_missing_experiment(
+        request: Request, _: ExperimentNotFoundError
+    ) -> JSONResponse:
+        return _error_response(
+            request, 404, "experiment_not_found", "The requested experiment was not found."
+        )
 
     @app.exception_handler(httpx.HTTPError)
     async def handle_provider_error(request: Request, exc: httpx.HTTPError) -> JSONResponse:

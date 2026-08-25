@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from bktstr.services.experiments import ExecutionMode, ExperimentRecord, ExperimentStatus
+
+
+ParameterValue = float | int | str | bool | None
 
 
 class ApiError(BaseModel):
@@ -39,6 +42,109 @@ class CapabilityResponse(BaseModel):
     version: str
     timeframes: list[str]
     sides: list[str]
+
+
+class StrategyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    version: str
+    parameters: dict[str, ParameterValue] = Field(default_factory=dict)
+
+
+class MarketCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    start: date
+    end: date
+    timeframe: str = "1m"
+    source: str = "auto"
+
+
+class RegimeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    rules: str | None = None
+    benchmark: str | None = None
+    sentiment_enabled: bool = False
+    sentiment_sector_benchmark: str | None = None
+    sentiment_market_benchmark: str | None = None
+    sentiment_data_profile: str = "clean"
+    sentiment_sources: list[str] = Field(default_factory=lambda: ["price"])
+
+
+class BacktestCreate(BaseModel):
+    """One registered strategy evaluated over one normalized market range."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: StrategyCreate
+    market: MarketCreate
+    side: str = "short"
+    entry: str = "close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10"
+    regime: RegimeCreate | None = None
+    execution: ExecutionMode = ExecutionMode.AUTO
+    include_trades: bool = True
+
+
+class BacktestMetricsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total_pnl: float | None
+    total_return: float | None
+    ev_per_trade: float | None
+    win_rate: float | None
+    profit_factor: float | None
+    max_drawdown: float | None
+    sharpe: float | None
+    trade_count: int
+
+
+class ResearchTradeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    entry_timestamp: datetime | None
+    exit_timestamp: datetime | None
+    entry_price: float | None
+    exit_price: float | None
+    holding_time_minutes: int | None
+    realized_pnl: float | None
+    return_pct: float | None
+    mfe: float | None
+    mae: float | None
+    side: str | None
+    exit_reason: str | None
+    signal_values_at_entry: dict[str, Any]
+    regime_variables: dict[str, Any]
+
+
+class BacktestConfigurationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    strategy: dict[str, Any]
+    market: dict[str, Any]
+    regime: dict[str, Any]
+    execution: dict[str, Any]
+
+
+class ResearchProvenanceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    strategy: dict[str, Any]
+    market_data: dict[str, Any]
+    execution_model: dict[str, Any]
+    software: dict[str, Any]
+
+
+class BacktestResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    metrics: BacktestMetricsResponse
+    trades: list[ResearchTradeResponse]
+    configuration: BacktestConfigurationResponse
+    provenance: ResearchProvenanceResponse
 
 
 class ExperimentError(BaseModel):
@@ -77,6 +183,12 @@ class ExperimentEnvelope(BaseModel):
             error=ExperimentError.model_validate(_thaw(record.error)) if record.error else None,
             provenance=_thaw(record.provenance),
         )
+
+
+class BacktestExperimentResponse(ExperimentEnvelope):
+    operation: Literal["backtest"]
+    request: BacktestCreate
+    result: BacktestResult | None = None
 
 
 def _thaw(value: Any) -> Any:

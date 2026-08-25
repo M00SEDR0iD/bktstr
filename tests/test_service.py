@@ -4,7 +4,6 @@ import httpx
 import pandas as pd
 import pytest
 
-import bktstr.server as server
 from bktstr.providers import MassiveProvider
 from bktstr.orchestrator import StrategyRunResult
 from bktstr.service import (
@@ -112,10 +111,10 @@ def test_disabled_derived_cache_retains_legacy_uncached_status_shape(monkeypatch
     }
 
 
-def test_execute_backtest_reraises_http_provider_error_for_legacy_server_classifier(
+def test_execute_backtest_preserves_http_provider_error_for_typed_service_boundary(
     monkeypatch, tmp_path
 ):
-    # Break caught: sanitizing the domain error could stop the established 502 classifier.
+    # Break caught: sanitizing here could stop the API/worker boundary classifying the provider failure.
     monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
     monkeypatch.setenv("BKTSTR_CACHE_DIR", str(tmp_path))
     monkeypatch.setenv("BKTSTR_DERIVED_CACHE_DIR", str(tmp_path / "derived"))
@@ -142,26 +141,6 @@ def test_execute_backtest_reraises_http_provider_error_for_legacy_server_classif
         asyncio.run(execute_backtest(request))
     assert raised.value is provider_error
 
-    captured = []
-    handler = object.__new__(server.Handler)
-    handler.path = "/api/v1/backtest"
-    handler._json = lambda status, payload: captured.append((status, payload))
-    monkeypatch.setattr(
-        server,
-        "parse_backtest_query",
-        lambda query: (request, {"trade_limit": 25}),
-    )
-    handler.do_GET()
-
-    assert captured == [
-        (
-            502,
-            {
-                "error": "market_data_http_error",
-                "detail": str(provider_error),
-            },
-        )
-    ]
 
 
 def test_execute_regime_sentiment_reports_context(monkeypatch,tmp_path):

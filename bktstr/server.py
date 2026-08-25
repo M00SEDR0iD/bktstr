@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from dataclasses import is_dataclass
 import os
-from urllib.parse import parse_qs
 
 import uvicorn
 
 from . import __version__
 from .build_info import runtime_build_info
 from .service import (
-    BacktestRequest,
     INTRADAY_FEATURE_FORMULA_VERSION,
     REGIME_FORMULA_VERSION,
     SENTIMENT_FORMULA_VERSION,
@@ -317,67 +315,6 @@ def health_payload() -> dict:
         "version": __version__,
         **runtime_build_info(),
     }
-
-
-def _first(params: dict[str, list[str]], name: str, default: str | None = None) -> str:
-    values = params.get(name)
-    if values:
-        return values[0]
-    if default is None:
-        raise ValueError(f"missing required query parameter '{name}'")
-    return default
-
-
-def _bool(value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"invalid boolean '{value}'")
-
-
-def parse_backtest_query(query: str) -> tuple[BacktestRequest, dict]:
-    params = parse_qs(query, keep_blank_values=False)
-    request = BacktestRequest.from_values(
-        symbol=_first(params, "symbol"),
-        start=_first(params, "start"),
-        end=_first(params, "end"),
-        timeframe=_first(params, "timeframe", "1m"),
-        side=_first(params, "side", "long"),
-        entry=_first(params, "entry"),
-        stop_pct=float(_first(params, "stop_pct", "1.0")),
-        target_pct=float(_first(params, "target_pct", "3.0")),
-        max_hold_minutes=int(_first(params, "max_hold_minutes", "240")),
-        position_size=float(_first(params, "position_size", "1000")),
-        starting_capital=float(_first(params, "starting_capital", "10000")),
-        slippage_bps=float(_first(params, "slippage_bps", "2")),
-        regular_hours_only=_bool(_first(params, "regular_hours_only", "true")),
-        same_day_only=_bool(_first(params, "same_day_only", "true")),
-        entry_start_time=_first(params, "entry_start_time", "") or None,
-        entry_end_time=_first(params, "entry_end_time", "") or None,
-        regime=_first(params, "regime", "") or None,
-        benchmark=_first(params, "benchmark", "") or None,
-        sentiment=_bool(_first(params, "sentiment", "false")),
-        sentiment_sector_benchmark=_first(params, "sentiment_sector_benchmark", "") or None,
-        sentiment_market_benchmark=_first(params, "sentiment_market_benchmark", "") or None,
-        sentiment_data_profile=_first(params, "sentiment_data_profile", "clean"),
-        sentiment_sources=_first(params, "sentiment_sources", "") or None,
-    )
-    trade_limit = int(_first(params, "trade_limit", "100"))
-    if not 0 <= trade_limit <= 1000:
-        raise ValueError("trade_limit must be between 0 and 1000")
-    return request, {"trade_limit": trade_limit}
-
-
-def _trim_result(result: dict, trade_limit: int) -> dict:
-    trades = result.get("trades", [])
-    result = dict(result)
-    result["trades_total"] = len(trades)
-    result["trades"] = trades[:trade_limit]
-    result["trades_returned"] = len(result["trades"])
-    result["trades_truncated"] = len(trades) > trade_limit
-    return result
 
 
 def main() -> None:
