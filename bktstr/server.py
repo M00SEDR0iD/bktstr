@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import is_dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
 import os
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs
 
-import httpx
+import uvicorn
 
 from . import __version__
 from .build_info import runtime_build_info
@@ -16,7 +13,6 @@ from .service import (
     INTRADAY_FEATURE_FORMULA_VERSION,
     REGIME_FORMULA_VERSION,
     SENTIMENT_FORMULA_VERSION,
-    execute_backtest,
 )
 from bktstr_cache.derived import CACHE_FORMAT_VERSION
 from .provenance import capability_provenance
@@ -384,53 +380,9 @@ def _trim_result(result: dict, trade_limit: int) -> dict:
     return result
 
 
-class Handler(BaseHTTPRequestHandler):
-    server_version = f"BKTSTR/{__version__}"
-
-    def log_message(self, format: str, *args) -> None:  # noqa: A003
-        print(f"{self.address_string()} - {format % args}")
-
-    def _json(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self) -> None:  # noqa: N802
-        parsed = urlparse(self.path)
-        if parsed.path in {"/", "/health"}:
-            self._json(200, health_payload())
-            return
-        if parsed.path == "/api/v1/capabilities":
-            self._json(200, CAPABILITIES)
-            return
-        if parsed.path != "/api/v1/backtest":
-            self._json(404, {"error": "not_found"})
-            return
-
-        try:
-            request, options = parse_backtest_query(parsed.query)
-            result = asyncio.run(execute_backtest(request))
-            self._json(200, _trim_result(result, options["trade_limit"]))
-        except ValueError as exc:
-            self._json(400, {"error": "invalid_request", "detail": str(exc)})
-        except httpx.HTTPStatusError as exc:
-            self._json(502, {"error": "market_data_http_error", "detail": str(exc)})
-        except RuntimeError as exc:
-            self._json(503, {"error": "service_unavailable", "detail": str(exc)})
-        except Exception as exc:  # pragma: no cover - last-resort production guard
-            self._json(500, {"error": "internal_error", "detail": str(exc)})
-
-
 def main() -> None:
     port = int(os.getenv("PORT", "8000"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"BKTSTR listening on 0.0.0.0:{port}")
-    server.serve_forever()
+    uvicorn.run("bktstr.api.app:create_app", factory=True, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

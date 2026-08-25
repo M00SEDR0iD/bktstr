@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from typing import Any
+from uuid import uuid4
+
+import httpx
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+from bktstr import __version__
+from bktstr.server import health_payload
+
+from .routes import api_router
+from .schemas import ApiError, HealthResponse
+
+
+def _request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", f"req_{uuid4().hex}")
+
+
+def _error_response(
+    request: Request,
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    error = ApiError(
+        code=code,
+        message=message,
+        details=details or {},
+        request_id=_request_id(request),
+    )
+    return JSONResponse(status_code=status_code, content={"error": error.model_dump()}, headers=headers)
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="BKTSTR Research API", version=__version__)
+
+    @app.middleware("http")
+    async def assign_request_id(
+        request: Request, call_next: Callable[[Request], Awaitable[Any]]
+    ) -> Any:
+        request.state.request_id = f"req_{uuid4().hex}"
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request.state.request_id
+        return response
+
+    @app.exception_handler(HTTPException)
+    async def handle_http_error(request: Request, exc: HTTPException) -> JSONResponse:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        return _error_response(
+            request,
+            exc.status_code,
+            detail.get("code", "http_error"),
+            detail.get("message", str(exc.detail)),
+            detail.get("details", {}),
+            dict(exc.headers or {}),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return _error_response(
+            request, 422, "validation_error", "Request validation failed.", {"fields": exc.errors()}
+        )
+
+    @app.exception_handler(ValueError)
+    async def handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
+        return _error_response(request, 400, "invalid_request", str(exc))
+
+    @app.exception_handler(httpx.HTTPError)
+    async def handle_provider_error(request: Request, exc: httpx.HTTPError) -> JSONResponse:
+        return _error_response(request, 502, "market_data_http_error", "Market-data provider request failed.")
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, _: Exception) -> JSONResponse:
+        return _error_response(request, 500, "internal_error", "An unexpected server error occurred.")
+
+    @app.get("/health", response_model=HealthResponse)
+    def root_health() -> dict:
+        return health_payload()
+
+    app.include_router(api_router, prefix="/api/v1")
+    return app
