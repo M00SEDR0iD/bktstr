@@ -4,7 +4,15 @@ import pandas as pd
 import pytest
 
 from bktstr.providers import MassiveProvider
-from bktstr.service import BacktestRequest, execute_backtest, provider_name_for_request
+from bktstr.orchestrator import StrategyRunResult
+from bktstr.service import (
+    BacktestRequest,
+    execute_backtest,
+    provider_name_for_request,
+    serialize_strategy_run_result,
+)
+from bktstr.strategies import ResolvedStrategy
+from bktstr.variables import VariableSet
 
 
 def _bars():
@@ -39,6 +47,39 @@ def test_request_validates_regime_sentiment_dependencies():
     assert req.regime.startswith("sentiment_fragility")
 
 
+def test_domain_result_serializer_retains_exact_legacy_public_shape():
+    # Break caught: the compatibility adapter could expose new provenance/degraded fields or drop legacy request values.
+    req=BacktestRequest.from_values(symbol="NVDA",start="2026-08-17",end="2026-08-17",timeframe="1m",side="short",entry="close.cross_below:vwap")
+    result=StrategyRunResult(
+        resolved_strategy=ResolvedStrategy(
+            strategy_id="bktstr.bearish-regime-scalp",
+            strategy_version="1.0.0",
+            schema_version="1.0.0",
+            values={},
+            execution_model_id="bktstr.next-bar-open",
+            execution_model_version="1.0.0",
+        ),
+        variables=VariableSet(),
+        summary={"trades":0},
+        trades=({"entry_price":100.0},),
+        data={"provider":"fixture"},
+        provenance={"provider":{"name":"fixture"}},
+        degraded=True,
+        canonical=False,
+    )
+
+    serialized=serialize_strategy_run_result(req,result)
+
+    assert serialized=={
+        "request":{
+            "symbol":"NVDA","start":"2026-08-17","end":"2026-08-17","timeframe":"1m","side":"short","entry":"close.cross_below:vwap","regime":None,"benchmark":None,"sentiment":False,"sentiment_sector_benchmark":None,"sentiment_market_benchmark":None,"sentiment_data_profile":"clean","sentiment_sources":["price"],"stop_pct":1.0,"target_pct":3.0,"max_hold_minutes":240,"position_size":1000.0,"starting_capital":10000.0,"slippage_bps":2.0,"entry_start_time":None,"entry_end_time":None,
+        },
+        "data":{"provider":"fixture"},
+        "summary":{"trades":0},
+        "trades":[{"entry_price":100.0}],
+    }
+
+
 def test_execute_backtest_preserves_raw_cache_and_adds_derived(monkeypatch,tmp_path):
     monkeypatch.setenv("MASSIVE_API_KEY","test-key"); monkeypatch.setenv("BKTSTR_CACHE_DIR",str(tmp_path)); monkeypatch.setenv("BKTSTR_DERIVED_CACHE_DIR",str(tmp_path/"derived"))
     calls=0
@@ -53,6 +94,22 @@ def test_execute_backtest_preserves_raw_cache_and_adds_derived(monkeypatch,tmp_p
     assert one["data"]["derived_cache"]["intraday"]["hit"] is False and two["data"]["derived_cache"]["intraday"]["hit"] is True
 
 
+def test_disabled_derived_cache_retains_legacy_uncached_status_shape(monkeypatch,tmp_path):
+    # Break caught: moving to variable snapshots could change the public disabled-cache status payload.
+    monkeypatch.setenv("MASSIVE_API_KEY","test-key"); monkeypatch.setenv("BKTSTR_CACHE_DIR",str(tmp_path)); monkeypatch.setenv("BKTSTR_DERIVED_CACHE_DIR",str(tmp_path/"derived")); monkeypatch.setenv("BKTSTR_DERIVED_CACHE_ENABLED","false")
+    async def fake(self,symbol,start,end,timeframe="1m"):
+        return _bars()
+    monkeypatch.setattr(MassiveProvider,"fetch_bars",fake)
+    req=BacktestRequest.from_values(symbol="NVDA",start="2026-08-17",end="2026-08-17",timeframe="1m",side="short",entry="close.cross_below:vwap")
+
+    out=asyncio.run(execute_backtest(req))
+
+    assert out["data"]["derived_cache"] == {
+        "enabled":False,
+        "intraday":{"hit":False,"elapsed_seconds":0.0,"recovered_corruption":False},
+    }
+
+
 def test_execute_regime_sentiment_reports_context(monkeypatch,tmp_path):
     monkeypatch.setenv("MASSIVE_API_KEY","test-key"); monkeypatch.setenv("BKTSTR_CACHE_DIR",str(tmp_path)); monkeypatch.setenv("BKTSTR_DERIVED_CACHE_DIR",str(tmp_path/"derived"))
     async def fake(self,symbol,start,end,timeframe="1m"):
@@ -65,3 +122,44 @@ def test_execute_regime_sentiment_reports_context(monkeypatch,tmp_path):
     assert out["data"]["sentiment"]["market_benchmark"]=="QQQ"
     assert out["data"]["sentiment"]["provenance"]["all_point_in_time_safe"] is True
     assert "sentiment_direction" in out["trades"][0]
+
+
+def test_regime_uses_only_explicit_legacy_benchmark_not_sentiment_sector(monkeypatch, tmp_path):
+    # Break caught: a sector needed only for sentiment could silently alter a day-only regime request.
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
+    monkeypatch.setenv("BKTSTR_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("BKTSTR_DERIVED_CACHE_DIR", str(tmp_path / "derived"))
+
+    async def fake(self, symbol, start, end, timeframe="1m"):
+        if timeframe == "1d":
+            return _daily(
+                start,
+                end,
+                {"NVDA": 300.0, "SOXX": 200.0, "QQQ": 500.0}[symbol],
+                {"NVDA": -0.2, "SOXX": 0.1, "QQQ": 0.05}[symbol],
+            )
+        return _bars()
+
+    monkeypatch.setattr(MassiveProvider, "fetch_bars", fake)
+    request = BacktestRequest.from_values(
+        symbol="NVDA",
+        start="2026-08-17",
+        end="2026-08-17",
+        timeframe="1m",
+        side="short",
+        entry="close.lt:1000",
+        regime="day_sma20_slope5.lt:999",
+        sentiment=True,
+        sentiment_sector_benchmark="SOXX",
+        sentiment_market_benchmark="QQQ",
+        stop_pct=10,
+        target_pct=10,
+        max_hold_minutes=1,
+        slippage_bps=0,
+    )
+
+    result = asyncio.run(execute_backtest(request))
+
+    assert result["data"]["regime"]["benchmark"] is None
+    assert result["data"]["regime"]["benchmark_daily_bars"] == 0
+    assert result["data"]["regime"]["benchmark_cache"] is None
