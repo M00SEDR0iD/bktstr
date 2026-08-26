@@ -8,7 +8,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
 from bktstr.api.app import _validation_error_fields, create_app
+from bktstr.api.schemas import CompareCreate
+import bktstr.services.backtest as backtest_service
 from bktstr.services.experiments import ExperimentWorker
+from test_services_research_operations import _completed_backtest, _research_result
 
 
 AUTH = {"Authorization": "Bearer test-key"}
@@ -84,6 +87,79 @@ def test_research_operation_routes_queue_in_auto_mode(monkeypatch, tmp_path):
     assert sweep.json()["operation"] == "parameter_sweep"
     assert compare.json()["operation"] == "compare"
     assert regime.json()["operation"] == "regime_comparison"
+
+
+def test_compare_worker_serializes_immutable_result_for_experiment_ids(
+    monkeypatch, tmp_path
+):
+    # Break caught: a real compare worker could fail when immutable service values hit storage.
+    with _client(monkeypatch, tmp_path) as client:
+        store = client.app.state.experiment_store
+        first = _completed_backtest(store, stop_pct=1.0, profit_factor=1.5)
+        second = _completed_backtest(store, stop_pct=2.0, profit_factor=2.0)
+        request = CompareCreate.model_validate(
+            {"candidates": [first, second], "execution": "async"}
+        )
+        response = client.post(
+            "/api/v1/compare",
+            json=request.model_dump(mode="json"),
+            headers=AUTH,
+        )
+        completed = client.app.state.experiment_worker.run_one()
+
+    assert completed is not None
+    assert completed.status.value == "completed"
+    assert completed.error is None
+    assert completed.result["metric_deltas"]["profit_factor"][second] == 0.5
+    assert completed.result["candidates"][0]["provenance"]["strategy"]["id"] == (
+        "bktstr.bearish-regime-scalp"
+    )
+
+
+def test_compare_worker_keeps_named_variant_children(monkeypatch, tmp_path):
+    # Break caught: named candidates could lose their labels or child experiment linkage.
+    async def deterministic(value):
+        return _research_result(value)
+
+    monkeypatch.setattr(backtest_service, "run_backtest", deterministic)
+    with _client(monkeypatch, tmp_path) as client:
+        request = CompareCreate.model_validate(
+            {
+                "candidates": [
+                    {"name": "control", "backtest": deepcopy(BACKTEST_BODY)},
+                    {
+                        "name": "wide-stop",
+                        "backtest": {
+                            **deepcopy(BACKTEST_BODY),
+                            "strategy": {
+                                **BACKTEST_BODY["strategy"],
+                                "parameters": {"stop_pct": 2.0},
+                            },
+                        },
+                    },
+                ],
+                "execution": "async",
+            }
+        )
+        response = client.post(
+            "/api/v1/compare",
+            json=request.model_dump(mode="json"),
+            headers=AUTH,
+        )
+        completed = client.app.state.experiment_worker.run_one()
+        store = client.app.state.experiment_store
+
+    assert completed is not None
+    assert completed.status.value == "completed"
+    assert [item["name"] for item in completed.result["candidates"]] == [
+        "control",
+        "wide-stop",
+    ]
+    assert len(completed.result["provenance"]["candidate_experiment_ids"]) == 2
+    assert all(
+        store.load_experiment(experiment_id).parent_experiment_id == completed.experiment_id
+        for experiment_id in completed.result["provenance"]["candidate_experiment_ids"]
+    )
 
 
 def test_known_research_experiments_poll_through_typed_shared_envelopes(

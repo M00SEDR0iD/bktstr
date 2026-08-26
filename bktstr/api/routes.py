@@ -5,7 +5,7 @@ from datetime import date
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from bktstr.server import capabilities_payload, health_payload
 from bktstr.services.backtest import (
@@ -19,6 +19,7 @@ from bktstr.services.backtest import (
     run_backtest,
     run_parameter_sweep,
     run_regime_comparison,
+    to_json_value,
 )
 from bktstr.services.experiments import (
     ExperimentNotFoundError,
@@ -58,6 +59,16 @@ from .schemas import (
 
 
 api_router = APIRouter()
+
+
+ResultModel = TypeVar("ResultModel", bound=BaseModel)
+
+
+def _validated_result_payload(
+    model_type: type[ResultModel], value: Any
+) -> dict[str, Any]:
+    validated = model_type.model_validate(to_json_value(value))
+    return validated.model_dump(mode="json")
 
 
 def _error_responses(*statuses: int) -> dict[int, dict[str, type[ErrorResponse]]]:
@@ -141,11 +152,11 @@ def _execute_backtest_experiment(
 ) -> tuple[dict, dict]:
     request = BacktestCreate.model_validate(record.request)
     result = BacktestResult.model_validate(
-        asyncio.run(run_backtest(_backtest_input(request))), from_attributes=True
+        to_json_value(asyncio.run(run_backtest(_backtest_input(request))))
     )
     if not request.include_trades:
         result = result.model_copy(update={"trades": []})
-    payload = result.model_dump(mode="json")
+    payload = _validated_result_payload(BacktestResult, result)
     return payload, payload["provenance"]
 
 
@@ -222,15 +233,14 @@ def _execute_parameter_sweep_experiment(
     record: ExperimentRecord, store: ExperimentStore
 ) -> tuple[dict, dict]:
     request = ParameterSweepCreate.model_validate(record.request)
-    result = ParameterSweepResult.model_validate(
+    payload = _validated_result_payload(
+        ParameterSweepResult,
         run_parameter_sweep(
             _parameter_sweep_input(request),
             store=store,
             parent_experiment_id=record.experiment_id,
         ),
-        from_attributes=True,
     )
-    payload = result.model_dump(mode="json")
     return payload, payload["provenance"]
 
 
@@ -238,15 +248,14 @@ def _execute_compare_experiment(
     record: ExperimentRecord, store: ExperimentStore
 ) -> tuple[dict, dict]:
     request = CompareCreate.model_validate(record.request)
-    result = CompareResult.model_validate(
+    payload = _validated_result_payload(
+        CompareResult,
         compare_experiments(
             _compare_input(request),
             store=store,
             parent_experiment_id=record.experiment_id,
         ),
-        from_attributes=True,
     )
-    payload = result.model_dump(mode="json")
     return payload, payload["provenance"]
 
 
@@ -254,15 +263,14 @@ def _execute_regime_comparison_experiment(
     record: ExperimentRecord, store: ExperimentStore
 ) -> tuple[dict, dict]:
     request = RegimeComparisonCreate.model_validate(record.request)
-    result = RegimeComparisonResult.model_validate(
+    payload = _validated_result_payload(
+        RegimeComparisonResult,
         run_regime_comparison(
             _regime_comparison_input(request),
             store=store,
             parent_experiment_id=record.experiment_id,
         ),
-        from_attributes=True,
     )
-    payload = result.model_dump(mode="json")
     return payload, payload["provenance"]
 
 

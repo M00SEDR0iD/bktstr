@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
+from enum import StrEnum
 from types import MappingProxyType
 
 import pytest
@@ -21,6 +22,7 @@ from bktstr.services.backtest import (
     compare_experiments,
     run_parameter_sweep,
     run_regime_comparison,
+    to_json_value,
 )
 from bktstr.services.experiments import ExperimentStatus, ExperimentStore
 from bktstr.services.validation import SemanticValidationError
@@ -36,6 +38,31 @@ BASE = BacktestInput(
     side="short",
     entry="close.cross_below:vwap",
 )
+
+
+class _FixtureState(StrEnum):
+    READY = "ready"
+
+
+def test_to_json_value_recursively_thaws_domain_values():
+    # Break caught: immutable service results could reach JSON persistence unchanged.
+    value = MappingProxyType(
+        {
+            "candidate": MappingProxyType(
+                {"metrics": BacktestMetrics(1, 2, 3, 4, 5, 6, 7, 8)}
+            ),
+            "states": (_FixtureState.READY,),
+            "at": datetime(2026, 8, 26, tzinfo=timezone.utc),
+        }
+    )
+
+    normalized = to_json_value(value)
+
+    assert type(normalized) is dict
+    assert type(normalized["candidate"]) is dict
+    assert normalized["candidate"]["metrics"]["trade_count"] == 8
+    assert normalized["states"] == ["ready"]
+    assert normalized["at"] == "2026-08-26T00:00:00+00:00"
 
 
 def _research_result(value: BacktestInput) -> BacktestResearchResult:
@@ -68,8 +95,13 @@ def _research_result(value: BacktestInput) -> BacktestResearchResult:
                 "coverage": {
                     "requested_start": value.start.isoformat(),
                     "requested_end": value.end.isoformat(),
+                    "available_start": value.start.isoformat(),
+                    "available_end": value.end.isoformat(),
+                    "observations": 2,
                     "bars": 2,
                 },
+                "snapshot_id": "fixture-snapshot",
+                "cache": {"hit_days": 1, "miss_days": 0, "fetched_ranges": 0},
             }
         ),
         execution_model=MappingProxyType(
@@ -206,6 +238,35 @@ def _completed_backtest(
         "execution": "sync",
         "include_trades": True,
     }
+    provenance = {
+        "strategy": {
+            "id": "bktstr.bearish-regime-scalp",
+            "version": "1.0.0",
+            "schema_version": "1.0.0",
+            "parameters": {"stop_pct": stop_pct},
+        },
+        "market_data": {
+            "source": "fixture",
+            "requested_source": "auto",
+            "version": "fixture-v1",
+            "snapshot_id": "fixture-snapshot",
+            "coverage": {
+                "requested_start": "2026-08-17",
+                "requested_end": "2026-08-17",
+                "available_start": "2026-08-17",
+                "available_end": "2026-08-17",
+                "observations": 2,
+                "bars": 2,
+            },
+            "cache": {"hit_days": 1, "miss_days": 0, "fetched_ranges": 0},
+        },
+        "execution_model": {
+            "id": "bktstr.next-bar-open",
+            "version": "1.0.0",
+            "slippage_bps": 2.0,
+        },
+        "software": {"bktstr_version": "0.5.0"},
+    }
     record, _ = store.create_and_claim_experiment("backtest", request, "sync")
     completed = store.complete(
         record.experiment_id,
@@ -222,9 +283,9 @@ def _completed_backtest(
             },
             "trades": [],
             "configuration": {},
-            "provenance": {"strategy": {"id": "bktstr.bearish-regime-scalp"}},
+            "provenance": provenance,
         },
-        {"strategy": {"id": "bktstr.bearish-regime-scalp"}},
+        provenance,
     )
     return completed.experiment_id
 

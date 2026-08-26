@@ -972,13 +972,15 @@ class RegimeComparisonResult:
     provenance: Mapping[str, Any]
 
 
-def _json_value(value: Any) -> Any:
+def to_json_value(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
-        return {item.name: _json_value(getattr(value, item.name)) for item in fields(value)}
+        return {
+            item.name: to_json_value(getattr(value, item.name)) for item in fields(value)
+        }
     if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
+        return {str(key): to_json_value(item) for key, item in value.items()}
     if isinstance(value, tuple | list):
-        return [_json_value(item) for item in value]
+        return [to_json_value(item) for item in value]
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime | date):
@@ -1040,7 +1042,7 @@ def _execute_child_backtest(
         raise RuntimeError("child backtests do not reuse idempotency records")
     try:
         result = asyncio.run(run_backtest(child_input))
-        payload = _json_value(result)
+        payload = to_json_value(result)
         store.complete(record.experiment_id, payload, payload["provenance"])
     except Exception:
         store.fail(
@@ -1237,7 +1239,7 @@ def run_regime_comparison(
                 experiment_id=child_id,
                 metrics=result.metrics,
                 trades=result.trades,
-                provenance=_immutable_mapping(_json_value(result.provenance)),
+                provenance=_immutable_mapping(to_json_value(result.provenance)),
             )
         )
     comparison_matrix = {
@@ -1293,5 +1295,6 @@ __all__ = [
     "run_backtest",
     "run_parameter_sweep",
     "run_regime_comparison",
+    "to_json_value",
     "to_legacy_request",
 ]
