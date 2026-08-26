@@ -33,6 +33,7 @@ from bktstr.services.data import inspect_market_data
 
 from .auth import require_api_key
 from .schemas import (
+    AutomaticSource,
     BacktestCreate,
     BacktestExperimentResponse,
     BacktestResult,
@@ -44,6 +45,7 @@ from .schemas import (
     ExperimentResponse,
     HealthResponse,
     MarketDataResponse,
+    MarketTimeframe,
     NamedVariantCreate,
     ParameterSweepCreate,
     ParameterSweepExperimentResponse,
@@ -85,8 +87,8 @@ async def get_market_data(
     symbol: Annotated[str, Query(min_length=1, max_length=15)],
     start: date,
     end: date,
-    timeframe: str = "1m",
-    source: str = "auto",
+    timeframe: MarketTimeframe = MarketTimeframe.ONE_MINUTE,
+    source: AutomaticSource = AutomaticSource.AUTO,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
     _: Annotated[None, Depends(require_api_key)] = None,

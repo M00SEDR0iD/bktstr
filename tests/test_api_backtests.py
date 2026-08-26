@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 from types import MappingProxyType
 
 import pytest
@@ -204,13 +205,6 @@ def test_completed_backtest_returns_typed_experiment(monkeypatch, tmp_path):
         (
             {
                 **BACKTEST_BODY,
-                "market": {**BACKTEST_BODY["market"], "source": "manual"},
-            },
-            ["market.source"],
-        ),
-        (
-            {
-                **BACKTEST_BODY,
                 "regime": {"rules": "relative_return20.lt:0", "benchmark": "bad symbol"},
             },
             ["regime.benchmark"],
@@ -284,6 +278,28 @@ def test_semantic_backtest_errors_return_exact_fields_before_persistence(
 
     assert response.status_code == 400
     assert response.json()["error"]["details"]["fields"] == fields
+
+
+def test_incompatible_backtest_timeframe_returns_422_before_persistence(
+    monkeypatch, tmp_path
+):
+    # Break caught: strategy-specific market requirements could be reported as a
+    # generic semantic error after durable work has been created.
+    body = deepcopy(BACKTEST_BODY)
+    body["market"]["timeframe"] = "1d"
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post("/api/v1/backtests", json=body, headers=AUTH)
+        assert client.app.state.experiment_store.claim_next() is None
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "strategy_incompatible"
+    assert response.json()["error"]["details"] == {
+        "fields": ["market.timeframe"],
+        "strategy_id": "bktstr.bearish-regime-scalp",
+        "strategy_version": "1.0.0",
+        "required_timeframe": "1m",
+        "received_timeframe": "1d",
+    }
 
 
 def test_async_idempotent_submission_can_be_polled(monkeypatch, tmp_path):

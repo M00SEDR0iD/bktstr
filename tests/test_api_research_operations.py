@@ -144,6 +144,52 @@ def test_invalid_sweep_is_rejected_before_it_creates_a_durable_experiment(monkey
     assert response.json()["error"]["details"]["fields"] == ["grid"]
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "body", "field"),
+    [
+        (
+            "/api/v1/parameter-sweeps",
+            {**deepcopy(SWEEP_BODY), "base": deepcopy(BACKTEST_BODY)},
+            "base.market.timeframe",
+        ),
+        (
+            "/api/v1/compare",
+            {
+                "candidates": [
+                    {"name": "daily", "backtest": deepcopy(BACKTEST_BODY)},
+                    "exp_valid",
+                ],
+                "execution": "auto",
+            },
+            "candidates.0.backtest.market.timeframe",
+        ),
+        (
+            "/api/v1/regime-comparison",
+            {**deepcopy(REGIME_BODY), "base": deepcopy(BACKTEST_BODY)},
+            "base.market.timeframe",
+        ),
+    ],
+)
+def test_compound_requests_reject_incompatible_timeframe_before_enqueue(
+    monkeypatch, tmp_path, endpoint, body, field
+):
+    # Break caught: compound request adapters could lose a strategy-specific
+    # incompatibility or enqueue the request before reporting it.
+    target = (
+        body["candidates"][0]["backtest"]
+        if endpoint.endswith("compare")
+        else body["base"]
+    )
+    target["market"]["timeframe"] = "1d"
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post(endpoint, json=body, headers=AUTH)
+        assert client.app.state.experiment_store.claim_next() is None
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "strategy_incompatible"
+    assert response.json()["error"]["details"]["fields"] == [field]
+
+
 def _body_with_backtest_error(operation, path, value, inner_path):
     bodies = {
         "sweep": ("/api/v1/parameter-sweeps", deepcopy(SWEEP_BODY), "base"),
@@ -177,7 +223,6 @@ def _body_with_backtest_error(operation, path, value, inner_path):
 @pytest.mark.parametrize(
     ("path", "value", "inner_path"),
     [
-        (("market", "source"), "manual", "market.source"),
         (
             ("regime",),
             {"rules": "relative_return20.lt:0", "benchmark": "bad symbol"},

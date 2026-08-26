@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -359,14 +360,32 @@ class StrategyCreate(BaseModel):
     parameters: dict[str, ParameterValue] = Field(default_factory=dict)
 
 
+class MarketTimeframe(StrEnum):
+    ONE_MINUTE = "1m"
+    FIVE_MINUTES = "5m"
+    FIFTEEN_MINUTES = "15m"
+    ONE_HOUR = "1h"
+    ONE_DAY = "1d"
+
+
+class AutomaticSource(StrEnum):
+    AUTO = "auto"
+
+
 class MarketCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     symbol: str
     start: date
     end: date
-    timeframe: str = "1m"
-    source: str = "auto"
+    timeframe: MarketTimeframe = Field(
+        default=MarketTimeframe.ONE_MINUTE,
+        description=(
+            "Globally valid market-data timeframe. The selected strategy may "
+            "narrow this set; the baseline strategy requires 1m."
+        ),
+    )
+    source: AutomaticSource = AutomaticSource.AUTO
 
 
 class RegimeCreate(BaseModel):
