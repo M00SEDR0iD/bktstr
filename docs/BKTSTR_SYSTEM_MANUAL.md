@@ -1,7 +1,7 @@
 # BKTSTR System Manual
 
-**Release:** v0.3.5  
-**Behavioral baseline:** v0.3.3 trading semantics preserved; v0.3.4 adds integrated deterministic derived caching and v0.3.5 adds development/release reproducibility  
+**Current release:** v0.6.0
+**Behavioral baseline:** v0.3.3 trading semantics are preserved; v0.3.4 added deterministic derived caching, v0.3.5 added release reproducibility, and v0.6 adds the typed research API
 **Purpose:** architecture reference, research-methodology white paper, API/user manual, and future GUI implementation guide.
 
 BKTSTR is a read-only historical market-research service. It separates slow background context from intermediate market regime and fast technical entries so that each layer can be tested independently and combined without hiding assumptions. It never places brokerage orders.
@@ -474,40 +474,54 @@ Missing required-period data remains a hard failure. Cache hits must preserve ex
 Some execution environments cannot reliably reach the Railway hostname directly. The proven agent path is:
 
 ```text
-ChatGPT → Supabase.execute_sql → pg_net net.http_get → Railway BKTSTR → net._http_response → ChatGPT
+ChatGPT → Supabase.execute_sql → pg_net HTTP request → Railway BKTSTR → net._http_response → ChatGPT
 ```
 
-See `AGENT_BACKTEST_RUNBOOK.md` for exact SQL, timeout/polling discipline, frozen NVDA parameters, percentage semantics, and standard QQQ/SOXX controls.
+See `AGENT_BACKTEST_RUNBOOK.md` for bearer-authenticated SQL, timeout/polling discipline, typed request bodies, percentage semantics, and standard QQQ/SOXX controls.
 
 ## API examples
 
-### Sentiment only
+### Typed regime + sentiment backtest
 
-```text
-GET /api/v1/backtest?
-symbol=NVDA&
-start=2026-06-01&
-end=2026-08-21&
-timeframe=1m&
-side=short&
-entry=close.cross_below%3Avwap%2Crsi14.lt%3A50%2Cvolume_ratio20.gt%3A1.1&
-sentiment=true&
-sentiment_sector_benchmark=SOXX&
-sentiment_market_benchmark=QQQ&
-sentiment_data_profile=clean&
-sentiment_sources=price
+Authenticate every research request with `Authorization: Bearer <BKTSTR_API_KEY>`
+and submit a JSON body to `POST /api/v1/backtests`:
+
+```json
+{
+  "strategy": {
+    "id": "bktstr.bearish-regime-scalp",
+    "version": "1.0.0",
+    "parameters": {"stop_pct": 1.0, "target_pct": 3.0}
+  },
+  "market": {
+    "symbol": "NVDA",
+    "start": "2026-06-01",
+    "end": "2026-08-21",
+    "timeframe": "1m",
+    "source": "auto"
+  },
+  "side": "short",
+  "entry": "close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10",
+  "regime": {
+    "enabled": true,
+    "rules": "day_sma20_slope5.lt:0,relative_return20.lt:0",
+    "benchmark": "SOXX",
+    "sentiment_enabled": true,
+    "sentiment_sector_benchmark": "SOXX",
+    "sentiment_market_benchmark": "QQQ",
+    "sentiment_data_profile": "clean",
+    "sentiment_sources": ["price"]
+  },
+  "execution": "async",
+  "include_trades": true
+}
 ```
 
-### Regime + sentiment
-
-```text
-regime=day_sma20_slope5.lt:0,relative_return20.lt:0
-benchmark=SOXX
-sentiment=true
-sentiment_sector_benchmark=SOXX
-sentiment_market_benchmark=QQQ
-sentiment_data_profile=clean
-```
+This long request returns `202 Accepted` with an immutable experiment envelope
+whose `status` is `queued`. Poll `GET /api/v1/experiments/{experiment_id}` with
+the same bearer key until `status` is `completed` or `failed`. A completed
+envelope carries `result.metrics`, `result.trades`, `result.configuration`, and
+`result.provenance`; it does not expose the retired query-string payload.
 
 The regime remains a hard trade filter. Sentiment outputs remain research metadata unless a later release explicitly introduces validated sizing behavior.
 
@@ -640,7 +654,7 @@ The following findings guide future experiments but are not production trade rul
 
 Treat the heavily explored NVDA 2025 and Jun-Aug 2026 samples as discovery data. New claims require untouched periods and cross-symbol validation.
 
-## v0.3.5 release identity and development workflow
+## Historical v0.3.5 release identity and development workflow
 
 v0.3.5 does not change trading formulas. It adds an explicit release identity so a production result can be tied back to the source and deterministic formula/cache contract that produced it. `/health` reports `version` plus `git_commit`, `git_branch`, `git_repo`, `deployment_id`, and optional `build_time`. Railway-sourced identity comes from `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_GIT_BRANCH`, `RAILWAY_GIT_REPO_OWNER`, `RAILWAY_GIT_REPO_NAME`, and `RAILWAY_DEPLOYMENT_ID`; local verification may override commit/build time with `BKTSTR_GIT_COMMIT` and `BKTSTR_BUILD_TIME`.
 
@@ -686,6 +700,110 @@ Strategy filters declare one of gate, rank, or annotate behavior and cannot muta
 Missing required evidence fails with an explanation and a deterministic suggestion. Suggestions are diagnostics only: they never modify source data or variable snapshots, and there is no automatic backfill. Optional missing evidence may be omitted only when its registered filter is both optional and forceable and the caller explicitly confirms a forced run. Such a forced run is degraded and non-canonical; it cannot be presented as a canonical result.
 
 The capability response publishes registered metadata only; it does not promise confirmation requirements or forced-run status. Run-specific information is split across run diagnostics, filter decisions and provenance, and the top-level StrategyRunResult degraded/canonical status when a registered optional, forceable filter is used; the current baseline has no registered filters.
+
+## v0.6 research API
+
+v0.6 makes the typed REST API BKTSTR's programmatic research interface. A
+future MCP server is only an adapter over these same services; it does not add
+agent-specific rules or a second experiment model. The complete machine-readable
+contract is available at `GET /openapi.json`.
+
+### Authentication and discovery
+
+`GET /health` and `GET /api/v1/health` are unauthenticated deployment probes.
+Every other `/api/v1/*` route requires one service bearer key:
+
+```text
+Authorization: Bearer <BKTSTR_API_KEY>
+```
+
+Start with `GET /api/v1/capabilities`. It publishes registered strategy and
+research-variable metadata, available sources and timeframe limits, operation
+names, execution policy, idempotency behavior, experiment states, and API/build
+identity. Registry-derived v0.5 variable tiers, immutability, no-automatic-
+backfill policy, and strategy evidence rules remain authoritative.
+
+### Research operations and polling
+
+Use high-level operations rather than client-supplied formulas:
+
+- `POST /api/v1/backtests` runs one registered strategy configuration.
+- `POST /api/v1/parameter-sweeps`, `POST /api/v1/compare`, and
+  `POST /api/v1/regime-comparison` submit bounded research jobs.
+- `GET /api/v1/backtests/{experiment_id}` is the typed backtest view.
+- `GET /api/v1/experiments/{experiment_id}` is the canonical shared experiment
+  envelope for polling any operation.
+
+All submissions create an immutable experiment with canonical typed request,
+result, and provenance artifacts on the Railway volume. SQLite is the committed
+source of record. Artifact files are written as immutable generations and a
+single atomic manifest points only to the generation matching that committed
+row; startup reconciliation recreates a missing manifest from SQLite and never
+mistakes an interrupted generation for a completed experiment. A completed
+result records the exact strategy configuration, dates, symbol, timeframe,
+selected data source/version or stable snapshot digest, actual coverage and
+cache lineage, governed dependency/regime/sentiment provenance, slippage/
+execution assumptions, regime settings, BKTSTR version and commit. Use the
+experiment ID when comparing or reproducing research.
+
+Every submitted operation accepts `execution: "auto" | "sync" | "async"`.
+`auto` completes a bounded single backtest inline and queues parameter sweeps,
+comparisons, and regime comparisons. `sync` either completes immediately or
+returns `409 execution_not_available`; it is never silently converted to a
+queue. `async` always returns a queued experiment. Poll until the immutable
+envelope status is `completed` or `failed`:
+
+```json
+{
+  "experiment_id": "exp_...",
+  "operation": "parameter_sweep",
+  "status": "queued",
+  "execution": "async"
+}
+```
+
+Mutating operations accept `Idempotency-Key`. Retrying the same key with the
+same canonical typed request returns the original experiment; using it for a
+different request returns `409 idempotency_conflict` rather than silently
+duplicating a hypothesis.
+
+### Market-data inspection and errors
+
+`GET /api/v1/market-data` returns read-only normalized `timestamp`, `open`,
+`high`, `low`, `close`, and `volume` rows. Supply `symbol`, `start`, `end`, and
+`timeframe`, with optional `source`, `limit` (1 through 1000), and opaque
+`cursor`. Use `next_cursor` unchanged for the following page. A cursor is bound
+to the canonical market-data identity, so it cannot page a different symbol,
+range, timeframe, or source. Responses never expose provider credentials or
+provider raw response payloads.
+
+Errors use one typed envelope with a stable `code`, human-readable `message`,
+structured `details`, and `request_id`. Common client actions are: correct the
+reported fields after `422 validation_error`; inspect input after `400
+invalid_request`; authenticate after `401 unauthorized`; wait/poll after `202`;
+adjust a forced inline request after `409 execution_not_available`; and retry a
+provider failure only after evaluating the returned error code.
+
+Semantic validation occurs before an experiment is created: an invalid sweep
+grid, candidate set, regime labels, or backtest configuration returns `400
+invalid_request` with `details.fields` and creates no queued or failed record.
+Once a valid request is durable, provider and execution failures are instead
+recorded on that experiment for polling. Generated OpenAPI enumerates the
+`400`, `401`, `409`, `422`, `500`, and where applicable `502` error envelopes
+for each public operation.
+
+The former `GET /api/v1/backtest` endpoint is intentionally removed in v0.6 to
+avoid a second execution path. It returns `410 legacy_endpoint_removed`, a
+`Link: </openapi.json>; rel="alternate"` header, and a migration target of
+`POST /api/v1/backtests`.
+
+### Railway configuration
+
+Set `BKTSTR_API_KEY` as the single bearer credential. Set
+`BKTSTR_EXPERIMENT_DIR` to a directory on the Railway volume so SQLite records
+and immutable artifacts survive a deployment. `BKTSTR_SYNC_MAX_CALENDAR_DAYS`
+sets the inclusive maximum span for an inline sync backtest (default `31`), and
+`BKTSTR_MAX_SWEEP_VARIANTS` caps parameter sweeps (default `500`).
 
 ## Known limitations
 

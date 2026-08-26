@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import os
+from types import MappingProxyType
 import re
 
 import httpx
@@ -14,6 +15,7 @@ from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
 from .provenance import resolve_sentiment_sources
 from .regime import validate_regime_rules
 from .rules import parse_rules
+from .services.data import normalize_market_request
 
 
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
@@ -83,17 +85,17 @@ class BacktestRequest:
         sentiment_data_profile: str = "clean",
         sentiment_sources: str | tuple[str, ...] | None = None,
     ) -> "BacktestRequest":
-        symbol = symbol.strip().upper()
-        if not _SYMBOL.match(symbol):
-            raise ValueError("invalid symbol")
-        start_date = date.fromisoformat(start)
-        end_date = date.fromisoformat(end)
-        if end_date < start_date:
-            raise ValueError("end must be on or after start")
-        if (end_date - start_date).days > 730:
-            raise ValueError("date range cannot exceed 730 days")
-        if timeframe not in _ALLOWED_TIMEFRAMES:
-            raise ValueError(f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}")
+        market = normalize_market_request(
+            symbol=symbol,
+            start=start,
+            end=end,
+            timeframe=timeframe,
+            source="auto",
+        )
+        symbol = market.symbol
+        start_date = market.start
+        end_date = market.end
+        timeframe = market.timeframe
         if side not in {"long", "short"}:
             raise ValueError("side must be long or short")
         _validate_entry_window(entry_start_time, entry_end_time)
@@ -178,6 +180,14 @@ def provider_name_for_request(request: BacktestRequest, *, today: date | None = 
     raise RuntimeError("MASSIVE_API_KEY is required for historical intraday ranges older than the Yahoo fallback window")
 
 
+class SerializedBacktestResult(dict):
+    """Frozen compatibility payload with private execution provenance for new services."""
+
+    def __init__(self, payload: dict, execution_provenance: dict) -> None:
+        super().__init__(payload)
+        self.execution_provenance = MappingProxyType(dict(execution_provenance))
+
+
 async def execute_backtest(request: BacktestRequest) -> dict:
     # These imports remain local because the governed measurements preserve the
     # legacy formula-version constants declared by this compatibility module.
@@ -219,7 +229,7 @@ async def execute_backtest(request: BacktestRequest) -> dict:
 def serialize_strategy_run_result(request: BacktestRequest, result) -> dict:
     """Render the domain result through the unchanged v0.3 compatibility payload."""
 
-    return {
+    payload = {
         "request": {
             "symbol": request.symbol,
             "start": request.start.isoformat(),
@@ -247,3 +257,7 @@ def serialize_strategy_run_result(request: BacktestRequest, result) -> dict:
         "summary": dict(result.summary),
         "trades": [dict(item) for item in result.trades],
     }
+    # This metadata is deliberately not a JSON key in the frozen v0.5 payload.
+    # The typed research service consumes it in-process to retain the governed
+    # input lineage needed for reproducibility.
+    return SerializedBacktestResult(payload, dict(result.provenance))

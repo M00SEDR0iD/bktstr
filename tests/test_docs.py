@@ -33,6 +33,23 @@ def test_readme_and_status_describe_v035_release_workflow():
     assert "git ls-files" in archive
 
 
+def test_current_linked_api_docs_use_typed_bearer_backtests_and_no_unimplemented_sunset():
+    # Break caught: a current linked guide could direct clients to the retired unauthenticated GET.
+    manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text(encoding="utf-8")
+    runbook = (ROOT / "AGENT_BACKTEST_RUNBOOK.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for document in (manual, runbook):
+        assert "Current release:** v0.6.0" in document
+        assert "POST /api/v1/backtests" in document
+        assert "Authorization" in document
+        assert "/api/v1/experiments/{experiment_id}" in document
+        assert "GET /api/v1/backtest?" not in document
+        assert "BKTSTR_LEGACY_BACKTEST_SUNSET" not in document
+    assert "BKTSTR_LEGACY_BACKTEST_SUNSET" not in readme
+    assert "legacy_endpoint_removed" in manual
+
+
 def test_manual_publishes_strategy_neutral_evidence_contracts():
     manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text().lower()
     for phrase in [

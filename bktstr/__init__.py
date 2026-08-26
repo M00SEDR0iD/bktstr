@@ -1,3 +1,3 @@
 """BKTSTR granular backtesting service."""
 
-__version__ = "0.3.5"
+__version__ = "0.6.0"

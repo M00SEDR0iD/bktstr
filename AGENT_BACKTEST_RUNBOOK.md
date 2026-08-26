@@ -1,7 +1,7 @@
 # BKTSTR Agent Backtest Runbook
 
-**Current release:** v0.3.5  
-**Behavioral baseline:** v0.3.3 trading semantics, with v0.3.4 deterministic derived caching and v0.3.5 release infrastructure  
+**Current release:** v0.6.0
+**Behavioral baseline:** v0.3.3 trading semantics, with v0.3.4 deterministic derived caching, v0.3.5 release infrastructure, and v0.6 typed experiment envelopes
 **Research purpose:** identify short-duration scalp opportunities that occur inside a broader bearish or deteriorating market/sector regime.  
 **Production API:** `https://bktstr-production.up.railway.app`
 
@@ -36,7 +36,7 @@ Direct browser/container access to Railway is unreliable from some ChatGPT sessi
 ```text
 ChatGPT
   → Supabase.execute_sql
-  → net.http_get(...)
+  → net.http_get(...) / net.http_post(...)
   → Railway BKTSTR
   → net._http_response
   → ChatGPT
@@ -56,9 +56,14 @@ select net.http_get(
 ```sql
 select net.http_get(
   url := 'https://bktstr-production.up.railway.app/api/v1/capabilities',
+  headers := jsonb_build_object('Authorization', 'Bearer <BKTSTR_API_KEY>'),
   timeout_milliseconds := 30000
 ) as request_id;
 ```
+
+Replace `<BKTSTR_API_KEY>` with the bearer key supplied through your approved
+secret path; do not store that key in a notebook, table, prompt, or committed
+SQL file.
 
 ### Poll a request
 
@@ -74,37 +79,49 @@ For long 1-minute backtests use `timeout_milliseconds := 120000` or `180000`. Fu
 
 ## 3. Locked NVDA research template
 
+Use `POST /api/v1/backtests` for each typed experiment. The long locked
+control below deliberately requests `async` execution, so it returns a queued
+experiment instead of occupying the HTTP request.
+
 ```sql
-select net.http_get(
-  url := 'https://bktstr-production.up.railway.app/api/v1/backtest',
-  params := jsonb_build_object(
-    'symbol','NVDA',
-    'start','2025-03-01',
-    'end','2025-12-31',
-    'timeframe','1m',
-    'side','short',
-    'entry','close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.1',
-    'regime','day_sma20_slope5.lt:0,relative_return20.lt:0',
-    'benchmark','SOXX',
-    'sentiment','true',
-    'sentiment_sector_benchmark','SOXX',
-    'sentiment_market_benchmark','QQQ',
-    'sentiment_data_profile','clean',
-    'sentiment_sources','price',
-    'stop_pct','1',
-    'target_pct','3',
-    'max_hold_minutes','240',
-    'slippage_bps','2',
-    'entry_start_time','12:30',
-    'entry_end_time','16:00',
-    'same_day','true',
-    'eod_exit','true',
-    'position_size','1000',
-    'trade_limit','1000'
+select net.http_post(
+  url := 'https://bktstr-production.up.railway.app/api/v1/backtests',
+  headers := jsonb_build_object('Authorization', 'Bearer <BKTSTR_API_KEY>'),
+  body := jsonb_build_object(
+    'strategy', jsonb_build_object(
+      'id', 'bktstr.bearish-regime-scalp',
+      'version', '1.0.0',
+      'parameters', jsonb_build_object('stop_pct', 1.0, 'target_pct', 3.0)
+    ),
+    'market', jsonb_build_object(
+      'symbol', 'NVDA', 'start', '2025-03-01', 'end', '2025-12-31',
+      'timeframe', '1m', 'source', 'auto'
+    ),
+    'side', 'short',
+    'entry', 'close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10',
+    'regime', jsonb_build_object(
+      'enabled', true,
+      'rules', 'day_sma20_slope5.lt:0,relative_return20.lt:0',
+      'benchmark', 'SOXX',
+      'sentiment_enabled', true,
+      'sentiment_sector_benchmark', 'SOXX',
+      'sentiment_market_benchmark', 'QQQ',
+      'sentiment_data_profile', 'clean',
+      'sentiment_sources', jsonb_build_array('price')
+    ),
+    'execution', 'async',
+    'include_trades', true
   ),
   timeout_milliseconds := 180000
 ) as request_id;
 ```
+
+This long request returns `202 Accepted` with `status: "queued"` and an
+`experiment_id` in the response body. Read that ID from `net._http_response`,
+then submit bearer-authenticated `GET /api/v1/experiments/{experiment_id}`
+requests until its `status` is `completed` or `failed`. A completed backtest
+returns `result.metrics`, `result.trades`, `result.configuration`, and
+`result.provenance`.
 
 ### Critical percentage semantics
 
@@ -146,24 +163,12 @@ These are research findings, not production trading rules:
 Always capture at least:
 
 ```text
-trades
-wins / losses
-win_rate_pct
-total_pnl_dollars
-expected_pnl_per_trade
-profit factor (derive from trades if not in summary)
-average winner / loser
-max_drawdown_pct
-MFE / MAE
-exit_reason distribution
-average sentiment direction / momentum / fragility
-component spread
-volatility stress
-coverage_start / coverage_end
-warmup_degraded
-fallback_used
-non_clean_data_used
-all_point_in_time_safe
+result.metrics.ev_per_trade / win_rate / profit_factor / max_drawdown / sharpe
+result.metrics.trade_count / total_pnl / total_return
+result.trades[].mfe / mae / exit_reason / holding_time_minutes
+result.trades[].signal_values_at_entry / regime_variables
+result.configuration (strategy, market, regime, execution)
+result.provenance (market-data source/version/coverage, execution model, software build)
 ```
 
 Do not compare win rate alone. EV, MFE/MAE, stop-out rate, trade count, and provenance matter.
@@ -206,10 +211,10 @@ must **not** recompute unchanged VWAP/RSI/daily EMA/ATR/sentiment primitives. Th
 
 ## v0.3.4+ derived cache verification
 
-Production `/api/v1/capabilities` must report the expected deployed version and the derived namespaces `intraday_features`, `daily_regime`, and `daily_sentiment`. Backtest responses expose `data.derived_cache`. For correctness controls, set `BKTSTR_DERIVED_CACHE_ENABLED=false` and verify trade records are exactly equal to the cache-enabled run; this toggle changes computation reuse only, never strategy semantics.
+Production `/api/v1/capabilities` must report the expected deployed version and the derived namespaces `intraday_features`, `daily_regime`, and `daily_sentiment`. The typed completed envelope preserves market-data provenance alongside the strategy result. For correctness controls, set `BKTSTR_DERIVED_CACHE_ENABLED=false` and verify trade records are exactly equal to the cache-enabled run; this toggle changes computation reuse only, never strategy semantics.
 
 
-## 10. v0.3.5 development and deployment workflow
+## 10. v0.6 development and deployment workflow
 
 Normal source development is:
 
@@ -226,7 +231,7 @@ python scripts/production_acceptance.py \
   --base-url https://bktstr-production.up.railway.app
 ```
 
-This is the canonical v0.3.5 production gate. It runs the frozen NVDA Jun-Aug 2026 anchor twice and requires the known summary, identical trading output, and warm hits for intraday/regime/sentiment derived caches.
+Set `BKTSTR_API_KEY` in the environment before running production acceptance. This v0.6 production gate verifies deployed identity, the OpenAPI research contract, bearer-authenticated capabilities, and a completed bounded backtest envelope.
 
 ### GitHub-through-Supabase emergency recovery
 

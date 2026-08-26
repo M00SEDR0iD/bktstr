@@ -6,7 +6,7 @@ on:
       expected_version:
         description: Version expected from production health and capabilities
         required: true
-        default: '0.3.5'
+        default: '0.6.0'
         type: string
       expected_commit:
         description: Full Git SHA expected from Railway health
@@ -39,6 +39,8 @@ jobs:
       - name: Install pinned dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Run production acceptance
+        env:
+          BKTSTR_API_KEY: ${{ secrets.BKTSTR_API_KEY }}
         run: >-
           python scripts/production_acceptance.py
           --base-url "${{ inputs.base_url }}"

@@ -5,8 +5,8 @@ This outcome-driven plan maps the standalone web-application roadmap to producti
 | Version | State | Milestone | Production outcome |
 | --- | --- | --- | --- |
 | v0.4.0 | Completed | Baseline and documentation repair | Trustworthy docs, executable examples, professional delivery governance, and a frozen v0.3.5 baseline |
-| v0.5.0 | Active | Strategy-neutral core | Stable domain contracts with equal normalized trading output |
-| v0.6.0 | Planned | FastAPI application foundation | Typed API, OpenAPI, compatibility routing, structured errors, and health contracts |
+| v0.5.0 | Completed | Strategy-neutral core | Stable domain contracts with equal normalized trading output |
+| v0.6.0 | Completed | API-first research interface | Typed REST research operations, OpenAPI, bearer access, durable experiments, and health contracts |
 | v0.7.0 | Planned | Persistence and single-owner authentication | Private owner access and durable research records |
 | v0.8.0 | Planned | Durable execution jobs | Worker jobs with idempotency, retries, cancellation, heartbeat, and recovery |
 | v0.9.0 | Planned | React research workspace | Complete browser research workflow |
@@ -32,7 +32,7 @@ The migrated baseline produces byte-equivalent normalized trades and equal summa
 
 ### v0.6.0
 
-API contract, legacy compatibility, structured-error, and production baseline tests pass through FastAPI.
+The API-first research contract is delivered: typed REST operations expose a complete OpenAPI document, every experiment is reproducible on the Railway volume, bounded ordinary backtests complete inline, expensive research queues for polling, and the old `GET /api/v1/backtest` returns the documented `410` migration response. MCP and a browser UI remain future adapters over these same services.
 
 ### v0.7.0
 

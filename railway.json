@@ -1,7 +1,7 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
-    "startCommand": "python -m bktstr.server",
+    "startCommand": "uvicorn bktstr.api.app:create_app --factory --host 0.0.0.0 --port $PORT",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 20,
     "restartPolicyType": "ON_FAILURE",

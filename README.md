@@ -1,6 +1,6 @@
 # BKTSTR
 
-**Current release: v0.3.5**
+**Current release: v0.6.0**
 
 BKTSTR is a read-only equity/ETF research backtester built to identify short-duration scalp opportunities inside a broader bearish or deteriorating market regime. It never places brokerage orders.
 
@@ -46,7 +46,10 @@ Optional path override:
 BKTSTR_DERIVED_CACHE_DIR=/data/bktstr-cache/derived
 ```
 
-Every backtest exposes `data.derived_cache` hit/miss metadata.
+Every typed backtest reports provider day-cache counters at
+`result.provenance.market_data.cache`. Governed source and derived
+materializations, including their stable definitions, scopes, coverage, and
+content digests, are exposed at `result.provenance.governed_dependencies`.
 
 ## API
 
@@ -54,7 +57,13 @@ Production endpoint: `https://bktstr-production.up.railway.app`
 
 - `GET /health`
 - `GET /api/v1/capabilities`
-- `GET /api/v1/backtest`
+- `POST /api/v1/backtests`
+- `POST /api/v1/parameter-sweeps`
+- `POST /api/v1/compare`
+- `POST /api/v1/regime-comparison`
+- `GET /api/v1/experiments/{experiment_id}`
+- `GET /api/v1/market-data`
+- `GET /openapi.json`
 
 Core short setup used as the frozen NVDA research baseline:
 
@@ -104,7 +113,7 @@ PORT=8000 python -m bktstr.server
 - [v1 release plan](docs/roadmap/v1-release-plan.md)
 - [Release procedure](docs/development/releases.md)
 
-## v0.3.5 development and release workflow
+## v0.6.0 development and release workflow
 
 GitHub Actions now runs the complete test suite, compile checks, repository-hygiene guard, and derived-cache benchmark on pushes to `main` and on pull requests. The standard release path is:
 
@@ -120,12 +129,16 @@ After Railway deploys, run the locked production regression:
 python scripts/production_acceptance.py --base-url https://bktstr-production.up.railway.app
 ```
 
-The acceptance command checks v0.3.5, the derived-cache contract, the frozen NVDA Jun-Aug 2026 anchor, exact trading-output equality across two identical runs, and second-run derived-cache hits.
+The acceptance command checks v0.6.0 deployment identity, the published OpenAPI research contract, bearer-authenticated capabilities, and a completed bounded backtest envelope.
 
 If an agent cannot reach GitHub directly, use the GitHub-through-Supabase recovery bridge in `ops/supabase/GITHUB_BRIDGE.md`. It is an emergency source-recovery path, not the normal development workflow.
 
 ## Deployment
 
-Railway uses `Dockerfile` and `railway.json`. Set `MASSIVE_API_KEY` as a Railway secret and attach a persistent volume (commonly `/data`). Never commit API credentials.
+Railway uses `Dockerfile` and `railway.json`. Set `MASSIVE_API_KEY` and `BKTSTR_API_KEY` as Railway secrets and attach a persistent volume (commonly `/data`). Never commit API credentials. The FastAPI service also reads these deployment settings:
+
+- `BKTSTR_EXPERIMENT_DIR` — durable SQLite records and immutable experiment artifacts; place it on the Railway volume.
+- `BKTSTR_SYNC_MAX_CALENDAR_DAYS` — maximum inclusive calendar span for an inline `sync` backtest (default `31`).
+- `BKTSTR_MAX_SWEEP_VARIANTS` — maximum generated parameter-sweep variants (default `500`).
 
 See [`docs/BKTSTR_SYSTEM_MANUAL.md`](docs/BKTSTR_SYSTEM_MANUAL.md) for the complete architecture, research discipline, look-ahead rules, provenance system, and GUI contract.

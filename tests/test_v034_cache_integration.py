@@ -161,8 +161,8 @@ def test_v034_capabilities_publish_derived_cache_contract():
     from bktstr import __version__
     from bktstr.server import CAPABILITIES
 
-    assert __version__ == "0.3.5"
-    assert CAPABILITIES["version"] == "0.3.5"
+    assert __version__ == "0.6.0"
+    assert CAPABILITIES["version"] == "0.6.0"
     assert CAPABILITIES["cache"]["derived"]["type"] == "deterministic feature/context DataFrames"
     assert CAPABILITIES["cache"]["derived"]["toggle"] == "BKTSTR_DERIVED_CACHE_ENABLED"
     assert set(CAPABILITIES["cache"]["derived"]["namespaces"]) >= {
