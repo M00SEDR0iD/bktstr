@@ -12,7 +12,7 @@ from bktstr.services.backtest import (
 )
 from bktstr.services.data import normalize_market_request
 from bktstr.services.regimes import RegimeInput, normalize_regime_request
-from bktstr.services.validation import SemanticValidationError
+from bktstr.services.validation import SemanticValidationError, StrategyCompatibilityError
 
 
 BASE_INPUT = {
@@ -25,6 +25,45 @@ BASE_INPUT = {
     "side": "short",
     "entry": "close.cross_below:vwap",
 }
+
+
+def test_backtest_input_rejects_timeframe_incompatible_with_registered_strategy():
+    with pytest.raises(StrategyCompatibilityError) as raised:
+        BacktestInput(
+            strategy_id="bktstr.bearish-regime-scalp",
+            strategy_version="1.0.0",
+            symbol="NVDA",
+            start=date(2026, 8, 17),
+            end=date(2026, 8, 17),
+            timeframe="1d",
+            side="short",
+            entry="close.cross_below:vwap",
+        )
+
+    error = raised.value
+    assert error.fields == ("market.timeframe",)
+    assert error.strategy_id == "bktstr.bearish-regime-scalp"
+    assert error.strategy_version == "1.0.0"
+    assert error.required_timeframe == "1m"
+    assert error.received_timeframe == "1d"
+
+
+def test_strategy_compatibility_error_keeps_metadata_when_prefixed():
+    original = StrategyCompatibilityError(
+        "incompatible",
+        ("market.timeframe",),
+        strategy_id="strategy",
+        strategy_version="1",
+        required_timeframe="1m",
+        received_timeframe="1d",
+    )
+
+    prefixed = original.prefixed("base")
+
+    assert isinstance(prefixed, StrategyCompatibilityError)
+    assert prefixed.fields == ("base.market.timeframe",)
+    assert prefixed.required_timeframe == "1m"
+    assert prefixed.received_timeframe == "1d"
 
 
 def _one_trade_legacy_result() -> dict:

@@ -23,7 +23,7 @@ from bktstr.strategies import ResolvedStrategy, baseline_strategy_registry
 from .data import normalize_market_request
 from .experiments import ExperimentStatus, ExperimentStore
 from .regimes import RegimeInput, normalize_regime_request
-from .validation import SemanticValidationError
+from .validation import SemanticValidationError, StrategyCompatibilityError
 
 
 ParameterValue = float | int | str | bool | None
@@ -120,6 +120,19 @@ class BacktestInput:
             raise SemanticValidationError(
                 f"unknown strategy {self.strategy_id!r} version {self.strategy_version!r}",
                 (field_path,),
+            )
+        if market.timeframe != definition.timeframe:
+            raise StrategyCompatibilityError(
+                (
+                    f"Strategy {self.strategy_id!r} version {self.strategy_version!r} "
+                    f"requires timeframe {definition.timeframe!r}; "
+                    f"received {market.timeframe!r}."
+                ),
+                ("market.timeframe",),
+                strategy_id=self.strategy_id,
+                strategy_version=self.strategy_version,
+                required_timeframe=definition.timeframe,
+                received_timeframe=market.timeframe,
             )
         definitions = definition.parameter_definitions
         unknown = sorted(set(self.parameters) - set(definitions))
