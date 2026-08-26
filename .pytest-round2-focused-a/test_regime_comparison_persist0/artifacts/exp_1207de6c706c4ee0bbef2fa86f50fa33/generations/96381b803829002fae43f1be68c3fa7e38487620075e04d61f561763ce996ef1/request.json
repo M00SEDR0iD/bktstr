@@ -1,0 +1,1 @@
+{"entry":"close.cross_below:vwap","execution":"sync","include_trades":true,"market":{"end":"2026-01-31","source":"auto","start":"2026-01-01","symbol":"NVDA","timeframe":"1m"},"regime":null,"side":"short","strategy":{"id":"bktstr.bearish-regime-scalp","parameters":{},"version":"1.0.0"}}

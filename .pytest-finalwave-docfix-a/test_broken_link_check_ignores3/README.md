@@ -1,0 +1,3 @@
+- ```markdown
+  [example](missing.md)
+  ```

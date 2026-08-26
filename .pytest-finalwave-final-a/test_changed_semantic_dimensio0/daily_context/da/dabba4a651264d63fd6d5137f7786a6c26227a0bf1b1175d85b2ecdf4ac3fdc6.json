@@ -1,0 +1,22 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "x"
+  ],
+  "created_unix": 1787698182.3890865,
+  "dimensions": {
+    "formula_version": "sentiment-v2",
+    "symbol": "NVDA"
+  },
+  "input_digests": {
+    "raw": "ef4690210fcdc4582d9cfb3c2e6710ac9eebe484b6ef2dcac62584661fe34502"
+  },
+  "key": "dabba4a651264d63fd6d5137f7786a6c26227a0bf1b1175d85b2ecdf4ac3fdc6",
+  "namespace": "daily_context",
+  "rows": 3
+}

@@ -1,0 +1,22 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "feature"
+  ],
+  "created_unix": 1787698182.4081042,
+  "dimensions": {
+    "formula_version": "v1",
+    "symbol": "NVDA"
+  },
+  "input_digests": {
+    "raw": "ef4690210fcdc4582d9cfb3c2e6710ac9eebe484b6ef2dcac62584661fe34502"
+  },
+  "key": "dc822034285089b363a3325f0c3f974935ffbcd4da5e8324abe5aa7c8c0266c8",
+  "namespace": "intraday_features",
+  "rows": 3
+}

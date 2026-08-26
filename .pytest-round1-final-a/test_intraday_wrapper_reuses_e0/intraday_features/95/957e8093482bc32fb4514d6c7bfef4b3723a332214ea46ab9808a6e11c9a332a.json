@@ -1,0 +1,23 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "close",
+    "volume",
+    "vwap",
+    "rsi14",
+    "volume_ratio20"
+  ],
+  "created_unix": 1787696104.1521368,
+  "dimensions": {
+    "formula_version": "intraday-v0.3.3",
+    "session_model_version": "regular-hours-session-v1",
+    "symbol": "NVDA",
+    "timeframe": "1m"
+  },
+  "input_digests": {
+    "raw": "dfa734eba8d937d8cbf2aebda64dd2e7f75c45a8b97ee3802443c321badde4bf"
+  },
+  "key": "957e8093482bc32fb4514d6c7bfef4b3723a332214ea46ab9808a6e11c9a332a",
+  "namespace": "intraday_features",
+  "rows": 5
+}

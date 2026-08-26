@@ -1,0 +1,92 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "day_close",
+    "day_sma20",
+    "day_sma50",
+    "day_sma20_slope5",
+    "day_return20",
+    "benchmark_return20",
+    "relative_return20"
+  ],
+  "created_unix": 1787696820.3237133,
+  "dimensions": {
+    "caller_dimensions": {
+      "formula_version": "regime-v1",
+      "symbol": "NVDA",
+      "timeframe": "1m"
+    },
+    "definitions": [
+      {
+        "column": "benchmark_return20",
+        "formula_version": "regime-v1",
+        "id": "regime.benchmark_return20",
+        "plugin_id": "bktstr.regime",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "day_close",
+        "formula_version": "regime-v1",
+        "id": "regime.day_close",
+        "plugin_id": "bktstr.regime",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "day_return20",
+        "formula_version": "regime-v1",
+        "id": "regime.day_return20",
+        "plugin_id": "bktstr.regime",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "day_sma20",
+        "formula_version": "regime-v1",
+        "id": "regime.day_sma20",
+        "plugin_id": "bktstr.regime",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "day_sma20_slope5",
+        "formula_version": "regime-v1",
+        "id": "regime.day_sma20_slope5",
+        "plugin_id": "bktstr.regime",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "day_sma50",
+        "formula_version": "regime-v1",
+        "id": "regime.day_sma50",
+        "plugin_id": "bktstr.regime",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "relative_return20",
+        "formula_version": "regime-v1",
+        "id": "regime.relative_return20",
+        "plugin_id": "bktstr.regime",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "input_digests": {
+    "daily_regime": "be95858d873cfaa593f4ae95d6c8396f3bf0219a540543a99e1b43b7e005cfd7",
+    "intraday": "6d48946f170c70d8295e650b8fe02988c5a946c56c630c194356099a5a3484e1"
+  },
+  "key": "28afef50069d899dd94b14c91ac5d6270885687ee7615c1f112ba2ef5e5cedba",
+  "namespace": "intraday_regime_attachment",
+  "rows": 3
+}

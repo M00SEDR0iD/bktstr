@@ -1,0 +1,29 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "alpha"
+  ],
+  "created_unix": 1787698452.0816197,
+  "dimensions": {
+    "caller_dimensions": {
+      "symbol": "NVDA"
+    },
+    "definitions": [
+      {
+        "column": "alpha",
+        "formula_version": "alpha-v1",
+        "id": "technical.alpha",
+        "plugin_id": "technical",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.1.0"
+      }
+    ]
+  },
+  "input_digests": {
+    "raw": "1de1f64610edb5c21011e9c87a910f8f29653a74bdd162669d781f081b31a567"
+  },
+  "key": "bca659bdb8a1432286b7f59612a50f7d160aeb7f22996ee1ed5a5ffde902e8ea",
+  "namespace": "technical",
+  "rows": 3
+}

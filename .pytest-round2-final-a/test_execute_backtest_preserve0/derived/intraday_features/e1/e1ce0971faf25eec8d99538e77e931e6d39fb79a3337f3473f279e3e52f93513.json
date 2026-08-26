@@ -1,0 +1,102 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "rsi14",
+    "volume_ratio20"
+  ],
+  "created_unix": 1787696770.542327,
+  "dimensions": {
+    "caller_dimensions": {
+      "formula_version": "intraday-v1",
+      "regular_hours_only": true,
+      "symbol": "NVDA",
+      "timeframe": "1m"
+    },
+    "definitions": [
+      {
+        "column": "close",
+        "formula_version": null,
+        "id": "market.subject.close",
+        "plugin_id": null,
+        "plugin_version": null,
+        "tier": "A",
+        "version": "1.0.0"
+      },
+      {
+        "column": "high",
+        "formula_version": null,
+        "id": "market.subject.high",
+        "plugin_id": null,
+        "plugin_version": null,
+        "tier": "A",
+        "version": "1.0.0"
+      },
+      {
+        "column": "low",
+        "formula_version": null,
+        "id": "market.subject.low",
+        "plugin_id": null,
+        "plugin_version": null,
+        "tier": "A",
+        "version": "1.0.0"
+      },
+      {
+        "column": "open",
+        "formula_version": null,
+        "id": "market.subject.open",
+        "plugin_id": null,
+        "plugin_version": null,
+        "tier": "A",
+        "version": "1.0.0"
+      },
+      {
+        "column": "volume",
+        "formula_version": null,
+        "id": "market.subject.volume",
+        "plugin_id": null,
+        "plugin_version": null,
+        "tier": "A",
+        "version": "1.0.0"
+      },
+      {
+        "column": "rsi14",
+        "formula_version": "intraday-v1",
+        "id": "technical.rsi14",
+        "plugin_id": "bktstr.technical",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "volume_ratio20",
+        "formula_version": "intraday-v1",
+        "id": "technical.volume_ratio20",
+        "plugin_id": "bktstr.technical",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "vwap",
+        "formula_version": "intraday-v1",
+        "id": "technical.vwap",
+        "plugin_id": "bktstr.technical",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "input_digests": {
+    "raw": "ab570eec04eb3639abcdb6b96fc39bf2aca0f0e2a95e7b1ba2f9f959175d346b"
+  },
+  "key": "e1ce0971faf25eec8d99538e77e931e6d39fb79a3337f3473f279e3e52f93513",
+  "namespace": "intraday_features",
+  "rows": 3
+}

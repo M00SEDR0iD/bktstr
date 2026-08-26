@@ -1,0 +1,20 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "close",
+    "volume",
+    "ema50"
+  ],
+  "created_unix": 1787698184.123186,
+  "dimensions": {
+    "formula_version": "daily-v1",
+    "symbol": "NVDA",
+    "timeframe": "1d"
+  },
+  "input_digests": {
+    "raw_daily": "dfa734eba8d937d8cbf2aebda64dd2e7f75c45a8b97ee3802443c321badde4bf"
+  },
+  "key": "2d2a6ecb9fd7e481afc564bf0249e593cb6c7b380ea58ebcbb3bb0d2009db947",
+  "namespace": "daily_features",
+  "rows": 5
+}

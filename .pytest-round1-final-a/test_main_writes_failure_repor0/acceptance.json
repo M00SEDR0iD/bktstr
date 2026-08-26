@@ -1,0 +1,4 @@
+{
+  "error": "expected commit new-commit, got old-commit",
+  "status": "fail"
+}

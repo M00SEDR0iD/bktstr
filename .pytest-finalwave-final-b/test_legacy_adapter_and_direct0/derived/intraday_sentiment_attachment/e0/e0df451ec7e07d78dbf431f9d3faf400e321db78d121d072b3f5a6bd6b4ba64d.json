@@ -1,0 +1,362 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "relative_return63_sector",
+    "relative_return126_sector",
+    "relative_return63_market",
+    "relative_return126_market",
+    "sma50_slope20",
+    "sma100_slope20",
+    "sma200_slope20",
+    "distance_from_52w_high",
+    "days_below_sma50",
+    "ema50",
+    "ema100",
+    "ema200",
+    "atr20_pct",
+    "realized_vol20",
+    "realized_vol60",
+    "volatility_ratio",
+    "persistence_occupancy",
+    "normalized_ema50_distance",
+    "persistence_pressure_raw",
+    "sentiment_leadership_score",
+    "sentiment_trend_score",
+    "sentiment_peak_score",
+    "sentiment_persistence_score",
+    "sentiment_direction",
+    "sentiment_completeness",
+    "sentiment_confidence",
+    "sentiment_multiplier_long",
+    "sentiment_multiplier_short",
+    "sentiment_momentum20",
+    "sentiment_momentum60",
+    "sentiment_momentum",
+    "sentiment_component_spread",
+    "sentiment_volatility_stress",
+    "sentiment_fragility"
+  ],
+  "created_unix": 1787698436.2081673,
+  "dimensions": {
+    "caller_dimensions": {
+      "formula_version": "sentiment-v0.3.3",
+      "symbol": "NVDA",
+      "timeframe": "1m"
+    },
+    "definitions": [
+      {
+        "column": "atr20_pct",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.atr20_pct",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_completeness",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.completeness",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_component_spread",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.component_spread",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_confidence",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.confidence",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "days_below_sma50",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.days_below_sma50",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_direction",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.direction",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "distance_from_52w_high",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.distance_from_52w_high",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "ema100",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.ema100",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "ema200",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.ema200",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "ema50",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.ema50",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_fragility",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.fragility",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_leadership_score",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.leadership_score",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_momentum",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.momentum",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_momentum20",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.momentum20",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_momentum60",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.momentum60",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_multiplier_long",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.multiplier_long",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_multiplier_short",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.multiplier_short",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "normalized_ema50_distance",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.normalized_ema50_distance",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_peak_score",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.peak_score",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "persistence_occupancy",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.persistence_occupancy",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "persistence_pressure_raw",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.persistence_pressure_raw",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_persistence_score",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.persistence_score",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "realized_vol20",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.realized_vol20",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "realized_vol60",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.realized_vol60",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "relative_return126_market",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.relative_return126_market",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "relative_return126_sector",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.relative_return126_sector",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "relative_return63_market",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.relative_return63_market",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "relative_return63_sector",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.relative_return63_sector",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sma100_slope20",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.sma100_slope20",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sma200_slope20",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.sma200_slope20",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sma50_slope20",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.sma50_slope20",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_trend_score",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.trend_score",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "volatility_ratio",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.volatility_ratio",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "sentiment_volatility_stress",
+        "formula_version": "sentiment-v0.3.3",
+        "id": "sentiment.volatility_stress",
+        "plugin_id": "bktstr.sentiment",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "input_digests": {
+    "daily_sentiment": "8c736df0fed24f8a0d9ad53ea2fd9d1c670958df2693167e0666e89f0b6d7be3",
+    "intraday": "fa376e5e4732e1552a583e1dadfdd58377f480bb0b0a7c164922a12774687d1e"
+  },
+  "key": "e0df451ec7e07d78dbf431f9d3faf400e321db78d121d072b3f5a6bd6b4ba64d",
+  "namespace": "intraday_sentiment_attachment",
+  "rows": 3
+}

@@ -1,0 +1,29 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "close",
+    "volume",
+    "sentiment_direction",
+    "relative_return20"
+  ],
+  "created_unix": 1787696104.1691396,
+  "dimensions": {
+    "data_profile": "clean",
+    "formula_version": "context-sentiment-v0.3.3",
+    "lookahead_rule": "strictly-prior-completed-session",
+    "market": "QQQ",
+    "sector": "SOXX",
+    "sources": [
+      "price"
+    ],
+    "subject": "NVDA"
+  },
+  "input_digests": {
+    "market_daily_features": "c3da552a5e7a81f6a9aad2d02fca9dba4512efac90a6461caadb02944c0e4c7a",
+    "sector_daily_features": "6bb060b4c6f4a8174ba009110fa1e4290e26dd1d58ded64a0671ff95621e6266",
+    "subject_daily_features": "dfa734eba8d937d8cbf2aebda64dd2e7f75c45a8b97ee3802443c321badde4bf"
+  },
+  "key": "f07af6e09a0f097cc34e442f10ad01c101fb925d776aae2b2af5990aab1f6610",
+  "namespace": "daily_context",
+  "rows": 5
+}

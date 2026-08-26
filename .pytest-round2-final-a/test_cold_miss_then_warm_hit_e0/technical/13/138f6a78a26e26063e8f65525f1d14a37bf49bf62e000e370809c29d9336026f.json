@@ -1,0 +1,40 @@
+{
+  "cache_format_version": "derived-frame-cache-v1",
+  "columns": [
+    "alpha",
+    "beta"
+  ],
+  "created_unix": 1787696821.9644406,
+  "dimensions": {
+    "caller_dimensions": {
+      "symbol": "NVDA",
+      "timeframe": "1m"
+    },
+    "definitions": [
+      {
+        "column": "alpha",
+        "formula_version": "alpha-v1",
+        "id": "technical.alpha",
+        "plugin_id": "technical",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      },
+      {
+        "column": "beta",
+        "formula_version": "beta-v1",
+        "id": "technical.beta",
+        "plugin_id": "technical",
+        "plugin_version": "1.0.0",
+        "tier": "B",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "input_digests": {
+    "raw": "1de1f64610edb5c21011e9c87a910f8f29653a74bdd162669d781f081b31a567"
+  },
+  "key": "138f6a78a26e26063e8f65525f1d14a37bf49bf62e000e370809c29d9336026f",
+  "namespace": "technical",
+  "rows": 3
+}

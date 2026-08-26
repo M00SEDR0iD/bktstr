@@ -1,0 +1,1 @@
+{"configuration":{},"metrics":{"ev_per_trade":1.0,"max_drawdown":-1.0,"profit_factor":2.0,"sharpe":0.5,"total_pnl":10.0,"total_return":1.0,"trade_count":2,"win_rate":50.0},"provenance":{"strategy":{"id":"bktstr.bearish-regime-scalp"}},"trades":[]}
