@@ -40,6 +40,9 @@ RESEARCH_PATHS = {
     "/api/v1/experiments/{experiment_id}",
     "/api/v1/market-data",
 }
+MARKET_TIMEFRAMES = ["1m", "5m", "15m", "1h", "1d"]
+AUTOMATIC_SOURCES = ["auto"]
+RETRY_AFTER_SECONDS = 2
 
 
 class AcceptanceError(RuntimeError):
@@ -70,7 +73,6 @@ def _post_json(
     path: str,
     body: dict,
     *,
-    require_polling_headers: bool = False,
     required_status: int | None = None,
 ) -> dict:
     response = client.post(path, json=body)
@@ -80,15 +82,31 @@ def _post_json(
     payload = response.json()
     if not isinstance(payload, dict):
         raise AcceptanceError(f"{path} did not return a JSON object")
-    if require_polling_headers and payload.get("status") in {"queued", "running"}:
-        status_url = payload.get("status_url")
-        retry_after = payload.get("retry_after_seconds")
-        if (
-            response.headers.get("Location") != status_url
-            or response.headers.get("Retry-After") != str(retry_after)
-        ):
-            raise AcceptanceError("queued experiment is missing valid polling headers")
+    _require_experiment_metadata(response, payload, require_location=True)
     return payload
+
+
+def _require_experiment_metadata(
+    response: httpx.Response,
+    payload: dict[str, Any],
+    *,
+    require_location: bool,
+) -> None:
+    experiment_id = payload.get("experiment_id")
+    if not isinstance(experiment_id, str) or not experiment_id:
+        raise AcceptanceError("experiment response is missing an experiment_id")
+    canonical_url = f"/api/v1/experiments/{experiment_id}"
+    if payload.get("status_url") != canonical_url:
+        raise AcceptanceError("experiment response is missing its canonical status_url")
+    if require_location and response.headers.get("Location") != canonical_url:
+        raise AcceptanceError("experiment response is missing valid polling headers")
+
+    nonterminal = payload.get("status") in {"queued", "running"}
+    expected_retry = RETRY_AFTER_SECONDS if nonterminal else None
+    if payload.get("retry_after_seconds") != expected_retry:
+        raise AcceptanceError("experiment response has incorrect retry timing")
+    if nonterminal and response.headers.get("Retry-After") != str(RETRY_AFTER_SECONDS):
+        raise AcceptanceError("experiment response has incorrect retry timing in polling headers")
 
 
 def _poll_experiment(
@@ -102,18 +120,13 @@ def _poll_experiment(
     deadline = time.monotonic() + timeout_seconds
     remaining_wait = timeout_seconds
     while current.get("status") in {"queued", "running"}:
+        experiment_id = current.get("experiment_id")
         status_url = current.get("status_url")
         retry_after = current.get("retry_after_seconds")
-        if not isinstance(status_url, str) or not status_url.startswith(
-            "/api/v1/experiments/"
-        ):
-            raise AcceptanceError("queued experiment is missing a valid status_url")
-        if (
-            isinstance(retry_after, bool)
-            or not isinstance(retry_after, int)
-            or retry_after < 1
-        ):
-            raise AcceptanceError("queued experiment is missing retry timing")
+        if status_url != f"/api/v1/experiments/{experiment_id}":
+            raise AcceptanceError("queued experiment is missing its canonical status_url")
+        if retry_after != RETRY_AFTER_SECONDS:
+            raise AcceptanceError("queued experiment has incorrect retry timing")
         if (
             retry_after > remaining_wait
             or time.monotonic() + retry_after > deadline
@@ -123,7 +136,12 @@ def _poll_experiment(
         remaining_wait -= retry_after
         if time.monotonic() >= deadline:
             raise AcceptanceError("comparison polling timed out")
-        current = _get_json(client, status_url)
+        response = client.get(status_url)
+        response.raise_for_status()
+        current = response.json()
+        if not isinstance(current, dict):
+            raise AcceptanceError(f"{status_url} did not return a JSON object")
+        _require_experiment_metadata(response, current, require_location=False)
     return current
 
 
@@ -136,20 +154,27 @@ def _require_openapi_contract(schema: dict[str, Any]) -> None:
         polling_response = schema["paths"]["/api/v1/experiments/{experiment_id}"][
             "get"
         ]["responses"]["200"]
-    except (KeyError, TypeError):
+        timeframe = schemas["MarketTimeframe"]
+        source = schemas["AutomaticSource"]
+        if market["timeframe"]["$ref"] != "#/components/schemas/MarketTimeframe":
+            raise KeyError("MarketTimeframe reference")
+        if market["source"]["$ref"] != "#/components/schemas/AutomaticSource":
+            raise KeyError("AutomaticSource reference")
+        if timeframe.get("type") != "string" or timeframe.get("enum") != MARKET_TIMEFRAMES:
+            raise KeyError("MarketTimeframe values")
+        if source.get("type") != "string" or source.get("enum") != AUTOMATIC_SOURCES:
+            raise KeyError("AutomaticSource values")
+        if not {"status_url", "retry_after_seconds"} <= set(experiment):
+            raise KeyError("polling metadata")
+        for status in ("200", "202"):
+            if not {"Location", "Retry-After"} <= set(
+                compare_responses[status]["headers"]
+            ):
+                raise KeyError("comparison polling headers")
+        if "Retry-After" not in polling_response["headers"]:
+            raise KeyError("experiment polling headers")
+    except (AttributeError, KeyError, TypeError):
         raise AcceptanceError("OpenAPI does not publish the async comparison contract") from None
-
-    if "$ref" not in market["timeframe"] or "$ref" not in market["source"]:
-        raise AcceptanceError("OpenAPI does not publish market request enums")
-    if not {"status_url", "retry_after_seconds"} <= set(experiment):
-        raise AcceptanceError("OpenAPI does not publish polling metadata")
-    for status in ("200", "202"):
-        if not {"Location", "Retry-After"} <= set(
-            compare_responses.get(status, {}).get("headers", {})
-        ):
-            raise AcceptanceError("OpenAPI does not publish comparison polling headers")
-    if "Retry-After" not in polling_response.get("headers", {}):
-        raise AcceptanceError("OpenAPI does not publish experiment polling headers")
 
 
 def _wait_for_deployment(
@@ -296,7 +321,6 @@ def run_acceptance(
                 ],
                 "execution": "async",
             },
-            require_polling_headers=True,
             required_status=202,
         )
         comparison = _poll_experiment(

@@ -169,6 +169,76 @@ def test_compare_worker_keeps_named_variant_children(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("candidate_kind", "candidate_id", "reason", "message"),
+    [
+        (
+            "missing",
+            "exp_missing_candidate",
+            "not_found",
+            "Comparison candidate 1 'exp_missing_candidate' was not found.",
+        ),
+        (
+            "wrong_operation",
+            None,
+            "wrong_operation",
+            "belongs to operation 'parameter_sweep'; expected 'backtest'.",
+        ),
+        (
+            "nonterminal",
+            None,
+            "not_completed",
+            "has status 'running'; expected 'completed'.",
+        ),
+    ],
+)
+def test_compare_worker_classifies_invalid_experiment_id_candidates(
+    monkeypatch, tmp_path, candidate_kind, candidate_id, reason, message
+):
+    # Break caught: lookup/state failures could fall through to operation_failed or
+    # lose the exact comparison candidate that the client must correct.
+    with _client(monkeypatch, tmp_path) as client:
+        store = client.app.state.experiment_store
+        valid = _completed_backtest(store, stop_pct=1.0, profit_factor=1.5)
+        if candidate_kind == "wrong_operation":
+            candidate, _ = store.create_and_claim_experiment(
+                "parameter_sweep", {"grid": {}}, "sync"
+            )
+            candidate_id = store.complete(
+                candidate.experiment_id, {"variants": []}, {"source": "fixture"}
+            ).experiment_id
+        elif candidate_kind == "nonterminal":
+            candidate, _ = store.create_and_claim_experiment(
+                "backtest", {"symbol": "NVDA"}, "sync"
+            )
+            candidate_id = candidate.experiment_id
+
+        response = client.post(
+            "/api/v1/compare",
+            json={"candidates": [valid, candidate_id], "execution": "async"},
+            headers=AUTH,
+        )
+        failed = client.app.state.experiment_worker.run_one()
+
+    assert response.status_code == 202
+    assert failed is not None
+    assert failed.status.value == "failed"
+    assert failed.error == {
+        "code": "invalid_request",
+        "message": (
+            message
+            if candidate_kind == "missing"
+            else f"Comparison candidate 1 '{candidate_id}' {message}"
+        ),
+        "details": {
+            "fields": ("candidates.1",),
+            "candidate_index": 1,
+            "candidate_id": candidate_id,
+            "reason": reason,
+        },
+    }
+
+
 def test_known_research_experiments_poll_through_typed_shared_envelopes(
     monkeypatch, tmp_path
 ):

@@ -673,7 +673,7 @@ feature branch → GitHub CI → merge main → Railway auto-deploy
                            Supabase pg_net acceptance
 ```
 
-GitHub CI runs the full test suite, Python compile checks, a generated-file hygiene check, and the cache benchmark. Generated `__pycache__`, `.pyc/.pyo`, and `.pytest_cache` artifacts must never be tracked. After deployment, `scripts/production_acceptance.py` reruns the frozen NVDA Jun-Aug 2026 control twice and requires identical trading output plus warm derived-cache hits.
+GitHub CI runs the full test suite, Python compile checks, a generated-file hygiene check, and the cache benchmark. Generated `__pycache__`, `.pyc/.pyo`, and `.pytest_cache` artifacts must never be tracked. After deployment, `scripts/production_acceptance.py` runs two one-day NVDA backtests with different `stop_pct` values, submits their comparison, and polls it to completion with a finite deadline. The script also checks the deployed OpenAPI enums and the asynchronous status, URL, retry-body, and polling-header contracts.
 
 When direct GitHub access from an agent is unavailable, the **GitHub-through-Supabase** recovery bridge in `ops/supabase/GITHUB_BRIDGE.md` uses `pg_net` to resolve an exact commit/tree and retrieve source bodies from GitHub's raw-content host. Every recovered source body is retained with its Git blob SHA so integrity can be verified. This bridge is operational tooling only and never enters the backtest execution path.
 

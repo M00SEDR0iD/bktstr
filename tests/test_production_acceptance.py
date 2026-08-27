@@ -33,6 +33,8 @@ def _completed_backtest(
         "operation": "backtest",
         "status": status,
         "execution": "auto",
+        "status_url": f"/api/v1/experiments/{experiment_id}",
+        "retry_after_seconds": 2 if status in {"queued", "running"} else None,
         "result": {
             "metrics": {"trade_count": 1},
             "trades": [],
@@ -50,8 +52,18 @@ def _transport(
     include_comparison: bool = True,
     publish_openapi_contract: bool = True,
     comparison_headers: bool = True,
+    polling_headers: bool = True,
     comparison_submission_status: int = 202,
     comparison_statuses: list[str] | None = None,
+    comparison_status_url: str = "/api/v1/experiments/exp_compare",
+    comparison_retry_seconds: int = 2,
+    comparison_retry_header: str = "2",
+    polling_retry_seconds: int = 2,
+    polling_retry_header: str = "2",
+    timeframe_ref: str = "#/components/schemas/MarketTimeframe",
+    source_ref: str = "#/components/schemas/AutomaticSource",
+    timeframe_values: list[str] | None = None,
+    source_values: list[str] | None = None,
 ):
     health_calls = 0
     backtest_calls = 0
@@ -80,7 +92,7 @@ def _transport(
                 if publish_openapi_contract
                 else {}
             )
-            polling_headers = (
+            openapi_polling_headers = (
                 {"Retry-After": {}} if publish_openapi_contract else {}
             )
             schemas = (
@@ -88,9 +100,9 @@ def _transport(
                     "MarketCreate": {
                         "properties": {
                             "timeframe": {
-                                "$ref": "#/components/schemas/MarketTimeframe"
+                                "$ref": timeframe_ref
                             },
-                            "source": {"$ref": "#/components/schemas/MarketSource"},
+                            "source": {"$ref": source_ref},
                         }
                     },
                     "CompareExperimentResponse": {
@@ -100,6 +112,15 @@ def _transport(
                                 "anyOf": [{"type": "integer"}, {"type": "null"}]
                             },
                         }
+                    },
+                    "MarketTimeframe": {
+                        "type": "string",
+                        "enum": timeframe_values
+                        or ["1m", "5m", "15m", "1h", "1d"],
+                    },
+                    "AutomaticSource": {
+                        "type": "string",
+                        "enum": source_values or ["auto"],
                     },
                 }
                 if publish_openapi_contract
@@ -126,7 +147,7 @@ def _transport(
                         "/api/v1/experiments/{experiment_id}": {
                             "get": {
                                 "responses": {
-                                    "200": {"headers": polling_headers}
+                                    "200": {"headers": openapi_polling_headers}
                                 }
                             }
                         },
@@ -149,8 +170,12 @@ def _transport(
         if request.url.path == "/api/v1/backtests" and request.method == "POST":
             experiment_id = f"exp_acceptance_{backtest_calls + 1}"
             backtest_calls += 1
+            headers = {"Location": f"/api/v1/experiments/{experiment_id}"}
+            if backtest_status in {"queued", "running"}:
+                headers["Retry-After"] = "2"
             return httpx.Response(
                 200,
+                headers=headers,
                 json=_completed_backtest(
                     experiment_id=experiment_id, status=backtest_status
                 ),
@@ -166,8 +191,8 @@ def _transport(
                 comparison_submission_status,
                 headers=(
                     {
-                        "Location": "/api/v1/experiments/exp_compare",
-                        "Retry-After": "2",
+                        "Location": comparison_status_url,
+                        "Retry-After": comparison_retry_header,
                     }
                     if comparison_headers
                     else {}
@@ -176,8 +201,8 @@ def _transport(
                     "experiment_id": "exp_compare",
                     "operation": "compare",
                     "status": "queued",
-                    "status_url": "/api/v1/experiments/exp_compare",
-                    "retry_after_seconds": 2,
+                    "status_url": comparison_status_url,
+                    "retry_after_seconds": comparison_retry_seconds,
                     "result": None,
                     "error": None,
                 },
@@ -192,13 +217,19 @@ def _transport(
             terminal = status in {"completed", "failed"}
             return httpx.Response(
                 200,
-                headers=({"Retry-After": "2"} if not terminal else {}),
+                headers=(
+                    {"Retry-After": polling_retry_header}
+                    if not terminal and polling_headers
+                    else {}
+                ),
                 json={
                     "experiment_id": "exp_compare",
                     "operation": "compare",
                     "status": status,
                     "status_url": "/api/v1/experiments/exp_compare",
-                    "retry_after_seconds": None if terminal else 2,
+                    "retry_after_seconds": (
+                        None if terminal else polling_retry_seconds
+                    ),
                     "result": (
                         {
                             "candidates": [
@@ -284,6 +315,42 @@ def test_production_acceptance_rejects_missing_openapi_async_contract():
         )
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"timeframe_values": ["1m", "1d"]},
+        {"source_values": ["auto", "massive"]},
+        {"timeframe_ref": "#/components/schemas/MissingTimeframe"},
+        {"source_ref": "#/components/schemas/MissingSource"},
+    ],
+)
+def test_production_acceptance_rejects_wrong_or_unresolved_openapi_enums(mutation):
+    # Break caught: a deployed schema could reference any component or publish
+    # broader request values while still looking superficially enum-shaped.
+    module = _module()
+
+    with pytest.raises(module.AcceptanceError, match="OpenAPI"):
+        module.run_acceptance(
+            "https://bktstr.example",
+            api_key="test-key",
+            transport=_transport(**mutation),
+        )
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"components": {"schemas": []}, "paths": {}},
+        {"components": {"schemas": {"MarketCreate": []}}, "paths": {}},
+    ],
+)
+def test_openapi_contract_converts_malformed_shapes_to_acceptance_error(schema):
+    module = _module()
+
+    with pytest.raises(module.AcceptanceError, match="OpenAPI"):
+        module._require_openapi_contract(schema)
+
+
 def test_production_acceptance_requires_queued_response_headers():
     # Break caught: acceptance could trust polling body metadata while headers regress.
     module = _module()
@@ -295,6 +362,52 @@ def test_production_acceptance_requires_queued_response_headers():
             transport=_transport(
                 include_comparison=True, comparison_headers=False
             ),
+        )
+
+
+def test_production_acceptance_requires_polling_get_retry_header():
+    # Break caught: release acceptance could ignore a missing Retry-After header
+    # on the polling GET clients actually repeat.
+    module = _module()
+
+    with pytest.raises(module.AcceptanceError, match="polling headers"):
+        module.run_acceptance(
+            "https://bktstr.example",
+            api_key="test-key",
+            transport=_transport(polling_headers=False),
+        )
+
+
+def test_production_acceptance_rejects_noncanonical_status_url():
+    module = _module()
+
+    with pytest.raises(module.AcceptanceError, match="canonical status_url"):
+        module.run_acceptance(
+            "https://bktstr.example",
+            api_key="test-key",
+            transport=_transport(
+                comparison_status_url="/api/v1/experiments/exp_other"
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"comparison_retry_seconds": 3},
+        {"comparison_retry_header": "3"},
+        {"polling_retry_seconds": 3},
+        {"polling_retry_header": "3"},
+    ],
+)
+def test_production_acceptance_requires_exact_two_second_retry_contract(mutation):
+    module = _module()
+
+    with pytest.raises(module.AcceptanceError, match="retry timing"):
+        module.run_acceptance(
+            "https://bktstr.example",
+            api_key="test-key",
+            transport=_transport(**mutation),
         )
 
 

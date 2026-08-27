@@ -301,6 +301,27 @@ def test_worker_preserves_benign_long_failure_identifiers(tmp_path):
     assert failed.error["message"] == message
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "price=100 was outside the supported range",
+        "parameters: {'symbol': 'NVDA'} were rejected",
+    ],
+)
+def test_worker_preserves_benign_lowercase_diagnostic_context(tmp_path, message):
+    # Break caught: ordinary assignments and request mappings could be mistaken
+    # for environment dumps and replaced with an opaque fallback.
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment("compare", {"candidates": []}, "async")
+
+    def fail(_):
+        raise RuntimeError(message)
+
+    failed = ExperimentWorker(store, {"compare": fail}).run(record.experiment_id)
+
+    assert failed.error["message"] == message
+
+
 def test_worker_classifies_retryable_provider_failures(tmp_path):
     store = ExperimentStore(tmp_path)
     store.create_experiment("backtest", {"symbol": "NVDA"}, "async")

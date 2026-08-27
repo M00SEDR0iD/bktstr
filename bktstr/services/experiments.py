@@ -38,10 +38,10 @@ _API_KEY_FORMAT = re.compile(
     r"|\bAKIA[0-9A-Z]{16}\b"
 )
 _ENVIRONMENT_ASSIGNMENT = re.compile(
-    r"(?m)(?:^|[\s,{])[A-Za-z_][A-Za-z0-9_]*\s*="
+    r"(?m)(?:^|[\s,{])[A-Z_][A-Z0-9_]*\s*="
 )
 _ENVIRONMENT_MAPPING = re.compile(
-    r'''(?im)[{,]\s*['"]?[A-Z_][A-Z0-9_]*['"]?\s*:'''
+    r'''(?m)[{,]\s*['"]?[A-Z_][A-Z0-9_]*['"]?\s*:'''
 )
 _RESPONSE_LABEL = re.compile(r"(?i)\bresponse\b(?:\s|['\"])*[:=]")
 _ENVIRONMENT_LABEL = re.compile(r"(?i)\b(?:environment|env)\b(?:\s|['\"])*[:=]")

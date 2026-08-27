@@ -21,7 +21,12 @@ from bktstr.service import BacktestRequest, execute_backtest
 from bktstr.strategies import ResolvedStrategy, baseline_strategy_registry
 
 from .data import normalize_market_request
-from .experiments import ExperimentStatus, ExperimentStore
+from .experiments import (
+    ExperimentNotFoundError,
+    ExperimentOperationError,
+    ExperimentStatus,
+    ExperimentStore,
+)
 from .regimes import RegimeInput, normalize_regime_request
 from .validation import SemanticValidationError, StrategyCompatibilityError
 
@@ -1138,6 +1143,24 @@ def _changed_paths(left: Any, right: Any, prefix: str = "") -> tuple[str, ...]:
     return () if left == right else (prefix,)
 
 
+def _invalid_comparison_candidate(
+    index: int,
+    experiment_id: str,
+    reason: str,
+    message: str,
+) -> ExperimentOperationError:
+    return ExperimentOperationError(
+        "invalid_request",
+        f"Comparison candidate {index} '{experiment_id}' {message}",
+        {
+            "fields": [f"candidates.{index}"],
+            "candidate_index": index,
+            "candidate_id": experiment_id,
+            "reason": reason,
+        },
+    )
+
+
 def compare_experiments(
     value: CompareInput | Sequence[ComparisonCandidateInput],
     *,
@@ -1146,7 +1169,7 @@ def compare_experiments(
 ) -> CompareResult:
     request = value if isinstance(value, CompareInput) else CompareInput(value)
     resolved: list[tuple[str, Any]] = []
-    for candidate in request.candidates:
+    for index, candidate in enumerate(request.candidates):
         if isinstance(candidate, NamedVariantInput):
             child_id, _ = _execute_child_backtest(
                 candidate.backtest,
@@ -1155,7 +1178,34 @@ def compare_experiments(
             )
             resolved.append((candidate.name, store.load_experiment(child_id)))
         else:
-            resolved.append((candidate, store.load_experiment(candidate)))
+            try:
+                record = store.load_experiment(candidate)
+            except ExperimentNotFoundError as exc:
+                raise _invalid_comparison_candidate(
+                    index, candidate, "not_found", "was not found."
+                ) from exc
+            if record.operation != "backtest":
+                raise _invalid_comparison_candidate(
+                    index,
+                    candidate,
+                    "wrong_operation",
+                    f"belongs to operation '{record.operation}'; expected 'backtest'.",
+                )
+            if record.status is not ExperimentStatus.COMPLETED:
+                raise _invalid_comparison_candidate(
+                    index,
+                    candidate,
+                    "not_completed",
+                    f"has status '{record.status.value}'; expected 'completed'.",
+                )
+            if record.result is None:
+                raise _invalid_comparison_candidate(
+                    index,
+                    candidate,
+                    "missing_result",
+                    "is completed but has no result.",
+                )
+            resolved.append((candidate, record))
 
     candidates: list[ComparisonCandidate] = []
     for name, record in resolved:

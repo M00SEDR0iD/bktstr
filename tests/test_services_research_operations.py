@@ -22,7 +22,11 @@ from bktstr.services.backtest import (
     run_regime_comparison,
     to_json_value,
 )
-from bktstr.services.experiments import ExperimentStatus, ExperimentStore
+from bktstr.services.experiments import (
+    ExperimentOperationError,
+    ExperimentStatus,
+    ExperimentStore,
+)
 from bktstr.services.validation import SemanticValidationError
 from research_fixtures import deterministic_research_result
 
@@ -235,8 +239,20 @@ def test_compare_requires_completed_backtest_experiments(tmp_path):
     queued, _ = store.create_experiment("backtest", {"symbol": "NVDA"}, "async")
     completed = _completed_backtest(store, stop_pct=1.0, profit_factor=1.5)
 
-    with pytest.raises(ValueError, match="completed backtest"):
+    with pytest.raises(ExperimentOperationError) as raised:
         compare_experiments((queued.experiment_id, completed), store=store)
+
+    assert raised.value.code == "invalid_request"
+    assert str(raised.value) == (
+        f"Comparison candidate 0 '{queued.experiment_id}' has status 'queued'; "
+        "expected 'completed'."
+    )
+    assert raised.value.details == {
+        "fields": ["candidates.0"],
+        "candidate_index": 0,
+        "candidate_id": queued.experiment_id,
+        "reason": "not_completed",
+    }
 
 
 def test_compare_input_reports_the_invalid_experiment_candidate_index():
