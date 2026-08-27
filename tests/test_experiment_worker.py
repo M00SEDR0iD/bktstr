@@ -241,6 +241,46 @@ def test_worker_persists_redacted_unexpected_failure_details(monkeypatch, tmp_pa
     assert "[redacted]" in failed.error["message"]
 
 
+@pytest.mark.parametrize(
+    ("payload", "secret"),
+    [
+        ("Authorization: Basic basic-auth-secret", "basic-auth-secret"),
+        ("X-API-Key: unconfigured-api-key", "unconfigured-api-key"),
+        ("/data?apiKey=relative-query-secret", "relative-query-secret"),
+        ("prices?token=short-query-secret", "short-query-secret"),
+        ("provider response body: raw-provider-body", "raw-provider-body"),
+        ("response_body: short-body-secret", "short-body-secret"),
+        ("provider body raw-body-secret", "raw-body-secret"),
+        ('{"detail": "private-json-value"}', "private-json-value"),
+        (
+            "Traceback (most recent call last):\\nBKTSTR_API_KEY=environment-secret",
+            "environment-secret",
+        ),
+        ("Traceback: raw-trace-secret", "raw-trace-secret"),
+        ("{'HOME': 'home-directory-secret'}", "home-directory-secret"),
+        ("provider rejected sk-proj-unconfigured-secret", "sk-proj-unconfigured-secret"),
+    ],
+)
+def test_worker_persists_redacted_adversarial_unexpected_failure_details(
+    tmp_path, payload, secret
+):
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment("compare", {"candidates": []}, "async")
+
+    def fail(_):
+        raise RuntimeError(payload)
+
+    failed = ExperimentWorker(store, {"compare": fail}).run(record.experiment_id)
+
+    assert failed.error["code"] == "operation_failed"
+    assert failed.error["message"] == "The experiment operation failed."
+    assert failed.error["details"] == {
+        "stage": "execution",
+        "exception_type": "RuntimeError",
+    }
+    assert secret not in json.dumps(dict(failed.error), default=dict)
+
+
 def test_worker_classifies_retryable_provider_failures(tmp_path):
     store = ExperimentStore(tmp_path)
     store.create_experiment("backtest", {"symbol": "NVDA"}, "async")
@@ -317,6 +357,35 @@ def test_worker_terminalizes_result_persistence_errors_and_keeps_processing(
     assert completed.status is ExperimentStatus.COMPLETED
     assert store.load_experiment(bad.experiment_id).status is ExperimentStatus.FAILED
     assert store.load_experiment(good.experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_worker_redacts_sensitive_result_persistence_errors(tmp_path, monkeypatch):
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment("backtest", {"symbol": "NVDA"}, "async")
+
+    def persist(*_args, **_kwargs):
+        raise RuntimeError(
+            "Authorization: Basic persistence-auth-secret "
+            "/data?apiKey=persistence-query-secret"
+        )
+
+    monkeypatch.setattr(store, "complete", persist)
+
+    failed = ExperimentWorker(
+        store, {"backtest": lambda _: ({"metric": 1}, {"source": "fixture"})}
+    ).run(record.experiment_id)
+
+    assert failed.error == {
+        "code": "result_persistence_failed",
+        "message": "Experiment result persistence failed.",
+        "details": {
+            "stage": "persistence",
+            "exception_type": "RuntimeError",
+        },
+    }
+    rendered = json.dumps(dict(failed.error), default=dict)
+    assert "persistence-auth-secret" not in rendered
+    assert "persistence-query-secret" not in rendered
 
 
 def test_worker_survives_completed_projection_failure_and_repairs_on_next_iteration(
