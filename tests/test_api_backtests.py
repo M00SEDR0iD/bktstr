@@ -2,20 +2,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from copy import deepcopy
-from types import MappingProxyType
 
 import pytest
 from fastapi.testclient import TestClient
 
 import bktstr.api.routes as api_routes
 from bktstr.api.app import create_app
-from bktstr.services.backtest import (
-    BacktestConfiguration,
-    BacktestMetrics,
-    BacktestResearchResult,
-    ResearchProvenance,
-)
 from bktstr.services.experiments import ExperimentWorker
+from research_fixtures import deterministic_research_result
 
 
 AUTH = {"Authorization": "Bearer test-key"}
@@ -40,86 +34,13 @@ BACKTEST_BODY = {
 }
 
 
-def _research_result(value) -> BacktestResearchResult:
-    strategy = MappingProxyType(
-        {
-            "id": value.strategy_id,
-            "version": value.strategy_version,
-            "schema_version": "1.0.0",
-            "parameters": dict(value.parameters),
-        }
-    )
-    return BacktestResearchResult(
-        metrics=BacktestMetrics(
-            total_pnl=12.5,
-            total_return=0.125,
-            ev_per_trade=12.5,
-            win_rate=100.0,
-            profit_factor=None,
-            max_drawdown=0.0,
-            sharpe=None,
-            trade_count=1,
-        ),
-        trades=(),
-        configuration=BacktestConfiguration(
-            strategy=strategy,
-            market=MappingProxyType(
-                {
-                    "symbol": value.symbol,
-                    "start": value.start.isoformat(),
-                    "end": value.end.isoformat(),
-                    "timeframe": value.timeframe,
-                    "source": value.source,
-                }
-            ),
-            regime=MappingProxyType({"enabled": False}),
-            execution=MappingProxyType(
-                {
-                    "mode": value.execution,
-                    "model_id": "bktstr.next-bar-open",
-                    "model_version": "1.0.0",
-                    "slippage_bps": 2.0,
-                    "position_size": 1000.0,
-                    "starting_capital": 10000.0,
-                }
-            ),
-        ),
-        provenance=ResearchProvenance(
-            strategy=strategy,
-            market_data=MappingProxyType(
-                {
-                    "source": "fixture",
-                    "requested_source": value.source,
-                    "version": "fixture-v1",
-                    "snapshot_id": "sha256:fixture-market-input",
-                    "coverage": {
-                        "requested_start": value.start.isoformat(),
-                        "requested_end": value.end.isoformat(),
-                        "available_start": value.start.isoformat(),
-                        "available_end": value.end.isoformat(),
-                        "observations": 3,
-                        "bars": 3,
-                    },
-                    "cache": {"hit_days": 0, "miss_days": 1, "fetched_ranges": 1},
-                }
-            ),
-            execution_model=MappingProxyType(
-                {"id": "bktstr.next-bar-open", "version": "1.0.0", "slippage_bps": 2.0}
-            ),
-            software=MappingProxyType(
-                {"bktstr_version": "0.5.0", "git_commit": "fixture-commit"}
-            ),
-        ),
-    )
-
-
 @contextmanager
 def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
     monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
 
     async def deterministic_backtest(value):
-        return _research_result(value)
+        return deterministic_research_result(value)
 
     monkeypatch.setattr(api_routes, "run_backtest", deterministic_backtest)
     with TestClient(create_app()) as client:
@@ -140,14 +61,14 @@ def test_completed_backtest_returns_typed_experiment(monkeypatch, tmp_path):
     market_data = body["result"]["provenance"]["market_data"]
     # The completed result—not merely the request—retains a stable market input
     # identity and actual coverage for later reproducibility checks.
-    assert market_data["snapshot_id"] == "sha256:fixture-market-input"
+    assert market_data["snapshot_id"] == "sha256:fixture"
     assert market_data["coverage"] == {
         "requested_start": "2026-08-17",
         "requested_end": "2026-08-17",
         "available_start": "2026-08-17",
         "available_end": "2026-08-17",
-        "observations": 3,
-        "bars": 3,
+        "observations": 2,
+        "bars": 2,
     }
 
 
