@@ -71,9 +71,12 @@ def _post_json(
     body: dict,
     *,
     require_polling_headers: bool = False,
+    required_status: int | None = None,
 ) -> dict:
     response = client.post(path, json=body)
     response.raise_for_status()
+    if required_status is not None and response.status_code != required_status:
+        raise AcceptanceError(f"{path} must return HTTP {required_status}")
     payload = response.json()
     if not isinstance(payload, dict):
         raise AcceptanceError(f"{path} did not return a JSON object")
@@ -294,6 +297,7 @@ def run_acceptance(
                 "execution": "async",
             },
             require_polling_headers=True,
+            required_status=202,
         )
         comparison = _poll_experiment(
             client,

@@ -50,13 +50,14 @@ def _transport(
     include_comparison: bool = True,
     publish_openapi_contract: bool = True,
     comparison_headers: bool = True,
+    comparison_submission_status: int = 202,
     comparison_statuses: list[str] | None = None,
 ):
     health_calls = 0
     backtest_calls = 0
     comparison_polls = 0
     commits = health_commits or ["test-commit"]
-    statuses = comparison_statuses or ["completed"]
+    statuses = comparison_statuses or ["running", "completed"]
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal health_calls, backtest_calls, comparison_polls
@@ -162,7 +163,7 @@ def _transport(
                 "execution": "async",
             }
             return httpx.Response(
-                202,
+                comparison_submission_status,
                 headers=(
                     {
                         "Location": "/api/v1/experiments/exp_compare",
@@ -252,7 +253,21 @@ def test_production_acceptance_submits_and_polls_comparison():
         "status": "completed",
         "candidate_count": 2,
     }
-    assert sleeps == [2]
+    assert sleeps == [2, 2]
+
+
+def test_production_acceptance_requires_accepted_async_comparison_submission():
+    # Break caught: a queued comparison could regress from the async 202 contract to 200.
+    module = _module()
+
+    with pytest.raises(module.AcceptanceError, match="HTTP 202"):
+        module.run_acceptance(
+            "https://bktstr.example",
+            api_key="test-key",
+            transport=_transport(
+                include_comparison=True, comparison_submission_status=200
+            ),
+        )
 
 
 def test_production_acceptance_rejects_missing_openapi_async_contract():
