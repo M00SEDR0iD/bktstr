@@ -246,8 +246,11 @@ def test_worker_persists_redacted_unexpected_failure_details(monkeypatch, tmp_pa
     [
         ("Authorization: Basic basic-auth-secret", "basic-auth-secret"),
         ("X-API-Key: unconfigured-api-key", "unconfigured-api-key"),
+        ("X-Auth-Token: short-auth-secret", "short-auth-secret"),
+        ("API token: short-api-secret", "short-api-secret"),
         ("/data?apiKey=relative-query-secret", "relative-query-secret"),
         ("prices?token=short-query-secret", "short-query-secret"),
+        ("provider response: short-response-secret", "short-response-secret"),
         ("provider response body: raw-provider-body", "raw-provider-body"),
         ("response_body: short-body-secret", "short-body-secret"),
         ("provider body raw-body-secret", "raw-body-secret"),
@@ -258,6 +261,10 @@ def test_worker_persists_redacted_unexpected_failure_details(monkeypatch, tmp_pa
         ),
         ("Traceback: raw-trace-secret", "raw-trace-secret"),
         ("{'HOME': 'home-directory-secret'}", "home-directory-secret"),
+        (
+            "Environment: {'Path': 'environment-path-secret'}",
+            "environment-path-secret",
+        ),
         ("provider rejected sk-proj-unconfigured-secret", "sk-proj-unconfigured-secret"),
     ],
 )
@@ -279,6 +286,19 @@ def test_worker_persists_redacted_adversarial_unexpected_failure_details(
         "exception_type": "RuntimeError",
     }
     assert secret not in json.dumps(dict(failed.error), default=dict)
+
+
+def test_worker_preserves_benign_long_failure_identifiers(tmp_path):
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment("compare", {"candidates": []}, "async")
+    message = "Upstream job 1234567890abcdef12345678 was not ready."
+
+    def fail(_):
+        raise RuntimeError(message)
+
+    failed = ExperimentWorker(store, {"compare": fail}).run(record.experiment_id)
+
+    assert failed.error["message"] == message
 
 
 def test_worker_classifies_retryable_provider_failures(tmp_path):
@@ -365,8 +385,8 @@ def test_worker_redacts_sensitive_result_persistence_errors(tmp_path, monkeypatc
 
     def persist(*_args, **_kwargs):
         raise RuntimeError(
-            "Authorization: Basic persistence-auth-secret "
-            "/data?apiKey=persistence-query-secret"
+            "X-Auth-Token: persistence-auth-secret "
+            "Environment: {'Path': 'persistence-environment-secret'}"
         )
 
     monkeypatch.setattr(store, "complete", persist)
@@ -385,7 +405,7 @@ def test_worker_redacts_sensitive_result_persistence_errors(tmp_path, monkeypatc
     }
     rendered = json.dumps(dict(failed.error), default=dict)
     assert "persistence-auth-secret" not in rendered
-    assert "persistence-query-secret" not in rendered
+    assert "persistence-environment-secret" not in rendered
 
 
 def test_worker_survives_completed_projection_failure_and_repairs_on_next_iteration(

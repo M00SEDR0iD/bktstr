@@ -27,21 +27,24 @@ _BEARER_TOKEN = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
 _URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]*")
 _UNSAFE_QUERY_VALUE = re.compile(r"\?(?!\[redacted\])\S+")
 _SENSITIVE_HEADER = re.compile(
-    r"(?i)\b(?:authorization|proxy-authorization|x[-_]?api[-_]?key|api[-_ ]?key)"
+    r"(?i)\b(?:authorization|proxy-authorization|x[-_]?api[-_]?key|"
+    r"x[-_]?auth[-_]?token|api[-_ ]?(?:key|token)|auth[-_ ]?token|"
+    r"access[-_ ]?token)"
     r"\b(?:\s|['\"])*[:=]"
 )
 _API_KEY_FORMAT = re.compile(
     r"(?i)\b(?:sk|pk|rk|ak|api|key|token|secret)[-_][A-Za-z0-9_-]{8,}\b"
     r"|\bAIza[A-Za-z0-9_-]{12,}\b"
     r"|\bAKIA[0-9A-Z]{16}\b"
-    r"|\b[A-Za-z0-9_-]{24,}\b"
 )
 _ENVIRONMENT_ASSIGNMENT = re.compile(
     r"(?m)(?:^|[\s,{])[A-Za-z_][A-Za-z0-9_]*\s*="
 )
 _ENVIRONMENT_MAPPING = re.compile(
-    r'''(?m)[{,]\s*['"]?[A-Z_][A-Z0-9_]*['"]?\s*:'''
+    r'''(?im)[{,]\s*['"]?[A-Z_][A-Z0-9_]*['"]?\s*:'''
 )
+_RESPONSE_LABEL = re.compile(r"(?i)\bresponse\b(?:\s|['\"])*[:=]")
+_ENVIRONMENT_LABEL = re.compile(r"(?i)\b(?:environment|env)\b(?:\s|['\"])*[:=]")
 _RAW_BODY = re.compile(
     r"(?i)\b(?:(?:provider|response)[_\s-]+)?(?:body|payload|content)\b"
 )
@@ -65,6 +68,8 @@ def _safe_exception_message(exc: BaseException, fallback: str) -> str:
             _API_KEY_FORMAT,
             _ENVIRONMENT_ASSIGNMENT,
             _ENVIRONMENT_MAPPING,
+            _RESPONSE_LABEL,
+            _ENVIRONMENT_LABEL,
             _RAW_BODY,
             _TRACEBACK,
             _STRUCTURED_PAYLOAD,
