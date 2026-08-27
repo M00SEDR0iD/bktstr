@@ -99,39 +99,68 @@ def test_post_routes_require_authentication_and_reject_invalid_schema(
 
     assert unauthorized.status_code == 401
     assert unauthorized.json()["error"]["code"] == "unauthorized"
+    assert unauthorized.headers["x-request-id"].startswith("req_")
     assert malformed.status_code == 422
     assert malformed.json()["error"]["code"] == "validation_error"
     assert malformed.headers["x-request-id"].startswith("req_")
 
 
 @pytest.mark.parametrize(
-    ("path", "body", "operation", "result_key"),
+    ("path", "body", "operation"),
     [
-        ("/api/v1/backtests", BACKTEST_ASYNC_BODY, "backtest", "metrics"),
-        ("/api/v1/parameter-sweeps", SWEEP_BODY, "parameter_sweep", "variants"),
-        ("/api/v1/compare", COMPARE_BODY, "compare", "candidates"),
-        ("/api/v1/regime-comparison", REGIME_BODY, "regime_comparison", "items"),
+        ("/api/v1/backtests", BACKTEST_ASYNC_BODY, "backtest"),
+        ("/api/v1/parameter-sweeps", SWEEP_BODY, "parameter_sweep"),
+        ("/api/v1/compare", COMPARE_BODY, "compare"),
+        ("/api/v1/regime-comparison", REGIME_BODY, "regime_comparison"),
     ],
 )
 def test_post_route_persists_executes_and_polls_typed_terminal_result(
-    monkeypatch, tmp_path, path, body, operation, result_key
+    monkeypatch, tmp_path, path, body, operation
 ):
     # Break caught: queued POST work could lose polling metadata or a typed terminal result.
     with _client(monkeypatch, tmp_path) as client:
         accepted = client.post(path, json=body, headers=AUTH)
         experiment_id = accepted.json()["experiment_id"]
+        status_url = f"/api/v1/experiments/{experiment_id}"
+        assert accepted.headers["location"] == status_url
+        assert accepted.json()["status_url"] == status_url
+        assert accepted.json()["retry_after_seconds"] == 2
         client.app.state.experiment_worker.run(experiment_id)
-        completed = client.get(f"/api/v1/experiments/{experiment_id}", headers=AUTH)
+        completed = client.get(status_url, headers=AUTH)
 
     assert accepted.status_code == 202
-    assert accepted.headers["location"] == accepted.json()["status_url"]
     assert accepted.headers["retry-after"] == "2"
     assert completed.status_code == 200
     assert completed.json()["operation"] == operation
     assert completed.json()["status"] == "completed"
     assert completed.json()["error"] is None
-    assert result_key in completed.json()["result"]
     assert completed.json()["retry_after_seconds"] is None
+    _assert_typed_terminal_result(operation, completed.json()["result"])
+
+
+def _assert_typed_terminal_result(operation, result):
+    if operation == "backtest":
+        assert result["metrics"]["trade_count"] == 2
+        assert result["provenance"]["market_data"]["snapshot_id"] == "sha256:fixture"
+    elif operation == "parameter_sweep":
+        variant = result["variants"][0]
+        assert result["objective"] == "profit_factor"
+        assert variant["parameters"]["stop_pct"] == 1.0
+        assert variant["metrics"]["trade_count"] == 2
+        assert variant["provenance"]["strategy"]["id"] == "bktstr.bearish-regime-scalp"
+    elif operation == "compare":
+        candidate = result["candidates"][0]
+        assert candidate["name"] == "control"
+        assert candidate["metrics"]["profit_factor"] == 2.0
+        assert candidate["provenance"]["market_data"]["source"] == "fixture"
+    elif operation == "regime_comparison":
+        item = result["items"][0]
+        assert item["label"] == "first-day"
+        assert item["metrics"]["trade_count"] == 2
+        assert item["provenance"]["market_data"]["snapshot_id"] == "sha256:fixture"
+        assert result["provenance"]["disjoint_periods"] is True
+    else:
+        raise AssertionError(f"Unhandled operation: {operation}")
 
 
 def _different_payload(path, body):
