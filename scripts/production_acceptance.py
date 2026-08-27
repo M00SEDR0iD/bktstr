@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import math
 import os
@@ -39,6 +40,9 @@ RESEARCH_PATHS = {
     "/api/v1/experiments/{experiment_id}",
     "/api/v1/market-data",
 }
+MARKET_TIMEFRAMES = ["1m", "5m", "15m", "1h", "1d"]
+AUTOMATIC_SOURCES = ["auto"]
+RETRY_AFTER_SECONDS = 2
 
 
 class AcceptanceError(RuntimeError):
@@ -64,13 +68,113 @@ def _get_json(client: httpx.Client, path: str, *, params: dict[str, str] | None 
     return payload
 
 
-def _post_json(client: httpx.Client, path: str, body: dict) -> dict:
+def _post_json(
+    client: httpx.Client,
+    path: str,
+    body: dict,
+    *,
+    required_status: int | None = None,
+) -> dict:
     response = client.post(path, json=body)
     response.raise_for_status()
+    if required_status is not None and response.status_code != required_status:
+        raise AcceptanceError(f"{path} must return HTTP {required_status}")
     payload = response.json()
     if not isinstance(payload, dict):
         raise AcceptanceError(f"{path} did not return a JSON object")
+    _require_experiment_metadata(response, payload, require_location=True)
     return payload
+
+
+def _require_experiment_metadata(
+    response: httpx.Response,
+    payload: dict[str, Any],
+    *,
+    require_location: bool,
+) -> None:
+    experiment_id = payload.get("experiment_id")
+    if not isinstance(experiment_id, str) or not experiment_id:
+        raise AcceptanceError("experiment response is missing an experiment_id")
+    canonical_url = f"/api/v1/experiments/{experiment_id}"
+    if payload.get("status_url") != canonical_url:
+        raise AcceptanceError("experiment response is missing its canonical status_url")
+    if require_location and response.headers.get("Location") != canonical_url:
+        raise AcceptanceError("experiment response is missing valid polling headers")
+
+    nonterminal = payload.get("status") in {"queued", "running"}
+    expected_retry = RETRY_AFTER_SECONDS if nonterminal else None
+    if payload.get("retry_after_seconds") != expected_retry:
+        raise AcceptanceError("experiment response has incorrect retry timing")
+    if nonterminal and response.headers.get("Retry-After") != str(RETRY_AFTER_SECONDS):
+        raise AcceptanceError("experiment response has incorrect retry timing in polling headers")
+
+
+def _poll_experiment(
+    client: httpx.Client,
+    envelope: dict[str, Any],
+    sleeper,
+    *,
+    timeout_seconds: float = 300.0,
+) -> dict[str, Any]:
+    current = envelope
+    deadline = time.monotonic() + timeout_seconds
+    remaining_wait = timeout_seconds
+    while current.get("status") in {"queued", "running"}:
+        experiment_id = current.get("experiment_id")
+        status_url = current.get("status_url")
+        retry_after = current.get("retry_after_seconds")
+        if status_url != f"/api/v1/experiments/{experiment_id}":
+            raise AcceptanceError("queued experiment is missing its canonical status_url")
+        if retry_after != RETRY_AFTER_SECONDS:
+            raise AcceptanceError("queued experiment has incorrect retry timing")
+        if (
+            retry_after > remaining_wait
+            or time.monotonic() + retry_after > deadline
+        ):
+            raise AcceptanceError("comparison polling timed out")
+        sleeper(retry_after)
+        remaining_wait -= retry_after
+        if time.monotonic() >= deadline:
+            raise AcceptanceError("comparison polling timed out")
+        response = client.get(status_url)
+        response.raise_for_status()
+        current = response.json()
+        if not isinstance(current, dict):
+            raise AcceptanceError(f"{status_url} did not return a JSON object")
+        _require_experiment_metadata(response, current, require_location=False)
+    return current
+
+
+def _require_openapi_contract(schema: dict[str, Any]) -> None:
+    try:
+        schemas = schema["components"]["schemas"]
+        market = schemas["MarketCreate"]["properties"]
+        experiment = schemas["CompareExperimentResponse"]["properties"]
+        compare_responses = schema["paths"]["/api/v1/compare"]["post"]["responses"]
+        polling_response = schema["paths"]["/api/v1/experiments/{experiment_id}"][
+            "get"
+        ]["responses"]["200"]
+        timeframe = schemas["MarketTimeframe"]
+        source = schemas["AutomaticSource"]
+        if market["timeframe"]["$ref"] != "#/components/schemas/MarketTimeframe":
+            raise KeyError("MarketTimeframe reference")
+        if market["source"]["$ref"] != "#/components/schemas/AutomaticSource":
+            raise KeyError("AutomaticSource reference")
+        if timeframe.get("type") != "string" or timeframe.get("enum") != MARKET_TIMEFRAMES:
+            raise KeyError("MarketTimeframe values")
+        if source.get("type") != "string" or source.get("enum") != AUTOMATIC_SOURCES:
+            raise KeyError("AutomaticSource values")
+        if not {"status_url", "retry_after_seconds"} <= set(experiment):
+            raise KeyError("polling metadata")
+        for status in ("200", "202"):
+            if not {"Location", "Retry-After"} <= set(
+                compare_responses[status]["headers"]
+            ):
+                raise KeyError("comparison polling headers")
+        if "Retry-After" not in polling_response["headers"]:
+            raise KeyError("experiment polling headers")
+    except (AttributeError, KeyError, TypeError):
+        raise AcceptanceError("OpenAPI does not publish the async comparison contract") from None
 
 
 def _wait_for_deployment(
@@ -140,6 +244,13 @@ def run_acceptance(
         or deployment_poll_seconds < 0
     ):
         raise AcceptanceError("deployment_poll_seconds must be finite and >= 0")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+    ):
+        raise AcceptanceError("timeout_seconds must be finite and > 0")
 
     with httpx.Client(
         base_url=base_url.rstrip("/"),
@@ -160,6 +271,7 @@ def run_acceptance(
         schema = _get_json(client, "/openapi.json")
         if not schema.get("openapi") or not RESEARCH_PATHS.issubset(set(schema.get("paths") or [])):
             raise AcceptanceError("OpenAPI is missing the v0.6 research contract")
+        _require_openapi_contract(schema)
 
         capabilities = _get_json(client, "/api/v1/capabilities")
         if capabilities.get("version") != expected_version:
@@ -169,14 +281,65 @@ def run_acceptance(
             raise AcceptanceError("capabilities do not publish bearer authentication")
 
         backtest = _post_json(client, "/api/v1/backtests", ANCHOR_REQUEST)
+        changed_request = deepcopy(ANCHOR_REQUEST)
+        changed_request["strategy"]["parameters"]["stop_pct"] = 2.0
+        changed_backtest = _post_json(
+            client, "/api/v1/backtests", changed_request
+        )
 
-    if backtest.get("operation") != "backtest" or backtest.get("status") != "completed":
-        raise AcceptanceError("bounded v0.6 backtest did not complete inline")
-    if not isinstance(backtest.get("experiment_id"), str) or not backtest["experiment_id"]:
-        raise AcceptanceError("completed backtest is missing an experiment_id")
-    result = backtest.get("result")
-    if not isinstance(result, dict) or not {"metrics", "trades", "configuration", "provenance"} <= set(result):
-        raise AcceptanceError("completed backtest is missing reproducible research output")
+        results = []
+        for candidate in (backtest, changed_backtest):
+            if (
+                candidate.get("operation") != "backtest"
+                or candidate.get("status") != "completed"
+            ):
+                raise AcceptanceError("bounded v0.6 backtest did not complete inline")
+            if (
+                not isinstance(candidate.get("experiment_id"), str)
+                or not candidate["experiment_id"]
+            ):
+                raise AcceptanceError("completed backtest is missing an experiment_id")
+            candidate_result = candidate.get("result")
+            if not isinstance(candidate_result, dict) or not {
+                "metrics",
+                "trades",
+                "configuration",
+                "provenance",
+            } <= set(candidate_result):
+                raise AcceptanceError(
+                    "completed backtest is missing reproducible research output"
+                )
+            results.append(candidate_result)
+
+        comparison = _post_json(
+            client,
+            "/api/v1/compare",
+            {
+                "candidates": [
+                    backtest["experiment_id"],
+                    changed_backtest["experiment_id"],
+                ],
+                "execution": "async",
+            },
+            required_status=202,
+        )
+        comparison = _poll_experiment(
+            client,
+            comparison,
+            sleeper,
+            timeout_seconds=timeout_seconds,
+        )
+
+    if comparison.get("status") != "completed" or comparison.get("error") is not None:
+        raise AcceptanceError("bounded v0.6 comparison did not complete")
+    comparison_result = comparison.get("result")
+    comparison_candidates = (
+        comparison_result.get("candidates")
+        if isinstance(comparison_result, dict)
+        else None
+    )
+    if not isinstance(comparison_candidates, list) or len(comparison_candidates) != 2:
+        raise AcceptanceError("completed comparison does not contain exactly two candidates")
 
     return {
         "status": "pass",
@@ -185,7 +348,12 @@ def run_acceptance(
         "backtest": {
             "experiment_id": backtest["experiment_id"],
             "status": backtest["status"],
-            "trade_count": result["metrics"].get("trade_count"),
+            "trade_count": results[0]["metrics"].get("trade_count"),
+        },
+        "comparison": {
+            "experiment_id": comparison["experiment_id"],
+            "status": comparison["status"],
+            "candidate_count": len(comparison_candidates),
         },
     }
 

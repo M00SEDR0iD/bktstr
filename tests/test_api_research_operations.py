@@ -8,7 +8,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
 from bktstr.api.app import _validation_error_fields, create_app
+from bktstr.api.schemas import CompareCreate
+import bktstr.services.backtest as backtest_service
 from bktstr.services.experiments import ExperimentWorker
+from test_services_research_operations import _completed_backtest, _research_result
 
 
 AUTH = {"Authorization": "Bearer test-key"}
@@ -84,6 +87,156 @@ def test_research_operation_routes_queue_in_auto_mode(monkeypatch, tmp_path):
     assert sweep.json()["operation"] == "parameter_sweep"
     assert compare.json()["operation"] == "compare"
     assert regime.json()["operation"] == "regime_comparison"
+    for response in (sweep, compare, regime):
+        payload = response.json()
+        expected_url = f"/api/v1/experiments/{payload['experiment_id']}"
+        assert payload["status_url"] == expected_url
+        assert payload["retry_after_seconds"] == 2
+        assert response.headers["location"] == expected_url
+        assert response.headers["retry-after"] == "2"
+
+
+def test_compare_worker_serializes_immutable_result_for_experiment_ids(
+    monkeypatch, tmp_path
+):
+    # Break caught: a real compare worker could fail when immutable service values hit storage.
+    with _client(monkeypatch, tmp_path) as client:
+        store = client.app.state.experiment_store
+        first = _completed_backtest(store, stop_pct=1.0, profit_factor=1.5)
+        second = _completed_backtest(store, stop_pct=2.0, profit_factor=2.0)
+        request = CompareCreate.model_validate(
+            {"candidates": [first, second], "execution": "async"}
+        )
+        response = client.post(
+            "/api/v1/compare",
+            json=request.model_dump(mode="json"),
+            headers=AUTH,
+        )
+        completed = client.app.state.experiment_worker.run_one()
+
+    assert completed is not None
+    assert completed.status.value == "completed"
+    assert completed.error is None
+    assert completed.result["metric_deltas"]["profit_factor"][second] == 0.5
+    assert completed.result["candidates"][0]["provenance"]["strategy"]["id"] == (
+        "bktstr.bearish-regime-scalp"
+    )
+
+
+def test_compare_worker_keeps_named_variant_children(monkeypatch, tmp_path):
+    # Break caught: named candidates could lose their labels or child experiment linkage.
+    async def deterministic(value):
+        return _research_result(value)
+
+    monkeypatch.setattr(backtest_service, "run_backtest", deterministic)
+    with _client(monkeypatch, tmp_path) as client:
+        request = CompareCreate.model_validate(
+            {
+                "candidates": [
+                    {"name": "control", "backtest": deepcopy(BACKTEST_BODY)},
+                    {
+                        "name": "wide-stop",
+                        "backtest": {
+                            **deepcopy(BACKTEST_BODY),
+                            "strategy": {
+                                **BACKTEST_BODY["strategy"],
+                                "parameters": {"stop_pct": 2.0},
+                            },
+                        },
+                    },
+                ],
+                "execution": "async",
+            }
+        )
+        response = client.post(
+            "/api/v1/compare",
+            json=request.model_dump(mode="json"),
+            headers=AUTH,
+        )
+        completed = client.app.state.experiment_worker.run_one()
+        store = client.app.state.experiment_store
+
+    assert completed is not None
+    assert completed.status.value == "completed"
+    assert [item["name"] for item in completed.result["candidates"]] == [
+        "control",
+        "wide-stop",
+    ]
+    assert len(completed.result["provenance"]["candidate_experiment_ids"]) == 2
+    assert all(
+        store.load_experiment(experiment_id).parent_experiment_id == completed.experiment_id
+        for experiment_id in completed.result["provenance"]["candidate_experiment_ids"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("candidate_kind", "candidate_id", "reason", "message"),
+    [
+        (
+            "missing",
+            "exp_missing_candidate",
+            "not_found",
+            "Comparison candidate 1 'exp_missing_candidate' was not found.",
+        ),
+        (
+            "wrong_operation",
+            None,
+            "wrong_operation",
+            "belongs to operation 'parameter_sweep'; expected 'backtest'.",
+        ),
+        (
+            "nonterminal",
+            None,
+            "not_completed",
+            "has status 'running'; expected 'completed'.",
+        ),
+    ],
+)
+def test_compare_worker_classifies_invalid_experiment_id_candidates(
+    monkeypatch, tmp_path, candidate_kind, candidate_id, reason, message
+):
+    # Break caught: lookup/state failures could fall through to operation_failed or
+    # lose the exact comparison candidate that the client must correct.
+    with _client(monkeypatch, tmp_path) as client:
+        store = client.app.state.experiment_store
+        valid = _completed_backtest(store, stop_pct=1.0, profit_factor=1.5)
+        if candidate_kind == "wrong_operation":
+            candidate, _ = store.create_and_claim_experiment(
+                "parameter_sweep", {"grid": {}}, "sync"
+            )
+            candidate_id = store.complete(
+                candidate.experiment_id, {"variants": []}, {"source": "fixture"}
+            ).experiment_id
+        elif candidate_kind == "nonterminal":
+            candidate, _ = store.create_and_claim_experiment(
+                "backtest", {"symbol": "NVDA"}, "sync"
+            )
+            candidate_id = candidate.experiment_id
+
+        response = client.post(
+            "/api/v1/compare",
+            json={"candidates": [valid, candidate_id], "execution": "async"},
+            headers=AUTH,
+        )
+        failed = client.app.state.experiment_worker.run_one()
+
+    assert response.status_code == 202
+    assert failed is not None
+    assert failed.status.value == "failed"
+    assert failed.error == {
+        "code": "invalid_request",
+        "message": (
+            message
+            if candidate_kind == "missing"
+            else f"Comparison candidate 1 '{candidate_id}' {message}"
+        ),
+        "details": {
+            "fields": ("candidates.1",),
+            "candidate_index": 1,
+            "candidate_id": candidate_id,
+            "reason": reason,
+        },
+    }
 
 
 def test_known_research_experiments_poll_through_typed_shared_envelopes(
@@ -144,6 +297,52 @@ def test_invalid_sweep_is_rejected_before_it_creates_a_durable_experiment(monkey
     assert response.json()["error"]["details"]["fields"] == ["grid"]
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "body", "field"),
+    [
+        (
+            "/api/v1/parameter-sweeps",
+            {**deepcopy(SWEEP_BODY), "base": deepcopy(BACKTEST_BODY)},
+            "base.market.timeframe",
+        ),
+        (
+            "/api/v1/compare",
+            {
+                "candidates": [
+                    {"name": "daily", "backtest": deepcopy(BACKTEST_BODY)},
+                    "exp_valid",
+                ],
+                "execution": "auto",
+            },
+            "candidates.0.backtest.market.timeframe",
+        ),
+        (
+            "/api/v1/regime-comparison",
+            {**deepcopy(REGIME_BODY), "base": deepcopy(BACKTEST_BODY)},
+            "base.market.timeframe",
+        ),
+    ],
+)
+def test_compound_requests_reject_incompatible_timeframe_before_enqueue(
+    monkeypatch, tmp_path, endpoint, body, field
+):
+    # Break caught: compound request adapters could lose a strategy-specific
+    # incompatibility or enqueue the request before reporting it.
+    target = (
+        body["candidates"][0]["backtest"]
+        if endpoint.endswith("compare")
+        else body["base"]
+    )
+    target["market"]["timeframe"] = "1d"
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post(endpoint, json=body, headers=AUTH)
+        assert client.app.state.experiment_store.claim_next() is None
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "strategy_incompatible"
+    assert response.json()["error"]["details"]["fields"] == [field]
+
+
 def _body_with_backtest_error(operation, path, value, inner_path):
     bodies = {
         "sweep": ("/api/v1/parameter-sweeps", deepcopy(SWEEP_BODY), "base"),
@@ -177,7 +376,6 @@ def _body_with_backtest_error(operation, path, value, inner_path):
 @pytest.mark.parametrize(
     ("path", "value", "inner_path"),
     [
-        (("market", "source"), "manual", "market.source"),
         (
             ("regime",),
             {"rules": "relative_return20.lt:0", "benchmark": "bad symbol"},
@@ -291,6 +489,12 @@ def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
         assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
             f"/{response_name}"
         )
+        for status in ("200", "202"):
+            response = operation["responses"][status]
+            assert set(response["headers"]) == {"Location", "Retry-After"}
+            assert response["content"]["application/json"]["schema"]["$ref"].endswith(
+                f"/{response_name}"
+            )
         for status in ("400", "401", "409", "422", "500"):
             assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
@@ -304,6 +508,8 @@ def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
         "regime_comparison",
         "pending",
     }
+    polling = document["paths"]["/api/v1/experiments/{experiment_id}"]["get"]["responses"]["200"]
+    assert set(polling["headers"]) == {"Retry-After"}
 
     schemas = document["components"]["schemas"]
     assert schemas["SweepVariantResponse"]["properties"]["provenance"] == {

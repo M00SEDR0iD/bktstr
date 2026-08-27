@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -20,6 +21,76 @@ from .validation import SemanticValidationError
 
 _WORKER_LEASE_NAME = "experiment-worker"
 _ARTIFACT_RECONCILE_LIMIT = 25
+_ERROR_MESSAGE_LIMIT = 1_000
+_RETRYABLE_PROVIDER_STATUSES = frozenset({429, 500, 502, 503, 504})
+_BEARER_TOKEN = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
+_URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]*")
+_UNSAFE_QUERY_VALUE = re.compile(r"\?(?!\[redacted\])\S+")
+_SENSITIVE_HEADER = re.compile(
+    r"(?i)\b(?:authorization|proxy-authorization|x[-_]?api[-_]?key|"
+    r"x[-_]?auth[-_]?token|api[-_ ]?(?:key|token)|auth[-_ ]?token|"
+    r"access[-_ ]?token)"
+    r"\b(?:\s|['\"])*[:=]"
+)
+_API_KEY_FORMAT = re.compile(
+    r"(?i)\b(?:sk|pk|rk|ak|api|key|token|secret)[-_][A-Za-z0-9_-]{8,}\b"
+    r"|\bAIza[A-Za-z0-9_-]{12,}\b"
+    r"|\bAKIA[0-9A-Z]{16}\b"
+)
+_ENVIRONMENT_ASSIGNMENT = re.compile(
+    r"(?m)(?:^|[\s,{])[A-Z_][A-Z0-9_]*\s*="
+)
+_ENVIRONMENT_MAPPING = re.compile(
+    r'''(?m)[{,]\s*['"]?[A-Z_][A-Z0-9_]*['"]?\s*:'''
+)
+_RESPONSE_LABEL = re.compile(r"(?i)\bresponse\b(?:\s|['\"])*[:=]")
+_ENVIRONMENT_LABEL = re.compile(r"(?i)\b(?:environment|env)\b(?:\s|['\"])*[:=]")
+_RAW_BODY = re.compile(
+    r"(?i)\b(?:(?:provider|response)[_\s-]+)?(?:body|payload|content)\b"
+)
+_TRACEBACK = re.compile(r"(?i)\btraceback\b")
+_STRUCTURED_PAYLOAD = re.compile(r"^\s*(?:\{|\[|<)")
+
+
+def _safe_exception_message(exc: BaseException, fallback: str) -> str:
+    message = str(exc).strip() or fallback
+    for variable in ("BKTSTR_API_KEY", "MASSIVE_API_KEY"):
+        secret = os.getenv(variable)
+        if secret:
+            message = message.replace(secret, "[redacted]")
+    message = _BEARER_TOKEN.sub("Bearer [redacted]", message)
+    message = _URL_QUERY.sub(r"\1?[redacted]", message)
+    if any(
+        pattern.search(message)
+        for pattern in (
+            _UNSAFE_QUERY_VALUE,
+            _SENSITIVE_HEADER,
+            _API_KEY_FORMAT,
+            _ENVIRONMENT_ASSIGNMENT,
+            _ENVIRONMENT_MAPPING,
+            _RESPONSE_LABEL,
+            _ENVIRONMENT_LABEL,
+            _RAW_BODY,
+            _TRACEBACK,
+            _STRUCTURED_PAYLOAD,
+        )
+    ):
+        return fallback[:_ERROR_MESSAGE_LIMIT]
+    return message[:_ERROR_MESSAGE_LIMIT]
+
+
+def _exception_details(exc: BaseException, stage: str) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "stage": stage,
+        "exception_type": type(exc).__name__,
+    }
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        details.update(
+            status_code=status_code,
+            retryable=status_code in _RETRYABLE_PROVIDER_STATUSES,
+        )
+    return details
 
 
 class ExperimentStatus(StrEnum):
@@ -805,8 +876,10 @@ class ExperimentStore:
             if temporary_owner:
                 self.release_worker_lease(owner)
 
-    def claim(self, experiment_id: str) -> ExperimentRecord:
-        """Claim one particular queued row for synchronous execution."""
+    def claim(
+        self, experiment_id: str, *, owner_id: str | None = None
+    ) -> ExperimentRecord:
+        """Claim one particular queued row for direct execution."""
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = self._load_row(connection, experiment_id)
@@ -814,8 +887,17 @@ class ExperimentStore:
                 raise ExperimentStateError(f"Experiment {experiment_id} is not queued.")
             now = _timestamp()
             connection.execute(
-                "UPDATE experiments SET status = ?, started_at = ? WHERE experiment_id = ?",
-                (ExperimentStatus.RUNNING.value, _encode_timestamp(now), experiment_id),
+                """
+                UPDATE experiments
+                SET status = ?, started_at = ?, worker_owner_id = ?
+                WHERE experiment_id = ?
+                """,
+                (
+                    ExperimentStatus.RUNNING.value,
+                    _encode_timestamp(now),
+                    owner_id,
+                    experiment_id,
+                ),
             )
             claimed = self._set_artifact_generation(connection, experiment_id)
             connection.execute("COMMIT")
@@ -1146,22 +1228,24 @@ class ExperimentWorker:
                 record,
                 {"code": "invalid_request", "message": str(exc), "details": {}},
             )
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             return self._fail_survivably(
                 record,
                 {
                     "code": "market_data_http_error",
                     "message": "Market-data provider request failed.",
-                    "details": {},
+                    "details": _exception_details(exc, "execution"),
                 },
             )
-        except Exception:
+        except Exception as exc:
             return self._fail_survivably(
                 record,
                 {
                     "code": "operation_failed",
-                    "message": "The experiment operation failed.",
-                    "details": {},
+                    "message": _safe_exception_message(
+                        exc, "The experiment operation failed."
+                    ),
+                    "details": _exception_details(exc, "execution"),
                 },
             )
         try:
@@ -1177,13 +1261,15 @@ class ExperimentWorker:
             )
         except ExperimentStateError:
             return self.store.load_experiment(record.experiment_id)
-        except Exception:
+        except Exception as exc:
             return self._fail_survivably(
                 record,
                 {
                     "code": "result_persistence_failed",
-                    "message": "Experiment result persistence failed.",
-                    "details": {},
+                    "message": _safe_exception_message(
+                        exc, "Experiment result persistence failed."
+                    ),
+                    "details": _exception_details(exc, "persistence"),
                 },
             )
 
@@ -1207,7 +1293,7 @@ class ExperimentWorker:
             self.release_lease()
 
     def run(self, experiment_id: str) -> ExperimentRecord:
-        return self._execute(self.store.claim(experiment_id))
+        return self._execute(self.store.claim(experiment_id, owner_id=self.owner_id))
 
     def run_claimed(self, record: ExperimentRecord) -> ExperimentRecord:
         if record.status is not ExperimentStatus.RUNNING:

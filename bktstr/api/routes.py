@@ -5,8 +5,9 @@ from datetime import date
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from bktstr.api.lifecycle import apply_experiment_headers
 from bktstr.server import capabilities_payload, health_payload
 from bktstr.services.backtest import (
     BacktestInput,
@@ -19,6 +20,7 @@ from bktstr.services.backtest import (
     run_backtest,
     run_parameter_sweep,
     run_regime_comparison,
+    to_json_value,
 )
 from bktstr.services.experiments import (
     ExperimentNotFoundError,
@@ -33,6 +35,7 @@ from bktstr.services.data import inspect_market_data
 
 from .auth import require_api_key
 from .schemas import (
+    AutomaticSource,
     BacktestCreate,
     BacktestExperimentResponse,
     BacktestResult,
@@ -44,6 +47,7 @@ from .schemas import (
     ExperimentResponse,
     HealthResponse,
     MarketDataResponse,
+    MarketTimeframe,
     NamedVariantCreate,
     ParameterSweepCreate,
     ParameterSweepExperimentResponse,
@@ -58,8 +62,40 @@ from .schemas import (
 api_router = APIRouter()
 
 
+ResultModel = TypeVar("ResultModel", bound=BaseModel)
+
+
+_POLLING_HEADER_SCHEMA = {
+    "Retry-After": {
+        "description": "Seconds to wait before polling a nonterminal experiment.",
+        "schema": {"type": "integer", "minimum": 1},
+    }
+}
+_POST_EXPERIMENT_HEADER_SCHEMA = {
+    "Location": {
+        "description": "Relative canonical experiment status URL.",
+        "schema": {"type": "string"},
+    },
+    **_POLLING_HEADER_SCHEMA,
+}
+
+
+def _validated_result_payload(
+    model_type: type[ResultModel], value: Any
+) -> dict[str, Any]:
+    validated = model_type.model_validate(to_json_value(value))
+    return validated.model_dump(mode="json")
+
+
 def _error_responses(*statuses: int) -> dict[int, dict[str, type[ErrorResponse]]]:
     return {status: {"model": ErrorResponse} for status in statuses}
+
+
+def _post_success_responses(response_type: type[BaseModel]) -> dict[int, dict[str, Any]]:
+    return {
+        status: {"model": response_type, "headers": _POST_EXPERIMENT_HEADER_SCHEMA}
+        for status in (200, 202)
+    }
 
 
 @api_router.get("/health", response_model=HealthResponse, responses=_error_responses(500))
@@ -85,8 +121,8 @@ async def get_market_data(
     symbol: Annotated[str, Query(min_length=1, max_length=15)],
     start: date,
     end: date,
-    timeframe: str = "1m",
-    source: str = "auto",
+    timeframe: MarketTimeframe = MarketTimeframe.ONE_MINUTE,
+    source: AutomaticSource = AutomaticSource.AUTO,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
     _: Annotated[None, Depends(require_api_key)] = None,
@@ -139,11 +175,11 @@ def _execute_backtest_experiment(
 ) -> tuple[dict, dict]:
     request = BacktestCreate.model_validate(record.request)
     result = BacktestResult.model_validate(
-        asyncio.run(run_backtest(_backtest_input(request))), from_attributes=True
+        to_json_value(asyncio.run(run_backtest(_backtest_input(request))))
     )
     if not request.include_trades:
         result = result.model_copy(update={"trades": []})
-    payload = result.model_dump(mode="json")
+    payload = _validated_result_payload(BacktestResult, result)
     return payload, payload["provenance"]
 
 
@@ -220,15 +256,14 @@ def _execute_parameter_sweep_experiment(
     record: ExperimentRecord, store: ExperimentStore
 ) -> tuple[dict, dict]:
     request = ParameterSweepCreate.model_validate(record.request)
-    result = ParameterSweepResult.model_validate(
+    payload = _validated_result_payload(
+        ParameterSweepResult,
         run_parameter_sweep(
             _parameter_sweep_input(request),
             store=store,
             parent_experiment_id=record.experiment_id,
         ),
-        from_attributes=True,
     )
-    payload = result.model_dump(mode="json")
     return payload, payload["provenance"]
 
 
@@ -236,15 +271,14 @@ def _execute_compare_experiment(
     record: ExperimentRecord, store: ExperimentStore
 ) -> tuple[dict, dict]:
     request = CompareCreate.model_validate(record.request)
-    result = CompareResult.model_validate(
+    payload = _validated_result_payload(
+        CompareResult,
         compare_experiments(
             _compare_input(request),
             store=store,
             parent_experiment_id=record.experiment_id,
         ),
-        from_attributes=True,
     )
-    payload = result.model_dump(mode="json")
     return payload, payload["provenance"]
 
 
@@ -252,15 +286,14 @@ def _execute_regime_comparison_experiment(
     record: ExperimentRecord, store: ExperimentStore
 ) -> tuple[dict, dict]:
     request = RegimeComparisonCreate.model_validate(record.request)
-    result = RegimeComparisonResult.model_validate(
+    payload = _validated_result_payload(
+        RegimeComparisonResult,
         run_regime_comparison(
             _regime_comparison_input(request),
             store=store,
             parent_experiment_id=record.experiment_id,
         ),
-        from_attributes=True,
     )
-    payload = result.model_dump(mode="json")
     return payload, payload["provenance"]
 
 
@@ -290,7 +323,7 @@ def _experiment_store(request: Request) -> ExperimentStore:
     "/backtests",
     response_model=BacktestExperimentResponse,
     responses={
-        202: {"model": BacktestExperimentResponse},
+        **_post_success_responses(BacktestExperimentResponse),
         **_error_responses(400, 401, 409, 422, 500, 502),
     },
 )
@@ -321,6 +354,7 @@ def create_backtest(
         calendar_days=(body.market.end - body.market.start).days + 1,
         idempotency_key=idempotency_key,
     )
+    apply_experiment_headers(response, record, include_location=True)
     response.status_code = (
         202
         if record.status in {ExperimentStatus.QUEUED, ExperimentStatus.RUNNING}
@@ -367,6 +401,7 @@ def _submit_research_operation(
         calendar_days=None,
         idempotency_key=idempotency_key,
     )
+    apply_experiment_headers(response, record, include_location=True)
     response.status_code = (
         202
         if record.status in {ExperimentStatus.QUEUED, ExperimentStatus.RUNNING}
@@ -379,7 +414,7 @@ def _submit_research_operation(
     "/parameter-sweeps",
     response_model=ParameterSweepExperimentResponse,
     responses={
-        202: {"model": ParameterSweepExperimentResponse},
+        **_post_success_responses(ParameterSweepExperimentResponse),
         **_error_responses(400, 401, 409, 422, 500),
     },
 )
@@ -405,7 +440,7 @@ def create_parameter_sweep(
     "/compare",
     response_model=CompareExperimentResponse,
     responses={
-        202: {"model": CompareExperimentResponse},
+        **_post_success_responses(CompareExperimentResponse),
         **_error_responses(400, 401, 409, 422, 500),
     },
 )
@@ -431,7 +466,7 @@ def create_comparison(
     "/regime-comparison",
     response_model=RegimeComparisonExperimentResponse,
     responses={
-        202: {"model": RegimeComparisonExperimentResponse},
+        **_post_success_responses(RegimeComparisonExperimentResponse),
         **_error_responses(400, 401, 409, 422, 500),
     },
 )
@@ -460,30 +495,40 @@ def _load_experiment(request: Request, experiment_id: str) -> ExperimentRecord:
 @api_router.get(
     "/backtests/{experiment_id}",
     response_model=BacktestExperimentResponse,
-    responses=_error_responses(401, 404, 500),
+    responses={
+        200: {"headers": _POLLING_HEADER_SCHEMA},
+        **_error_responses(401, 404, 500),
+    },
 )
 def get_backtest(
     experiment_id: str,
     request: Request,
+    response: Response,
     _: Annotated[None, Depends(require_api_key)],
 ) -> BacktestExperimentResponse:
     record = _load_experiment(request, experiment_id)
     if record.operation != "backtest":
         raise ExperimentNotFoundError(experiment_id)
+    apply_experiment_headers(response, record, include_location=False)
     return BacktestExperimentResponse.from_record(record)
 
 
 @api_router.get(
     "/experiments/{experiment_id}",
     response_model=ExperimentResponse,
-    responses=_error_responses(401, 404, 500),
+    responses={
+        200: {"headers": _POLLING_HEADER_SCHEMA},
+        **_error_responses(401, 404, 500),
+    },
 )
 def get_experiment(
     experiment_id: str,
     request: Request,
+    response: Response,
     _: Annotated[None, Depends(require_api_key)],
 ) -> ExperimentResponse:
     record = _load_experiment(request, experiment_id)
+    apply_experiment_headers(response, record, include_location=False)
     response_types = {
         "backtest": BacktestExperimentResponse,
         "parameter_sweep": ParameterSweepExperimentResponse,

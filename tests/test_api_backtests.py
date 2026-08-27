@@ -1,20 +1,15 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from types import MappingProxyType
+from copy import deepcopy
 
 import pytest
 from fastapi.testclient import TestClient
 
 import bktstr.api.routes as api_routes
 from bktstr.api.app import create_app
-from bktstr.services.backtest import (
-    BacktestConfiguration,
-    BacktestMetrics,
-    BacktestResearchResult,
-    ResearchProvenance,
-)
 from bktstr.services.experiments import ExperimentWorker
+from research_fixtures import deterministic_research_result
 
 
 AUTH = {"Authorization": "Bearer test-key"}
@@ -39,86 +34,13 @@ BACKTEST_BODY = {
 }
 
 
-def _research_result(value) -> BacktestResearchResult:
-    strategy = MappingProxyType(
-        {
-            "id": value.strategy_id,
-            "version": value.strategy_version,
-            "schema_version": "1.0.0",
-            "parameters": dict(value.parameters),
-        }
-    )
-    return BacktestResearchResult(
-        metrics=BacktestMetrics(
-            total_pnl=12.5,
-            total_return=0.125,
-            ev_per_trade=12.5,
-            win_rate=100.0,
-            profit_factor=None,
-            max_drawdown=0.0,
-            sharpe=None,
-            trade_count=1,
-        ),
-        trades=(),
-        configuration=BacktestConfiguration(
-            strategy=strategy,
-            market=MappingProxyType(
-                {
-                    "symbol": value.symbol,
-                    "start": value.start.isoformat(),
-                    "end": value.end.isoformat(),
-                    "timeframe": value.timeframe,
-                    "source": value.source,
-                }
-            ),
-            regime=MappingProxyType({"enabled": False}),
-            execution=MappingProxyType(
-                {
-                    "mode": value.execution,
-                    "model_id": "bktstr.next-bar-open",
-                    "model_version": "1.0.0",
-                    "slippage_bps": 2.0,
-                    "position_size": 1000.0,
-                    "starting_capital": 10000.0,
-                }
-            ),
-        ),
-        provenance=ResearchProvenance(
-            strategy=strategy,
-            market_data=MappingProxyType(
-                {
-                    "source": "fixture",
-                    "requested_source": value.source,
-                    "version": "fixture-v1",
-                    "snapshot_id": "sha256:fixture-market-input",
-                    "coverage": {
-                        "requested_start": value.start.isoformat(),
-                        "requested_end": value.end.isoformat(),
-                        "available_start": value.start.isoformat(),
-                        "available_end": value.end.isoformat(),
-                        "observations": 3,
-                        "bars": 3,
-                    },
-                    "cache": {"hit_days": 0, "miss_days": 1, "fetched_ranges": 1},
-                }
-            ),
-            execution_model=MappingProxyType(
-                {"id": "bktstr.next-bar-open", "version": "1.0.0", "slippage_bps": 2.0}
-            ),
-            software=MappingProxyType(
-                {"bktstr_version": "0.5.0", "git_commit": "fixture-commit"}
-            ),
-        ),
-    )
-
-
 @contextmanager
 def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
     monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
 
     async def deterministic_backtest(value):
-        return _research_result(value)
+        return deterministic_research_result(value)
 
     monkeypatch.setattr(api_routes, "run_backtest", deterministic_backtest)
     with TestClient(create_app()) as client:
@@ -139,14 +61,14 @@ def test_completed_backtest_returns_typed_experiment(monkeypatch, tmp_path):
     market_data = body["result"]["provenance"]["market_data"]
     # The completed result—not merely the request—retains a stable market input
     # identity and actual coverage for later reproducibility checks.
-    assert market_data["snapshot_id"] == "sha256:fixture-market-input"
+    assert market_data["snapshot_id"] == "sha256:fixture"
     assert market_data["coverage"] == {
         "requested_start": "2026-08-17",
         "requested_end": "2026-08-17",
         "available_start": "2026-08-17",
         "available_end": "2026-08-17",
-        "observations": 3,
-        "bars": 3,
+        "observations": 2,
+        "bars": 2,
     }
 
 
@@ -200,13 +122,6 @@ def test_completed_backtest_returns_typed_experiment(monkeypatch, tmp_path):
                 },
             },
             ["market.start", "market.end"],
-        ),
-        (
-            {
-                **BACKTEST_BODY,
-                "market": {**BACKTEST_BODY["market"], "source": "manual"},
-            },
-            ["market.source"],
         ),
         (
             {
@@ -286,6 +201,28 @@ def test_semantic_backtest_errors_return_exact_fields_before_persistence(
     assert response.json()["error"]["details"]["fields"] == fields
 
 
+def test_incompatible_backtest_timeframe_returns_422_before_persistence(
+    monkeypatch, tmp_path
+):
+    # Break caught: strategy-specific market requirements could be reported as a
+    # generic semantic error after durable work has been created.
+    body = deepcopy(BACKTEST_BODY)
+    body["market"]["timeframe"] = "1d"
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post("/api/v1/backtests", json=body, headers=AUTH)
+        assert client.app.state.experiment_store.claim_next() is None
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "strategy_incompatible"
+    assert response.json()["error"]["details"] == {
+        "fields": ["market.timeframe"],
+        "strategy_id": "bktstr.bearish-regime-scalp",
+        "strategy_version": "1.0.0",
+        "required_timeframe": "1m",
+        "received_timeframe": "1d",
+    }
+
+
 def test_async_idempotent_submission_can_be_polled(monkeypatch, tmp_path):
     # Break caught: a retry could duplicate durable research or become unpollable.
     monkeypatch.setattr(ExperimentWorker, "run_forever", lambda self, stop_event: None)
@@ -304,6 +241,35 @@ def test_async_idempotent_submission_can_be_polled(monkeypatch, tmp_path):
     assert polled.json()["experiment_id"] == experiment_id
     assert backtest.status_code == 200
     assert backtest.json()["operation"] == "backtest"
+
+
+def test_queued_backtest_publishes_canonical_polling_metadata_and_headers(
+    monkeypatch, tmp_path
+):
+    # Break caught: accepted work could make clients construct a status URL or guess polling timing.
+    monkeypatch.setattr(ExperimentWorker, "run_forever", lambda self, stop_event: None)
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/v1/backtests",
+            json={**BACKTEST_BODY, "execution": "async"},
+            headers=AUTH,
+        )
+        payload = response.json()
+        expected_url = f"/api/v1/experiments/{payload['experiment_id']}"
+        queued_poll = client.get(expected_url, headers=AUTH)
+        completed = client.app.state.experiment_worker.run_one()
+        polled = client.get(expected_url, headers=AUTH)
+
+    assert response.status_code == 202
+    assert payload["status_url"] == expected_url
+    assert payload["retry_after_seconds"] == 2
+    assert response.headers["location"] == expected_url
+    assert response.headers["retry-after"] == "2"
+    assert queued_poll.headers["retry-after"] == "2"
+    assert completed is not None and completed.status == "completed"
+    assert polled.json()["status_url"] == expected_url
+    assert polled.json()["retry_after_seconds"] is None
+    assert "retry-after" not in polled.headers
 
 
 def test_completed_async_idempotent_retry_returns_current_terminal_state(monkeypatch, tmp_path):
@@ -401,6 +367,8 @@ def test_canonical_polling_retains_non_backtest_lifecycle_while_typed_route_reje
         "operation": "pending",
         "stored_operation": "compare",
         "status": "queued",
+        "status_url": f"/api/v1/experiments/{other.experiment_id}",
+        "retry_after_seconds": 2,
         "created_at": other.created_at.isoformat().replace("+00:00", "Z"),
         "started_at": None,
         "completed_at": None,
@@ -442,6 +410,15 @@ def test_openapi_types_backtest_submissions_and_both_polling_views(monkeypatch, 
     assert post["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/BacktestExperimentResponse"
     )
+    for status in ("200", "202"):
+        response = post["responses"][status]
+        assert set(response["headers"]) == {"Location", "Retry-After"}
+        assert response["content"]["application/json"]["schema"]["$ref"].endswith(
+            "/BacktestExperimentResponse"
+        )
+    for path in ("/api/v1/backtests/{experiment_id}", "/api/v1/experiments/{experiment_id}"):
+        response = document["paths"][path]["get"]["responses"]["200"]
+        assert set(response["headers"]) == {"Retry-After"}
     assert post["responses"]["502"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/ErrorResponse"
     )
