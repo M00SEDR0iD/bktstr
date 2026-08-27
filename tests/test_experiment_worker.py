@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import json
 import threading
 
 import pytest
@@ -207,7 +208,61 @@ def test_worker_persists_provider_failures_with_a_stable_error_code(tmp_path):
     assert failed.error == {
         "code": "market_data_http_error",
         "message": "Market-data provider request failed.",
-        "details": {},
+        "details": {
+            "stage": "execution",
+            "exception_type": "ConnectError",
+        },
+    }
+
+
+def test_worker_persists_redacted_unexpected_failure_details(monkeypatch, tmp_path):
+    monkeypatch.setenv("BKTSTR_API_KEY", "service-secret")
+    monkeypatch.setenv("MASSIVE_API_KEY", "provider-secret")
+    store = ExperimentStore(tmp_path)
+    record, _ = store.create_experiment("compare", {"candidates": []}, "async")
+
+    def fail(_):
+        raise RuntimeError(
+            "Bearer service-secret provider-secret "
+            "https://provider.example/data?apiKey=provider-secret"
+        )
+
+    failed = ExperimentWorker(store, {"compare": fail}).run(record.experiment_id)
+
+    assert failed.error["code"] == "operation_failed"
+    assert failed.error["details"] == {
+        "stage": "execution",
+        "exception_type": "RuntimeError",
+    }
+    rendered = json.dumps(dict(failed.error), default=dict)
+    assert "service-secret" not in rendered
+    assert "provider-secret" not in rendered
+    assert "apiKey=" not in rendered
+    assert "[redacted]" in failed.error["message"]
+
+
+def test_worker_classifies_retryable_provider_failures(tmp_path):
+    store = ExperimentStore(tmp_path)
+    store.create_experiment("backtest", {"symbol": "NVDA"}, "async")
+    request = httpx.Request("GET", "https://provider.example/data")
+    response = httpx.Response(429, request=request)
+
+    def rate_limited(_):
+        raise httpx.HTTPStatusError(
+            "rate limited", request=request, response=response
+        )
+
+    failed = ExperimentWorker(store, {"backtest": rate_limited}).run_one()
+
+    assert failed.error == {
+        "code": "market_data_http_error",
+        "message": "Market-data provider request failed.",
+        "details": {
+            "stage": "execution",
+            "exception_type": "HTTPStatusError",
+            "status_code": 429,
+            "retryable": True,
+        },
     }
 
 
@@ -225,15 +280,24 @@ def test_reserved_inline_experiment_is_not_claimable_by_the_polling_worker(tmp_p
         assert executor.submit(ExperimentWorker(store, {}).run_one).result() is None
 
 
-def test_worker_terminalizes_result_persistence_errors_and_keeps_processing(tmp_path):
-    """An invalid completed result must fail only its experiment, not strand or stop the worker."""
+def test_worker_terminalizes_result_persistence_errors_and_keeps_processing(
+    tmp_path, monkeypatch
+):
+    """A persistence error must fail only its experiment, not strand or stop the worker."""
     store = ExperimentStore(tmp_path)
     bad, _ = store.create_experiment("backtest", {"invalid": True}, "async", None)
     good, _ = store.create_experiment("backtest", {"invalid": False}, "async", None)
+    original_complete = store.complete
+
+    def persist(experiment_id, *args, **kwargs):
+        if experiment_id == bad.experiment_id:
+            raise RuntimeError("disk unavailable")
+        return original_complete(experiment_id, *args, **kwargs)
+
+    monkeypatch.setattr(store, "complete", persist)
 
     def results(record):
-        value = float("nan") if record.request["invalid"] else 1
-        return {"metric": value}, {"source": "fixture"}
+        return {"metric": int(not record.request["invalid"])}, {"source": "fixture"}
 
     worker = ExperimentWorker(store, {"backtest": results})
     failed = worker.run_one()
@@ -243,8 +307,11 @@ def test_worker_terminalizes_result_persistence_errors_and_keeps_processing(tmp_
     assert failed.status is ExperimentStatus.FAILED
     assert failed.error == {
         "code": "result_persistence_failed",
-        "message": "Experiment result persistence failed.",
-        "details": {},
+        "message": "disk unavailable",
+        "details": {
+            "stage": "persistence",
+            "exception_type": "RuntimeError",
+        },
     }
     assert completed is not None
     assert completed.status is ExperimentStatus.COMPLETED
