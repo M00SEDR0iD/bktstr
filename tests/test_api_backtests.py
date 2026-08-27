@@ -322,6 +322,35 @@ def test_async_idempotent_submission_can_be_polled(monkeypatch, tmp_path):
     assert backtest.json()["operation"] == "backtest"
 
 
+def test_queued_backtest_publishes_canonical_polling_metadata_and_headers(
+    monkeypatch, tmp_path
+):
+    # Break caught: accepted work could make clients construct a status URL or guess polling timing.
+    monkeypatch.setattr(ExperimentWorker, "run_forever", lambda self, stop_event: None)
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/v1/backtests",
+            json={**BACKTEST_BODY, "execution": "async"},
+            headers=AUTH,
+        )
+        payload = response.json()
+        expected_url = f"/api/v1/experiments/{payload['experiment_id']}"
+        queued_poll = client.get(expected_url, headers=AUTH)
+        completed = client.app.state.experiment_worker.run_one()
+        polled = client.get(expected_url, headers=AUTH)
+
+    assert response.status_code == 202
+    assert payload["status_url"] == expected_url
+    assert payload["retry_after_seconds"] == 2
+    assert response.headers["location"] == expected_url
+    assert response.headers["retry-after"] == "2"
+    assert queued_poll.headers["retry-after"] == "2"
+    assert completed is not None and completed.status == "completed"
+    assert polled.json()["status_url"] == expected_url
+    assert polled.json()["retry_after_seconds"] is None
+    assert "retry-after" not in polled.headers
+
+
 def test_completed_async_idempotent_retry_returns_current_terminal_state(monkeypatch, tmp_path):
     # Break caught: a completed idempotent retry could be mislabeled as newly accepted work.
     monkeypatch.setattr(ExperimentWorker, "run_forever", lambda self, stop_event: None)
@@ -417,6 +446,8 @@ def test_canonical_polling_retains_non_backtest_lifecycle_while_typed_route_reje
         "operation": "pending",
         "stored_operation": "compare",
         "status": "queued",
+        "status_url": f"/api/v1/experiments/{other.experiment_id}",
+        "retry_after_seconds": 2,
         "created_at": other.created_at.isoformat().replace("+00:00", "Z"),
         "started_at": None,
         "completed_at": None,
@@ -458,6 +489,15 @@ def test_openapi_types_backtest_submissions_and_both_polling_views(monkeypatch, 
     assert post["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/BacktestExperimentResponse"
     )
+    for status in ("200", "202"):
+        response = post["responses"][status]
+        assert set(response["headers"]) == {"Location", "Retry-After"}
+        assert response["content"]["application/json"]["schema"]["$ref"].endswith(
+            "/BacktestExperimentResponse"
+        )
+    for path in ("/api/v1/backtests/{experiment_id}", "/api/v1/experiments/{experiment_id}"):
+        response = document["paths"][path]["get"]["responses"]["200"]
+        assert set(response["headers"]) == {"Retry-After"}
     assert post["responses"]["502"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/ErrorResponse"
     )

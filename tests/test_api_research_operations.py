@@ -87,6 +87,13 @@ def test_research_operation_routes_queue_in_auto_mode(monkeypatch, tmp_path):
     assert sweep.json()["operation"] == "parameter_sweep"
     assert compare.json()["operation"] == "compare"
     assert regime.json()["operation"] == "regime_comparison"
+    for response in (sweep, compare, regime):
+        payload = response.json()
+        expected_url = f"/api/v1/experiments/{payload['experiment_id']}"
+        assert payload["status_url"] == expected_url
+        assert payload["retry_after_seconds"] == 2
+        assert response.headers["location"] == expected_url
+        assert response.headers["retry-after"] == "2"
 
 
 def test_compare_worker_serializes_immutable_result_for_experiment_ids(
@@ -412,6 +419,12 @@ def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
         assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
             f"/{response_name}"
         )
+        for status in ("200", "202"):
+            response = operation["responses"][status]
+            assert set(response["headers"]) == {"Location", "Retry-After"}
+            assert response["content"]["application/json"]["schema"]["$ref"].endswith(
+                f"/{response_name}"
+            )
         for status in ("400", "401", "409", "422", "500"):
             assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
@@ -425,6 +438,8 @@ def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
         "regime_comparison",
         "pending",
     }
+    polling = document["paths"]["/api/v1/experiments/{experiment_id}"]["get"]["responses"]["200"]
+    assert set(polling["headers"]) == {"Retry-After"}
 
     schemas = document["components"]["schemas"]
     assert schemas["SweepVariantResponse"]["properties"]["provenance"] == {

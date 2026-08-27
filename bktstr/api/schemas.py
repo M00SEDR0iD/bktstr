@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bktstr.api.lifecycle import experiment_retry_after, experiment_status_url
 from bktstr.services.experiments import ExecutionMode, ExperimentRecord, ExperimentStatus
 
 
@@ -709,6 +710,15 @@ class ExperimentEnvelope(BaseModel):
     experiment_id: str
     operation: str
     status: ExperimentStatus
+    status_url: str = Field(
+        description="Canonical experiment status URL. GET this URL to retrieve the current experiment status."
+    )
+    retry_after_seconds: int | None = Field(
+        description=(
+            "Seconds to wait before GETting status_url again while the experiment is "
+            "nonterminal; null after it completes or fails."
+        )
+    )
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -724,6 +734,8 @@ class ExperimentEnvelope(BaseModel):
             experiment_id=record.experiment_id,
             operation=record.operation,
             status=record.status,
+            status_url=experiment_status_url(record),
+            retry_after_seconds=experiment_retry_after(record),
             created_at=record.created_at,
             started_at=record.started_at,
             completed_at=record.completed_at,
