@@ -281,11 +281,11 @@ Idempotency is scoped to one operation:
 
 | Reuse | Result |
 | --- | --- |
-| Same operation, key, and canonical typed payload | Return the existing experiment. Do not enqueue or execute another job. |
-| Same operation and key, different canonical typed payload | Return `409 idempotency_conflict`. |
+| Same operation, key, and canonical JSON payload | Return the existing experiment. Do not enqueue or execute another job. |
+| Same operation and key, different canonical JSON payload | Return `409 idempotency_conflict`. |
 | Different operation and same key | Treat as an independent idempotency record. |
 
-The canonical payload includes the normalized typed request, including `execution`; JSON object key order and insignificant formatting do not change it. A replay returns the experiment's current state, `202` while queued or running and `200` after completion or failure. Idempotency records do not expire independently. They remain valid as long as their owning experiment remains in SQLite; the API has no experiment-delete route.
+The canonical payload is canonical JSON of the validated typed request, including enum values, defaults, and `execution`. JSON object key order and insignificant input formatting do not create a new payload. This does not promise domain normalization, such as normalizing symbol case. A replay returns the experiment's current state, `202` while queued or running and `200` after completion or failure. Idempotency records do not expire independently. They remain valid as long as their owning experiment remains in SQLite; the API has no experiment-delete route.
 
 ## Errors and request IDs
 
