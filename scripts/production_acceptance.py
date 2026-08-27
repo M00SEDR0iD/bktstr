@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import math
 import os
@@ -64,13 +65,88 @@ def _get_json(client: httpx.Client, path: str, *, params: dict[str, str] | None 
     return payload
 
 
-def _post_json(client: httpx.Client, path: str, body: dict) -> dict:
+def _post_json(
+    client: httpx.Client,
+    path: str,
+    body: dict,
+    *,
+    require_polling_headers: bool = False,
+) -> dict:
     response = client.post(path, json=body)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
         raise AcceptanceError(f"{path} did not return a JSON object")
+    if require_polling_headers and payload.get("status") in {"queued", "running"}:
+        status_url = payload.get("status_url")
+        retry_after = payload.get("retry_after_seconds")
+        if (
+            response.headers.get("Location") != status_url
+            or response.headers.get("Retry-After") != str(retry_after)
+        ):
+            raise AcceptanceError("queued experiment is missing valid polling headers")
     return payload
+
+
+def _poll_experiment(
+    client: httpx.Client,
+    envelope: dict[str, Any],
+    sleeper,
+    *,
+    timeout_seconds: float = 300.0,
+) -> dict[str, Any]:
+    current = envelope
+    deadline = time.monotonic() + timeout_seconds
+    remaining_wait = timeout_seconds
+    while current.get("status") in {"queued", "running"}:
+        status_url = current.get("status_url")
+        retry_after = current.get("retry_after_seconds")
+        if not isinstance(status_url, str) or not status_url.startswith(
+            "/api/v1/experiments/"
+        ):
+            raise AcceptanceError("queued experiment is missing a valid status_url")
+        if (
+            isinstance(retry_after, bool)
+            or not isinstance(retry_after, int)
+            or retry_after < 1
+        ):
+            raise AcceptanceError("queued experiment is missing retry timing")
+        if (
+            retry_after > remaining_wait
+            or time.monotonic() + retry_after > deadline
+        ):
+            raise AcceptanceError("comparison polling timed out")
+        sleeper(retry_after)
+        remaining_wait -= retry_after
+        if time.monotonic() >= deadline:
+            raise AcceptanceError("comparison polling timed out")
+        current = _get_json(client, status_url)
+    return current
+
+
+def _require_openapi_contract(schema: dict[str, Any]) -> None:
+    try:
+        schemas = schema["components"]["schemas"]
+        market = schemas["MarketCreate"]["properties"]
+        experiment = schemas["CompareExperimentResponse"]["properties"]
+        compare_responses = schema["paths"]["/api/v1/compare"]["post"]["responses"]
+        polling_response = schema["paths"]["/api/v1/experiments/{experiment_id}"][
+            "get"
+        ]["responses"]["200"]
+    except (KeyError, TypeError):
+        raise AcceptanceError("OpenAPI does not publish the async comparison contract") from None
+
+    if "$ref" not in market["timeframe"] or "$ref" not in market["source"]:
+        raise AcceptanceError("OpenAPI does not publish market request enums")
+    if not {"status_url", "retry_after_seconds"} <= set(experiment):
+        raise AcceptanceError("OpenAPI does not publish polling metadata")
+    for status in ("200", "202"):
+        if not {"Location", "Retry-After"} <= set(
+            compare_responses.get(status, {}).get("headers", {})
+        ):
+            raise AcceptanceError("OpenAPI does not publish comparison polling headers")
+    if "Retry-After" not in polling_response.get("headers", {}):
+        raise AcceptanceError("OpenAPI does not publish experiment polling headers")
 
 
 def _wait_for_deployment(
@@ -140,6 +216,13 @@ def run_acceptance(
         or deployment_poll_seconds < 0
     ):
         raise AcceptanceError("deployment_poll_seconds must be finite and >= 0")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+    ):
+        raise AcceptanceError("timeout_seconds must be finite and > 0")
 
     with httpx.Client(
         base_url=base_url.rstrip("/"),
@@ -160,6 +243,7 @@ def run_acceptance(
         schema = _get_json(client, "/openapi.json")
         if not schema.get("openapi") or not RESEARCH_PATHS.issubset(set(schema.get("paths") or [])):
             raise AcceptanceError("OpenAPI is missing the v0.6 research contract")
+        _require_openapi_contract(schema)
 
         capabilities = _get_json(client, "/api/v1/capabilities")
         if capabilities.get("version") != expected_version:
@@ -169,14 +253,65 @@ def run_acceptance(
             raise AcceptanceError("capabilities do not publish bearer authentication")
 
         backtest = _post_json(client, "/api/v1/backtests", ANCHOR_REQUEST)
+        changed_request = deepcopy(ANCHOR_REQUEST)
+        changed_request["strategy"]["parameters"]["stop_pct"] = 2.0
+        changed_backtest = _post_json(
+            client, "/api/v1/backtests", changed_request
+        )
 
-    if backtest.get("operation") != "backtest" or backtest.get("status") != "completed":
-        raise AcceptanceError("bounded v0.6 backtest did not complete inline")
-    if not isinstance(backtest.get("experiment_id"), str) or not backtest["experiment_id"]:
-        raise AcceptanceError("completed backtest is missing an experiment_id")
-    result = backtest.get("result")
-    if not isinstance(result, dict) or not {"metrics", "trades", "configuration", "provenance"} <= set(result):
-        raise AcceptanceError("completed backtest is missing reproducible research output")
+        results = []
+        for candidate in (backtest, changed_backtest):
+            if (
+                candidate.get("operation") != "backtest"
+                or candidate.get("status") != "completed"
+            ):
+                raise AcceptanceError("bounded v0.6 backtest did not complete inline")
+            if (
+                not isinstance(candidate.get("experiment_id"), str)
+                or not candidate["experiment_id"]
+            ):
+                raise AcceptanceError("completed backtest is missing an experiment_id")
+            candidate_result = candidate.get("result")
+            if not isinstance(candidate_result, dict) or not {
+                "metrics",
+                "trades",
+                "configuration",
+                "provenance",
+            } <= set(candidate_result):
+                raise AcceptanceError(
+                    "completed backtest is missing reproducible research output"
+                )
+            results.append(candidate_result)
+
+        comparison = _post_json(
+            client,
+            "/api/v1/compare",
+            {
+                "candidates": [
+                    backtest["experiment_id"],
+                    changed_backtest["experiment_id"],
+                ],
+                "execution": "async",
+            },
+            require_polling_headers=True,
+        )
+        comparison = _poll_experiment(
+            client,
+            comparison,
+            sleeper,
+            timeout_seconds=timeout_seconds,
+        )
+
+    if comparison.get("status") != "completed" or comparison.get("error") is not None:
+        raise AcceptanceError("bounded v0.6 comparison did not complete")
+    comparison_result = comparison.get("result")
+    comparison_candidates = (
+        comparison_result.get("candidates")
+        if isinstance(comparison_result, dict)
+        else None
+    )
+    if not isinstance(comparison_candidates, list) or len(comparison_candidates) != 2:
+        raise AcceptanceError("completed comparison does not contain exactly two candidates")
 
     return {
         "status": "pass",
@@ -185,7 +320,12 @@ def run_acceptance(
         "backtest": {
             "experiment_id": backtest["experiment_id"],
             "status": backtest["status"],
-            "trade_count": result["metrics"].get("trade_count"),
+            "trade_count": results[0]["metrics"].get("trade_count"),
+        },
+        "comparison": {
+            "experiment_id": comparison["experiment_id"],
+            "status": comparison["status"],
+            "candidate_count": len(comparison_candidates),
         },
     }
 
