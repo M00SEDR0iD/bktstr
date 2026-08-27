@@ -93,35 +93,55 @@ def test_market_data_rejects_cursor_for_different_canonical_request(monkeypatch,
     assert response.json()["error"]["details"]["fields"] == ["cursor"]
 
 
-def test_market_data_validates_page_bounds_and_openapi_contract(monkeypatch, tmp_path):
+def test_market_data_validates_page_bounds_and_enum_openapi_contract(monkeypatch, tmp_path):
     # Break caught: unbounded inspection pages could exhaust a service worker or typed clients.
     monkeypatch.setenv("BKTSTR_API_KEY", "test-key")
     monkeypatch.setenv("BKTSTR_EXPERIMENT_DIR", str(tmp_path / "experiments"))
     with TestClient(create_app()) as client:
         invalid = client.get(QUERY.replace("limit=2", "limit=1001"), headers=AUTH)
+        invalid_source = client.get(f"{QUERY}&source=massive", headers=AUTH)
         document = client.get("/openapi.json").json()
 
     assert invalid.status_code == 422
     assert invalid.json()["error"]["details"]["fields"] == ["limit"]
+    assert invalid_source.status_code == 422
+    assert invalid_source.json()["error"]["code"] == "validation_error"
+    assert invalid_source.json()["error"]["details"]["fields"] == ["source"]
     operation = document["paths"]["/api/v1/market-data"]["get"]
     assert operation["responses"]["200"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("/MarketDataResponse")
     for status in ("400", "401", "422", "500", "502"):
         assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
+    schemas = document["components"]["schemas"]
+    assert schemas["MarketCreate"]["properties"]["timeframe"]["$ref"].endswith(
+        "/MarketTimeframe"
+    )
+    assert schemas["MarketCreate"]["properties"]["source"]["$ref"].endswith(
+        "/AutomaticSource"
+    )
+    assert schemas["MarketTimeframe"]["enum"] == ["1m", "5m", "15m", "1h", "1d"]
+    assert schemas["AutomaticSource"]["enum"] == ["auto"]
+    market_parameters = {item["name"]: item for item in operation["parameters"]}
+    assert market_parameters["timeframe"]["schema"]["$ref"].endswith(
+        "/MarketTimeframe"
+    )
+    assert market_parameters["source"]["schema"]["$ref"].endswith(
+        "/AutomaticSource"
+    )
 
 
 @pytest.mark.parametrize(
-    ("overrides", "fields"),
+    ("overrides", "fields", "status_code"),
     [
-        ({"symbol": "bad symbol"}, ["symbol"]),
-        ({"start": "2026-08-18", "end": "2026-08-17"}, ["start", "end"]),
-        ({"timeframe": "2m"}, ["timeframe"]),
-        ({"source": "manual"}, ["source"]),
+        ({"symbol": "bad symbol"}, ["symbol"], 400),
+        ({"start": "2026-08-18", "end": "2026-08-17"}, ["start", "end"], 400),
+        ({"timeframe": "2m"}, ["timeframe"], 422),
+        ({"source": "massive"}, ["source"], 422),
     ],
 )
-def test_market_data_semantic_errors_use_flat_query_paths(
-    monkeypatch, tmp_path, overrides, fields
+def test_market_data_invalid_query_errors_use_flat_query_paths(
+    monkeypatch, tmp_path, overrides, fields, status_code
 ):
     # Break caught: a shared nested-market normalizer could leak `market.*`
     # paths into the flat /market-data query contract.
@@ -140,7 +160,7 @@ def test_market_data_semantic_errors_use_flat_query_paths(
     with TestClient(create_app()) as client:
         response = client.get("/api/v1/market-data", params=query, headers=AUTH)
 
-    assert response.status_code == 400
+    assert response.status_code == status_code
     assert response.json()["error"]["details"]["fields"] == fields
 
 

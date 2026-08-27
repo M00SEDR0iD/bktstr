@@ -673,7 +673,7 @@ feature branch → GitHub CI → merge main → Railway auto-deploy
                            Supabase pg_net acceptance
 ```
 
-GitHub CI runs the full test suite, Python compile checks, a generated-file hygiene check, and the cache benchmark. Generated `__pycache__`, `.pyc/.pyo`, and `.pytest_cache` artifacts must never be tracked. After deployment, `scripts/production_acceptance.py` reruns the frozen NVDA Jun-Aug 2026 control twice and requires identical trading output plus warm derived-cache hits.
+GitHub CI runs the full test suite, Python compile checks, a generated-file hygiene check, and the cache benchmark. Generated `__pycache__`, `.pyc/.pyo`, and `.pytest_cache` artifacts must never be tracked. After deployment, `scripts/production_acceptance.py` runs two one-day NVDA backtests with different `stop_pct` values, submits their comparison, and polls it to completion with a finite deadline. The script also checks the deployed OpenAPI enums and the asynchronous status, URL, retry-body, and polling-header contracts.
 
 When direct GitHub access from an agent is unavailable, the **GitHub-through-Supabase** recovery bridge in `ops/supabase/GITHUB_BRIDGE.md` uses `pg_net` to resolve an exact commit/tree and retrieve source bodies from GitHub's raw-content host. Every recovered source body is retained with its Git blob SHA so integrity can be verified. This bridge is operational tooling only and never enters the backtest execution path.
 
@@ -708,96 +708,19 @@ future MCP server is only an adapter over these same services; it does not add
 agent-specific rules or a second experiment model. The complete machine-readable
 contract is available at `GET /openapi.json`.
 
-### Authentication and discovery
-
 `GET /health` and `GET /api/v1/health` are unauthenticated deployment probes.
-Every other `/api/v1/*` route requires one service bearer key:
+Other `/api/v1/*` routes require `Authorization: Bearer <BKTSTR_API_KEY>`.
+Clients submit registered strategy work through `POST /api/v1/backtests`,
+`POST /api/v1/parameter-sweeps`, `POST /api/v1/compare`, or
+`POST /api/v1/regime-comparison`, then poll the canonical
+`/api/v1/experiments/{experiment_id}` envelope. `GET /api/v1/backtests/{experiment_id}`
+is the typed backtest view. The former `GET /api/v1/backtest` endpoint returns
+`410 legacy_endpoint_removed`.
 
-```text
-Authorization: Bearer <BKTSTR_API_KEY>
-```
-
-Start with `GET /api/v1/capabilities`. It publishes registered strategy and
-research-variable metadata, available sources and timeframe limits, operation
-names, execution policy, idempotency behavior, experiment states, and API/build
-identity. Registry-derived v0.5 variable tiers, immutability, no-automatic-
-backfill policy, and strategy evidence rules remain authoritative.
-
-### Research operations and polling
-
-Use high-level operations rather than client-supplied formulas:
-
-- `POST /api/v1/backtests` runs one registered strategy configuration.
-- `POST /api/v1/parameter-sweeps`, `POST /api/v1/compare`, and
-  `POST /api/v1/regime-comparison` submit bounded research jobs.
-- `GET /api/v1/backtests/{experiment_id}` is the typed backtest view.
-- `GET /api/v1/experiments/{experiment_id}` is the canonical shared experiment
-  envelope for polling any operation.
-
-All submissions create an immutable experiment with canonical typed request,
-result, and provenance artifacts on the Railway volume. SQLite is the committed
-source of record. Artifact files are written as immutable generations and a
-single atomic manifest points only to the generation matching that committed
-row; startup reconciliation recreates a missing manifest from SQLite and never
-mistakes an interrupted generation for a completed experiment. A completed
-result records the exact strategy configuration, dates, symbol, timeframe,
-selected data source/version or stable snapshot digest, actual coverage and
-cache lineage, governed dependency/regime/sentiment provenance, slippage/
-execution assumptions, regime settings, BKTSTR version and commit. Use the
-experiment ID when comparing or reproducing research.
-
-Every submitted operation accepts `execution: "auto" | "sync" | "async"`.
-`auto` completes a bounded single backtest inline and queues parameter sweeps,
-comparisons, and regime comparisons. `sync` either completes immediately or
-returns `409 execution_not_available`; it is never silently converted to a
-queue. `async` always returns a queued experiment. Poll until the immutable
-envelope status is `completed` or `failed`:
-
-```json
-{
-  "experiment_id": "exp_...",
-  "operation": "parameter_sweep",
-  "status": "queued",
-  "execution": "async"
-}
-```
-
-Mutating operations accept `Idempotency-Key`. Retrying the same key with the
-same canonical typed request returns the original experiment; using it for a
-different request returns `409 idempotency_conflict` rather than silently
-duplicating a hypothesis.
-
-### Market-data inspection and errors
-
-`GET /api/v1/market-data` returns read-only normalized `timestamp`, `open`,
-`high`, `low`, `close`, and `volume` rows. Supply `symbol`, `start`, `end`, and
-`timeframe`, with optional `source`, `limit` (1 through 1000), and opaque
-`cursor`. Use `next_cursor` unchanged for the following page. A cursor is bound
-to the canonical market-data identity, so it cannot page a different symbol,
-range, timeframe, or source. Responses never expose provider credentials or
-provider raw response payloads.
-
-Errors use one typed envelope with a stable `code`, human-readable `message`,
-structured `details`, and `request_id`. Common client actions are: correct the
-reported fields after `422 validation_error`; inspect input after `400
-invalid_request`; authenticate after `401 unauthorized`; wait/poll after `202`;
-adjust a forced inline request after `409 execution_not_available`; and retry a
-provider failure only after evaluating the returned error code.
-
-Semantic validation occurs before an experiment is created: an invalid sweep
-grid, candidate set, regime labels, or backtest configuration returns `400
-invalid_request` with `details.fields` and creates no queued or failed record.
-Once a valid request is durable, provider and execution failures are instead
-recorded on that experiment for polling. Generated OpenAPI enumerates the
-`400`, `401`, `409`, `422`, `500`, and where applicable `502` error envelopes
-for each public operation.
-
-The former `GET /api/v1/backtest` endpoint is intentionally removed in v0.6 to
-avoid a second execution path. It returns `410 legacy_endpoint_removed`, a
-`Link: </openapi.json>; rel="alternate"` header, and a migration target of
-`POST /api/v1/backtests`.
-
-### Railway configuration
+Experiments retain canonical requests, results, provenance, and immutable
+artifacts on the Railway volume, with SQLite as the committed source of record.
+For authentication, lifecycle, idempotency, errors, request examples, market
+data, and comparison details, use the canonical [API reference](API_REFERENCE.md).
 
 Set `BKTSTR_API_KEY` as the single bearer credential. Set
 `BKTSTR_EXPERIMENT_DIR` to a directory on the Railway volume so SQLite records

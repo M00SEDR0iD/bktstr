@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bktstr.api.lifecycle import experiment_retry_after, experiment_status_url
 from bktstr.services.experiments import ExecutionMode, ExperimentRecord, ExperimentStatus
 
 
@@ -359,14 +361,32 @@ class StrategyCreate(BaseModel):
     parameters: dict[str, ParameterValue] = Field(default_factory=dict)
 
 
+class MarketTimeframe(StrEnum):
+    ONE_MINUTE = "1m"
+    FIVE_MINUTES = "5m"
+    FIFTEEN_MINUTES = "15m"
+    ONE_HOUR = "1h"
+    ONE_DAY = "1d"
+
+
+class AutomaticSource(StrEnum):
+    AUTO = "auto"
+
+
 class MarketCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     symbol: str
     start: date
     end: date
-    timeframe: str = "1m"
-    source: str = "auto"
+    timeframe: MarketTimeframe = Field(
+        default=MarketTimeframe.ONE_MINUTE,
+        description=(
+            "Globally valid market-data timeframe. The selected strategy may "
+            "narrow this set; the baseline strategy requires 1m."
+        ),
+    )
+    source: AutomaticSource = AutomaticSource.AUTO
 
 
 class RegimeCreate(BaseModel):
@@ -690,6 +710,15 @@ class ExperimentEnvelope(BaseModel):
     experiment_id: str
     operation: str
     status: ExperimentStatus
+    status_url: str = Field(
+        description="Canonical experiment status URL. GET this URL to retrieve the current experiment status."
+    )
+    retry_after_seconds: int | None = Field(
+        description=(
+            "Seconds to wait before GETting status_url again while the experiment is "
+            "nonterminal; null after it completes or fails."
+        )
+    )
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -705,6 +734,8 @@ class ExperimentEnvelope(BaseModel):
             experiment_id=record.experiment_id,
             operation=record.operation,
             status=record.status,
+            status_url=experiment_status_url(record),
+            retry_after_seconds=experiment_retry_after(record),
             created_at=record.created_at,
             started_at=record.started_at,
             completed_at=record.completed_at,

@@ -21,9 +21,14 @@ from bktstr.service import BacktestRequest, execute_backtest
 from bktstr.strategies import ResolvedStrategy, baseline_strategy_registry
 
 from .data import normalize_market_request
-from .experiments import ExperimentStatus, ExperimentStore
+from .experiments import (
+    ExperimentNotFoundError,
+    ExperimentOperationError,
+    ExperimentStatus,
+    ExperimentStore,
+)
 from .regimes import RegimeInput, normalize_regime_request
-from .validation import SemanticValidationError
+from .validation import SemanticValidationError, StrategyCompatibilityError
 
 
 ParameterValue = float | int | str | bool | None
@@ -120,6 +125,19 @@ class BacktestInput:
             raise SemanticValidationError(
                 f"unknown strategy {self.strategy_id!r} version {self.strategy_version!r}",
                 (field_path,),
+            )
+        if market.timeframe != definition.timeframe:
+            raise StrategyCompatibilityError(
+                (
+                    f"Strategy {self.strategy_id!r} version {self.strategy_version!r} "
+                    f"requires timeframe {definition.timeframe!r}; "
+                    f"received {market.timeframe!r}."
+                ),
+                ("market.timeframe",),
+                strategy_id=self.strategy_id,
+                strategy_version=self.strategy_version,
+                required_timeframe=definition.timeframe,
+                received_timeframe=market.timeframe,
             )
         definitions = definition.parameter_definitions
         unknown = sorted(set(self.parameters) - set(definitions))
@@ -959,13 +977,15 @@ class RegimeComparisonResult:
     provenance: Mapping[str, Any]
 
 
-def _json_value(value: Any) -> Any:
+def to_json_value(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
-        return {item.name: _json_value(getattr(value, item.name)) for item in fields(value)}
+        return {
+            item.name: to_json_value(getattr(value, item.name)) for item in fields(value)
+        }
     if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
+        return {str(key): to_json_value(item) for key, item in value.items()}
     if isinstance(value, tuple | list):
-        return [_json_value(item) for item in value]
+        return [to_json_value(item) for item in value]
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime | date):
@@ -1027,7 +1047,7 @@ def _execute_child_backtest(
         raise RuntimeError("child backtests do not reuse idempotency records")
     try:
         result = asyncio.run(run_backtest(child_input))
-        payload = _json_value(result)
+        payload = to_json_value(result)
         store.complete(record.experiment_id, payload, payload["provenance"])
     except Exception:
         store.fail(
@@ -1123,6 +1143,24 @@ def _changed_paths(left: Any, right: Any, prefix: str = "") -> tuple[str, ...]:
     return () if left == right else (prefix,)
 
 
+def _invalid_comparison_candidate(
+    index: int,
+    experiment_id: str,
+    reason: str,
+    message: str,
+) -> ExperimentOperationError:
+    return ExperimentOperationError(
+        "invalid_request",
+        f"Comparison candidate {index} '{experiment_id}' {message}",
+        {
+            "fields": [f"candidates.{index}"],
+            "candidate_index": index,
+            "candidate_id": experiment_id,
+            "reason": reason,
+        },
+    )
+
+
 def compare_experiments(
     value: CompareInput | Sequence[ComparisonCandidateInput],
     *,
@@ -1131,7 +1169,7 @@ def compare_experiments(
 ) -> CompareResult:
     request = value if isinstance(value, CompareInput) else CompareInput(value)
     resolved: list[tuple[str, Any]] = []
-    for candidate in request.candidates:
+    for index, candidate in enumerate(request.candidates):
         if isinstance(candidate, NamedVariantInput):
             child_id, _ = _execute_child_backtest(
                 candidate.backtest,
@@ -1140,7 +1178,34 @@ def compare_experiments(
             )
             resolved.append((candidate.name, store.load_experiment(child_id)))
         else:
-            resolved.append((candidate, store.load_experiment(candidate)))
+            try:
+                record = store.load_experiment(candidate)
+            except ExperimentNotFoundError as exc:
+                raise _invalid_comparison_candidate(
+                    index, candidate, "not_found", "was not found."
+                ) from exc
+            if record.operation != "backtest":
+                raise _invalid_comparison_candidate(
+                    index,
+                    candidate,
+                    "wrong_operation",
+                    f"belongs to operation '{record.operation}'; expected 'backtest'.",
+                )
+            if record.status is not ExperimentStatus.COMPLETED:
+                raise _invalid_comparison_candidate(
+                    index,
+                    candidate,
+                    "not_completed",
+                    f"has status '{record.status.value}'; expected 'completed'.",
+                )
+            if record.result is None:
+                raise _invalid_comparison_candidate(
+                    index,
+                    candidate,
+                    "missing_result",
+                    "is completed but has no result.",
+                )
+            resolved.append((candidate, record))
 
     candidates: list[ComparisonCandidate] = []
     for name, record in resolved:
@@ -1224,7 +1289,7 @@ def run_regime_comparison(
                 experiment_id=child_id,
                 metrics=result.metrics,
                 trades=result.trades,
-                provenance=_immutable_mapping(_json_value(result.provenance)),
+                provenance=_immutable_mapping(to_json_value(result.provenance)),
             )
         )
     comparison_matrix = {
@@ -1280,5 +1345,6 @@ __all__ = [
     "run_backtest",
     "run_parameter_sweep",
     "run_regime_comparison",
+    "to_json_value",
     "to_legacy_request",
 ]

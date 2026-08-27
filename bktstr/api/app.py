@@ -20,7 +20,7 @@ from bktstr.services.experiments import (
     ExperimentWorker,
     IdempotencyConflictError,
 )
-from bktstr.services.validation import SemanticValidationError
+from bktstr.services.validation import SemanticValidationError, StrategyCompatibilityError
 
 from .routes import api_router, experiment_operations
 from .schemas import ApiError, ErrorResponse, HealthResponse, NamedVariantCreate
@@ -150,6 +150,24 @@ def create_app() -> FastAPI:
             "invalid_request",
             str(exc),
             {"fields": list(exc.fields)},
+        )
+
+    @app.exception_handler(StrategyCompatibilityError)
+    async def handle_strategy_compatibility_error(
+        request: Request, exc: StrategyCompatibilityError
+    ) -> JSONResponse:
+        return _error_response(
+            request,
+            422,
+            "strategy_incompatible",
+            str(exc),
+            {
+                "fields": list(exc.fields),
+                "strategy_id": exc.strategy_id,
+                "strategy_version": exc.strategy_version,
+                "required_timeframe": exc.required_timeframe,
+                "received_timeframe": exc.received_timeframe,
+            },
         )
 
     @app.exception_handler(ValueError)

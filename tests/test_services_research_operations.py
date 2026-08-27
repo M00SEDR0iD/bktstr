@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
+from enum import StrEnum
 from types import MappingProxyType
 
 import pytest
 
 import bktstr.services.backtest as backtest_service
 from bktstr.services.backtest import (
-    BacktestConfiguration,
     BacktestInput,
     BacktestMetrics,
     BacktestResearchResult,
@@ -17,13 +17,18 @@ from bktstr.services.backtest import (
     ParameterSweepInput,
     RegimeComparisonInput,
     RegimeLabelInput,
-    ResearchProvenance,
     compare_experiments,
     run_parameter_sweep,
     run_regime_comparison,
+    to_json_value,
 )
-from bktstr.services.experiments import ExperimentStatus, ExperimentStore
+from bktstr.services.experiments import (
+    ExperimentOperationError,
+    ExperimentStatus,
+    ExperimentStore,
+)
 from bktstr.services.validation import SemanticValidationError
+from research_fixtures import deterministic_research_result
 
 
 BASE = BacktestInput(
@@ -38,78 +43,33 @@ BASE = BacktestInput(
 )
 
 
-def _research_result(value: BacktestInput) -> BacktestResearchResult:
-    stop_pct = float(value.parameters.get("stop_pct", 1.0))
-    strategy = MappingProxyType(
+# Kept as a test-module compatibility alias for adjacent operation-route tests.
+_research_result = deterministic_research_result
+
+
+class _FixtureState(StrEnum):
+    READY = "ready"
+
+
+def test_to_json_value_recursively_thaws_domain_values():
+    # Break caught: immutable service results could reach JSON persistence unchanged.
+    value = MappingProxyType(
         {
-            "id": value.strategy_id,
-            "version": value.strategy_version,
-            "schema_version": "1.0.0",
-            "parameters": {"stop_pct": stop_pct},
+            "candidate": MappingProxyType(
+                {"metrics": BacktestMetrics(1, 2, 3, 4, 5, 6, 7, 8)}
+            ),
+            "states": (_FixtureState.READY,),
+            "at": datetime(2026, 8, 26, tzinfo=timezone.utc),
         }
     )
-    metrics = BacktestMetrics(
-        total_pnl=stop_pct * 10.0,
-        total_return=stop_pct,
-        ev_per_trade=stop_pct,
-        win_rate=50.0,
-        profit_factor=stop_pct + 1.0,
-        max_drawdown=-stop_pct,
-        sharpe=stop_pct / 2.0,
-        trade_count=2,
-    )
-    provenance = ResearchProvenance(
-        strategy=strategy,
-        market_data=MappingProxyType(
-            {
-                "source": "fixture",
-                "requested_source": "auto",
-                "version": "fixture-v1",
-                "coverage": {
-                    "requested_start": value.start.isoformat(),
-                    "requested_end": value.end.isoformat(),
-                    "bars": 2,
-                },
-            }
-        ),
-        execution_model=MappingProxyType(
-            {"id": "bktstr.next-bar-open", "version": "1.0.0", "slippage_bps": 2.0}
-        ),
-        software=MappingProxyType({"bktstr_version": "0.5.0"}),
-    )
-    return BacktestResearchResult(
-        metrics=metrics,
-        trades=(),
-        configuration=BacktestConfiguration(
-            strategy=strategy,
-            market=MappingProxyType(
-                {
-                    "symbol": value.symbol,
-                    "start": value.start.isoformat(),
-                    "end": value.end.isoformat(),
-                    "timeframe": value.timeframe,
-                    "source": value.source,
-                }
-            ),
-            regime=MappingProxyType(
-                {
-                    "enabled": bool(value.regime and value.regime.enabled),
-                    "rules": value.regime.rules if value.regime else None,
-                }
-            ),
-            execution=MappingProxyType(
-                {
-                    "mode": value.execution,
-                    "model_id": "bktstr.next-bar-open",
-                    "model_version": "1.0.0",
-                    "slippage_bps": 2.0,
-                    "position_size": 1000.0,
-                    "starting_capital": 10000.0,
-                }
-            ),
-        ),
-        provenance=provenance,
-    )
+
+    normalized = to_json_value(value)
+
+    assert type(normalized) is dict
+    assert type(normalized["candidate"]) is dict
+    assert normalized["candidate"]["metrics"]["trade_count"] == 8
+    assert normalized["states"] == ["ready"]
+    assert normalized["at"] == "2026-08-26T00:00:00+00:00"
 
 
 def test_parameter_sweep_rejects_non_overridable_grid_key():
@@ -152,7 +112,7 @@ def test_parameter_sweep_is_deterministic_and_persists_linked_children(
 ):
     # Break caught: grid ordering or child linkage could vary between reproductions.
     async def deterministic(value: BacktestInput) -> BacktestResearchResult:
-        return _research_result(value)
+        return deterministic_research_result(value)
 
     monkeypatch.setattr(backtest_service, "run_backtest", deterministic)
     store = ExperimentStore(tmp_path)
@@ -206,6 +166,35 @@ def _completed_backtest(
         "execution": "sync",
         "include_trades": True,
     }
+    provenance = {
+        "strategy": {
+            "id": "bktstr.bearish-regime-scalp",
+            "version": "1.0.0",
+            "schema_version": "1.0.0",
+            "parameters": {"stop_pct": stop_pct},
+        },
+        "market_data": {
+            "source": "fixture",
+            "requested_source": "auto",
+            "version": "fixture-v1",
+            "snapshot_id": "fixture-snapshot",
+            "coverage": {
+                "requested_start": "2026-08-17",
+                "requested_end": "2026-08-17",
+                "available_start": "2026-08-17",
+                "available_end": "2026-08-17",
+                "observations": 2,
+                "bars": 2,
+            },
+            "cache": {"hit_days": 1, "miss_days": 0, "fetched_ranges": 0},
+        },
+        "execution_model": {
+            "id": "bktstr.next-bar-open",
+            "version": "1.0.0",
+            "slippage_bps": 2.0,
+        },
+        "software": {"bktstr_version": "0.5.0"},
+    }
     record, _ = store.create_and_claim_experiment("backtest", request, "sync")
     completed = store.complete(
         record.experiment_id,
@@ -222,9 +211,9 @@ def _completed_backtest(
             },
             "trades": [],
             "configuration": {},
-            "provenance": {"strategy": {"id": "bktstr.bearish-regime-scalp"}},
+            "provenance": provenance,
         },
-        {"strategy": {"id": "bktstr.bearish-regime-scalp"}},
+        provenance,
     )
     return completed.experiment_id
 
@@ -250,8 +239,20 @@ def test_compare_requires_completed_backtest_experiments(tmp_path):
     queued, _ = store.create_experiment("backtest", {"symbol": "NVDA"}, "async")
     completed = _completed_backtest(store, stop_pct=1.0, profit_factor=1.5)
 
-    with pytest.raises(ValueError, match="completed backtest"):
+    with pytest.raises(ExperimentOperationError) as raised:
         compare_experiments((queued.experiment_id, completed), store=store)
+
+    assert raised.value.code == "invalid_request"
+    assert str(raised.value) == (
+        f"Comparison candidate 0 '{queued.experiment_id}' has status 'queued'; "
+        "expected 'completed'."
+    )
+    assert raised.value.details == {
+        "fields": ["candidates.0"],
+        "candidate_index": 0,
+        "candidate_id": queued.experiment_id,
+        "reason": "not_completed",
+    }
 
 
 def test_compare_input_reports_the_invalid_experiment_candidate_index():
@@ -344,7 +345,7 @@ def test_regime_comparison_persists_every_caller_label_and_child(
 ):
     # Break caught: labels or exact period/rule inputs could disappear from provenance.
     async def deterministic(value: BacktestInput) -> BacktestResearchResult:
-        return _research_result(value)
+        return deterministic_research_result(value)
 
     monkeypatch.setattr(backtest_service, "run_backtest", deterministic)
     store = ExperimentStore(tmp_path)
