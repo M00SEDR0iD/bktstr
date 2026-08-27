@@ -65,6 +65,8 @@ Production endpoint: `https://bktstr-production.up.railway.app`
 - `GET /api/v1/market-data`
 - `GET /openapi.json`
 
+Read the [API reference](docs/API_REFERENCE.md) for authentication, request bodies, polling, idempotency, errors, provider behavior, and comparison semantics.
+
 Core short setup used as the frozen NVDA research baseline:
 
 ```text
