@@ -1,13 +1,10 @@
-import asyncio
 from datetime import date, datetime
 
 import pytest
 
-import bktstr.services.backtest as backtest_service
 from bktstr.services.backtest import (
     BacktestInput,
     project_research_result,
-    run_backtest,
     to_legacy_request,
 )
 from bktstr.services.data import normalize_market_request
@@ -209,21 +206,10 @@ def _governed_subject_provenance(
     }
 
 
-def test_typed_backtest_projects_research_fields_and_calls_legacy_once(monkeypatch):
-    # Break caught: the service could re-run execution or omit reproducible trade context.
-    calls = []
-
-    async def deterministic_execute(request):
-        calls.append(request)
-        return _one_trade_legacy_result()
-
-    monkeypatch.setattr(backtest_service, "execute_backtest", deterministic_execute)
+def test_legacy_result_projection_preserves_research_fields():
+    # Break caught: compatibility projection could omit reproducible trade context.
     backtest_input = BacktestInput(**BASE_INPUT)
-
-    result = asyncio.run(run_backtest(backtest_input))
-
-    assert len(calls) == 1
-    assert calls[0] == to_legacy_request(backtest_input)
+    result = project_research_result(backtest_input, _one_trade_legacy_result())
     assert result.metrics.trade_count == 1
     assert result.metrics.ev_per_trade == 12.5
     assert result.metrics.win_rate == 100.0

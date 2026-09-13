@@ -17,8 +17,10 @@ from bktstr import __version__
 from bktstr.build_info import runtime_build_info
 from bktstr.regime import REGIME_FIELDS
 from bktstr.rules import parse_rules
-from bktstr.service import BacktestRequest, execute_backtest
-from bktstr.strategies import ResolvedStrategy, baseline_strategy_registry
+from bktstr.orchestrator import StrategyRunResult
+from bktstr.runtime import run_strategy
+from bktstr.service import BacktestRequest
+from bktstr.strategies import ResolvedStrategy, StrategyRunRequest, baseline_strategy_registry
 
 from .data import normalize_market_request
 from .experiments import (
@@ -517,8 +519,6 @@ def project_research_result(
         raise TypeError("input must be a BacktestInput")
     if not isinstance(legacy_result, Mapping):
         raise TypeError("legacy_result must be a mapping")
-    resolved = _resolved_strategy(value)
-    request = to_legacy_request(value)
     summary = legacy_result.get("summary", {})
     data = legacy_result.get("data", {})
     raw_trades = tuple(legacy_result.get("trades", ()))
@@ -526,18 +526,43 @@ def project_research_result(
         raise ValueError("legacy result summary and data must be mappings")
     if not all(isinstance(item, Mapping) for item in raw_trades):
         raise ValueError("legacy result trades must be mappings")
+    return _project_result(
+        value, _resolved_strategy(value), summary, data, raw_trades,
+        execution_provenance or {},
+    )
+
+
+def project_strategy_result(
+    value: BacktestInput, result: StrategyRunResult,
+) -> BacktestResearchResult:
+    """Project the executed strategy directly into the public research contract."""
+    return _project_result(
+        value, result.resolved_strategy, result.summary, result.data,
+        result.trades, result.provenance,
+    )
+
+
+def _project_result(
+    value: BacktestInput,
+    resolved: ResolvedStrategy,
+    summary: Mapping[str, Any],
+    data: Mapping[str, Any],
+    raw_trades: tuple[Mapping[str, Any], ...],
+    execution_provenance: Mapping[str, Any],
+) -> BacktestResearchResult:
+    parameters = resolved.values
 
     trade_count = summary.get("trades")
     if not isinstance(trade_count, int) or isinstance(trade_count, bool):
         trade_count = len(raw_trades)
     total_pnl = _number(summary.get("total_pnl_dollars"))
     total_return = (
-        total_pnl / request.starting_capital * 100.0
-        if total_pnl is not None and request.starting_capital != 0
+        total_pnl / parameters["starting_capital"] * 100.0
+        if total_pnl is not None and parameters["starting_capital"] != 0
         else None
     )
     trades = tuple(
-        _project_trade(item, entry_rules=request.entry) for item in raw_trades
+        _project_trade(item, entry_rules=parameters["entry_rules"]) for item in raw_trades
     )
     metrics = BacktestMetrics(
         total_pnl=total_pnl,
@@ -564,9 +589,9 @@ def project_research_result(
             "mode": value.execution,
             "model_id": resolved.execution_model_id,
             "model_version": resolved.execution_model_version,
-            "slippage_bps": request.slippage_bps,
-            "position_size": request.position_size,
-            "starting_capital": request.starting_capital,
+            "slippage_bps": parameters["slippage_bps"],
+            "position_size": parameters["position_size"],
+            "starting_capital": parameters["starting_capital"],
         }
     )
     configuration = BacktestConfiguration(
@@ -630,7 +655,7 @@ def project_research_result(
             {
                 "id": resolved.execution_model_id,
                 "version": resolved.execution_model_version,
-                "slippage_bps": request.slippage_bps,
+                "slippage_bps": parameters["slippage_bps"],
             }
         ),
         software=_immutable_mapping(
@@ -657,13 +682,34 @@ def project_research_result(
     )
 
 
-async def run_backtest(value: BacktestInput) -> BacktestResearchResult:
-    request = to_legacy_request(value)
-    legacy_result = await execute_backtest(request)
-    provenance = getattr(legacy_result, "execution_provenance", None)
-    return project_research_result(
-        value, legacy_result, execution_provenance=provenance
+def to_strategy_request(value: BacktestInput) -> StrategyRunRequest:
+    if not isinstance(value, BacktestInput):
+        raise TypeError("input must be a BacktestInput")
+    resolved = _resolved_strategy(value)
+    instruments = {"subject": value.symbol}
+    regime = value.regime if value.regime and value.regime.enabled else None
+    if regime:
+        for role, symbol in (
+            ("benchmark", regime.benchmark),
+            ("sector", regime.sentiment_sector_benchmark),
+            ("market", regime.sentiment_market_benchmark),
+        ):
+            if symbol:
+                instruments[role] = symbol
+    return StrategyRunRequest(
+        strategy_id=resolved.strategy_id,
+        strategy_version=resolved.strategy_version,
+        instruments=instruments,
+        start=value.start,
+        end=value.end,
+        timeframe=value.timeframe,
+        overrides=resolved.values,
     )
+
+
+async def run_backtest(value: BacktestInput) -> BacktestResearchResult:
+    result = await run_strategy(to_strategy_request(value))
+    return project_strategy_result(value, result)
 
 
 SWEEP_OBJECTIVES = frozenset(
@@ -1342,9 +1388,11 @@ __all__ = [
     "backtest_input_mapping",
     "compare_experiments",
     "project_research_result",
+    "project_strategy_result",
     "run_backtest",
     "run_parameter_sweep",
     "run_regime_comparison",
     "to_json_value",
     "to_legacy_request",
+    "to_strategy_request",
 ]

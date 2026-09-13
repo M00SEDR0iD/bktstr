@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-import os
 from types import MappingProxyType
 import re
 
-import httpx
-
-from bktstr_cache.derived import DerivedFrameCache
-
-from .cache import BarCache, CachedProvider
-from .providers import MassiveProvider, YahooProvider, can_use_yahoo_intraday
+from .engine import validate_entry_window as _validate_entry_window
 from .provenance import resolve_sentiment_sources
 from .regime import validate_regime_rules
 from .rules import parse_rules
@@ -24,11 +18,6 @@ _ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "1d"}
 INTRADAY_FEATURE_FORMULA_VERSION = "intraday-v1"
 REGIME_FORMULA_VERSION = "regime-v1"
 SENTIMENT_FORMULA_VERSION = "sentiment-v0.3.3"
-
-
-def _derived_cache_enabled() -> bool:
-    value = os.getenv("BKTSTR_DERIVED_CACHE_ENABLED", "true").strip().lower()
-    return value not in {"0", "false", "no", "off"}
 
 
 @dataclass(frozen=True)
@@ -153,31 +142,13 @@ class BacktestRequest:
         )
 
 
-def _validate_entry_window(start: str | None, end: str | None) -> None:
-    from datetime import datetime
-
-    def parse(value: str | None):
-        if value is None:
-            return None
-        try:
-            return datetime.strptime(value, "%H:%M").time()
-        except ValueError as exc:
-            raise ValueError("entry times must use 24-hour HH:MM format") from exc
-
-    start_time = parse(start)
-    end_time = parse(end)
-    if start_time is not None and end_time is not None and start_time >= end_time:
-        raise ValueError("entry_start_time must be before entry_end_time")
-
-
 def provider_name_for_request(request: BacktestRequest, *, today: date | None = None) -> str:
-    if os.getenv("MASSIVE_API_KEY", ""):
-        return "massive"
-    if request.regime or request.sentiment:
-        raise RuntimeError("MASSIVE_API_KEY is required for regime or sentiment backtests")
-    if can_use_yahoo_intraday(request.start, request.end, request.timeframe, today=today):
-        return "yahoo"
-    raise RuntimeError("MASSIVE_API_KEY is required for historical intraday ranges older than the Yahoo fallback window")
+    from .runtime import select_provider
+
+    return select_provider(
+        request.start, request.end, request.timeframe,
+        requires_daily_context=bool(request.regime or request.sentiment), today=today,
+    )
 
 
 class SerializedBacktestResult(dict):
@@ -189,40 +160,10 @@ class SerializedBacktestResult(dict):
 
 
 async def execute_backtest(request: BacktestRequest) -> dict:
-    # These imports remain local because the governed measurements preserve the
-    # legacy formula-version constants declared by this compatibility module.
-    from .measurements import baseline_variable_registry
-    from .orchestrator import (
-        OrchestratorDependencies,
-        StrategyRunError,
-        execute_strategy_run,
-        legacy_request_to_strategy_run,
-    )
-    from .strategies import baseline_strategy_registry
-    from .variable_store import VariableSnapshotStore
+    from .orchestrator import legacy_request_to_strategy_run
+    from .runtime import run_strategy
 
-    provider_name = provider_name_for_request(request)
-    if provider_name == "massive":
-        upstream = MassiveProvider(os.environ["MASSIVE_API_KEY"])
-    else:
-        upstream = YahooProvider()
-    provider = CachedProvider(upstream, BarCache(), provider_name=provider_name)
-    try:
-        result = await execute_strategy_run(
-            legacy_request_to_strategy_run(request),
-            OrchestratorDependencies(
-                provider=provider,
-                provider_name=provider_name,
-                variable_store=VariableSnapshotStore(DerivedFrameCache()),
-                variable_registry=baseline_variable_registry(),
-                strategy_registry=baseline_strategy_registry(),
-                derived_cache_enabled=_derived_cache_enabled(),
-            ),
-        )
-    except StrategyRunError as error:
-        if isinstance(error.provider_cause, httpx.HTTPStatusError):
-            raise error.provider_cause from None
-        raise
+    result = await run_strategy(legacy_request_to_strategy_run(request))
     return serialize_strategy_run_result(request, result)
 
 

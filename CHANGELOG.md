@@ -4,6 +4,14 @@ All notable BKTSTR changes are recorded here. BKTSTR uses Semantic Versioning; r
 
 ## [Unreleased]
 
+### Changed
+
+- Run typed research directly through strategy execution, with shared provider
+  selection for backtests and market-data inspection. Preserve trading results,
+  provenance, cache behavior, and early entry-window validation.
+- Prioritize intraday research accuracy, decision evidence, recoverable batches,
+  and validation before expanding the web application.
+
 ## [0.6.0] - 2026-08-25
 
 ### Added

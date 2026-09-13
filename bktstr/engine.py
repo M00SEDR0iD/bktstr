@@ -36,10 +36,14 @@ class BacktestConfig:
             raise ValueError("capital values must be positive")
         if self.slippage_bps < 0:
             raise ValueError("slippage_bps cannot be negative")
-        start = _parse_market_time(self.entry_start_time)
-        end = _parse_market_time(self.entry_end_time)
-        if start is not None and end is not None and start >= end:
-            raise ValueError("entry_start_time must be before entry_end_time")
+        validate_entry_window(self.entry_start_time, self.entry_end_time)
+
+
+def validate_entry_window(start: str | None, end: str | None) -> None:
+    start_time = _parse_market_time(start)
+    end_time = _parse_market_time(end)
+    if start_time is not None and end_time is not None and start_time >= end_time:
+        raise ValueError("entry_start_time must be before entry_end_time")
 
 
 def _parse_market_time(value: str | None):
