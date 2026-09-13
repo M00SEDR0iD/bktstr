@@ -2,6 +2,8 @@
 
 This outcome-driven plan maps the standalone web-application roadmap to production versions. GitHub Project owns live status; this document owns stable outcomes, order, and exit criteria.
 
+For current agent research work, follow [Agent research priorities](agent-research.md). The application milestones below remain a broader product plan; they are not prerequisites for improving intraday research quality.
+
 | Version | State | Milestone | Production outcome |
 | --- | --- | --- | --- |
 | v0.4.0 | Completed | Baseline and documentation repair | Trustworthy docs, executable examples, professional delivery governance, and a frozen v0.3.5 baseline |

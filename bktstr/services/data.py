@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -166,24 +165,9 @@ def _decode_cursor(cursor: str, *, identity: str) -> datetime:
 
 def _cached_provider_for_market(market: MarketInput):
     """Resolve the same governed raw-bar provider/cache pair used by backtests."""
-    from bktstr.cache import BarCache, CachedProvider
-    from bktstr.providers import MassiveProvider, YahooProvider
-    from bktstr.service import BacktestRequest, provider_name_for_request
+    from bktstr.runtime import cached_provider
 
-    selection = BacktestRequest.from_values(
-        symbol=market.symbol,
-        start=market.start.isoformat(),
-        end=market.end.isoformat(),
-        timeframe=market.timeframe,
-        entry="close.cross_below:vwap",
-    )
-    provider_name = provider_name_for_request(selection)
-    upstream = (
-        MassiveProvider(os.environ["MASSIVE_API_KEY"])
-        if provider_name == "massive"
-        else YahooProvider()
-    )
-    return CachedProvider(upstream, BarCache(), provider_name=provider_name)
+    return cached_provider(market.start, market.end, market.timeframe)
 
 
 def _normalized_bar(timestamp: Any, row: Any) -> MarketDataBar:

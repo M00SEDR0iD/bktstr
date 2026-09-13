@@ -111,6 +111,7 @@ PORT=8000 python -m bktstr.server
 
 - [Contributor guide](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
+- [Agent research priorities](docs/roadmap/agent-research.md)
 - [Standalone web application roadmap](docs/roadmap/standalone-web-app.md)
 - [v1 release plan](docs/roadmap/v1-release-plan.md)
 - [Release procedure](docs/development/releases.md)
