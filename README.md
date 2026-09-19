@@ -96,6 +96,8 @@ sentiment_sources=price
 
 ## Agent access
 
+For local Windows agents, use the [local credential setup](docs/development/local-credentials.md). It stores the current verified BKTSTR key in Windows Credential Manager and supplies it to trusted research programs without printing it.
+
 When direct Railway networking is unavailable, use the proven Supabase `pg_net` bridge described in [`AGENT_BACKTEST_RUNBOOK.md`](AGENT_BACKTEST_RUNBOOK.md).
 
 ## Local development

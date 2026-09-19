@@ -4,6 +4,12 @@ All notable BKTSTR changes are recorded here. BKTSTR uses Semantic Versioning; r
 
 ## [Unreleased]
 
+### Added
+
+- Local Windows credential helper for verified key import, pending key generation,
+  explicit clipboard transfer, verified activation, and authenticated agent
+  processes. Store keys in Windows Credential Manager, scoped to a service origin.
+
 ### Changed
 
 - Run typed research directly through strategy execution, with shared provider

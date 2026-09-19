@@ -181,6 +181,14 @@ def _assert_ci_workflow_contract(text: str) -> None:
             "body": ["python-version: '3.12'"],
             "step_keys": [{"uses"}, {"uses", "with"}, {"run"}],
         },
+        "windows_credentials": {
+            "name": "Windows credentials",
+            "runner": "windows-latest",
+            "actions": ["actions/checkout@v7", "actions/setup-python@v7"],
+            "commands": ["python -m pip install -r requirements-dev.txt", "python -m pytest tests/test_local_credentials.py tests/test_windows_credentials.py -q"],
+            "body": ["python-version: '3.12'", "cache: pip", "cache-dependency-path: requirements-dev.txt"],
+            "step_keys": [{"uses"}, {"uses", "with"}, {"run"}, {"run"}],
+        },
         "production_image": {
             "name": "Production image",
             "actions": ["actions/checkout@v7"],
@@ -209,7 +217,7 @@ def _assert_ci_workflow_contract(text: str) -> None:
     for key, expected in expected_jobs.items():
         job = jobs[key]
         assert _job_name(job) == expected["name"]
-        assert _job_scalar(job, "runs-on") == "ubuntu-latest"
+        assert _job_scalar(job, "runs-on") == expected.get("runner", "ubuntu-latest")
         _assert_exact_keys(_direct_mapping_keys(job, 4), {"name", "runs-on", "steps"})
         steps = _step_blocks(_job_steps(job))
         assert len(steps) == len(expected["step_keys"])
