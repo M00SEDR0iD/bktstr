@@ -32,9 +32,9 @@ For documentation-only edits, verify links, runtime-versus-plan wording, current
 API examples, and release consistency. Do not claim that a documentation review
 validates trading behavior or deployment.
 
-The existing `tests/test_docs.py` includes obsolete assertions about retired
-release snapshots and network workarounds. Its revision is the first task in the
-implementation plan; do not restore obsolete material merely to satisfy them.
+Documentation checks cover active entry points, local links, release identity,
+API contracts, and the distinction between current and planned capabilities.
+Keep those checks aligned with the current references rather than old snapshots.
 
 ## Review and delivery
 

@@ -177,8 +177,9 @@ def extract_function_default(path: Path, function_name: str, parameter_name: str
 
 
 def markdown_documents(root: Path) -> list[Path]:
-    documents = [root / "README.md", root / "CONTRIBUTING.md", root / "CHANGELOG.md"]
-    documents.extend(sorted((root / "docs").rglob("*.md")))
+    documents = sorted(root.glob("*.md"))
+    for directory in ("docs", "integration", ".github"):
+        documents.extend(sorted((root / directory).rglob("*.md")))
     return [path for path in documents if path.exists()]
 
 

@@ -24,14 +24,17 @@ def test_issue_forms_require_outcome_acceptance_and_verification():
 
 
 def test_pull_request_template_requires_release_evidence():
-    text = _read(".github/PULL_REQUEST_TEMPLATE.md")
+    text = " ".join(_read(".github/PULL_REQUEST_TEMPLATE.md").split())
     for required in [
-        "Closes #",
-        "## Summary",
+        "## Change",
         "## Verification",
-        "Trading semantics",
-        "Documentation and changelog",
-        "Deployment and rollback",
+        "checks run and their results",
+        "unverified behavior or failing check",
+        "## Research and compatibility impact",
+        "execution assumptions, or public contracts",
+        "implemented behavior from planned capability",
+        "## Delivery",
+        "deployment needs and rollback",
     ]:
         assert required in text
 

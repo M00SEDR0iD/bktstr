@@ -418,9 +418,7 @@ def test_production_acceptance_workflow_rejects_semantic_mutations():
 
 def test_supabase_github_bridge_assets_are_present_and_safe():
     sql_path = ROOT / "ops" / "supabase" / "github_bridge.sql"
-    runbook_path = ROOT / "ops" / "supabase" / "GITHUB_BRIDGE.md"
     assert sql_path.exists(), "Supabase GitHub bridge migration is missing"
-    assert runbook_path.exists(), "Supabase GitHub bridge runbook is missing"
 
     sql = sql_path.read_text(encoding="utf-8")
     for required in [
@@ -441,16 +439,3 @@ def test_supabase_github_bridge_assets_are_present_and_safe():
         assert required in sql
     for forbidden in ["github_pat_", "ghp_", "service_role", "MASSIVE_API_KEY"]:
         assert forbidden not in sql
-
-
-def test_supabase_bridge_runbook_documents_four_phase_recovery():
-    text = (ROOT / "ops" / "supabase" / "GITHUB_BRIDGE.md").read_text(encoding="utf-8")
-    for required in [
-        "enqueue commit",
-        "enqueue tree",
-        "enqueue blobs",
-        "collect blobs",
-        "net._http_response",
-        "content_base64",
-    ]:
-        assert required.lower() in text.lower()

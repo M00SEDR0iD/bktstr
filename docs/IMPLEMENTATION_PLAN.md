@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use superpowers:executing-plans for inline implementation,
 > or superpowers:subagent-driven-development if the user selects delegated execution.
-> Complete and verify one task at a time. This documentation update does not start product implementation.
+> Complete and verify one task at a time. Implement only the tasks authorized in the current request.
 
 **Goal:** Carry one theory from explicit configuration through historical comparisons
 and a bounded forward paper session, with optional Jev macro interpretation.
@@ -17,9 +17,9 @@ BKTSTR caches and worker. Use existing dependencies where possible.
 
 **Spec:** [BKTSTR system design](BKTSTR_SYSTEM_MANUAL.md)
 
-**Status:** Planning complete; all implementation tasks below are unstarted.
-The user requested documentation first, followed by code and integration in a
-subsequent phase. Do not infer that planned API fields already exist.
+**Status:** Task 0 complete. Tasks 1-7 remain unstarted.
+No strategy, Jev, macro-feed, paper-runner, or broker integration was added by
+Task 0. Do not infer that planned API fields already exist.
 
 ## Global constraints
 
@@ -83,24 +83,26 @@ a documented stable source sequence and event ID.
 
 ## Task 0: Align verification with current documentation
 
-**Files:** Modify `tests/test_docs.py`, `tests/test_governance_docs.py`, and only the retired-document assertions in `tests/test_ops_assets.py`; inspect `scripts/check_release_consistency.py`
-and `tests/test_release_consistency.py` if present. Do not alter runtime logic.
+**Files:** Modify `tests/test_docs.py`, `tests/test_governance_docs.py`,
+`tests/test_github_templates.py`, and only the retired-document assertions in
+`tests/test_ops_assets.py`. Extend `scripts/check_release_consistency.py` and
+`tests/test_release_consistency.py` for entry-point link coverage. Do not alter runtime logic.
 
-- [ ] Run `python -m pytest tests/test_docs.py -q` and record assertions tied to
+- [x] Run `python -m pytest tests/test_docs.py -q` and record assertions tied to
   deleted release snapshots, old benchmark totals, and bridge instructions.
-- [ ] Replace obsolete prose assertions with checks that all documentation entry
+- [x] Replace obsolete prose assertions with checks that all documentation entry
   points exist and link to the active design/plan, and that future capabilities
   are labelled planned. Preserve GUI/runtime version and active API checks.
-- [ ] Add a check that Markdown links in agent and integration documents resolve;
+- [x] Add a check that Markdown links in agent and integration documents resolve;
   the existing release checker covers root README/contributing/changelog and docs.
-- [ ] Run `python -m pytest tests/test_docs.py tests/test_governance_docs.py tests/test_ops_assets.py -q` and `python scripts/check_release_consistency.py`.
+- [x] Run `python -m pytest tests/test_docs.py tests/test_governance_docs.py tests/test_ops_assets.py tests/test_github_templates.py tests/test_release_consistency.py -q` and `python scripts/check_release_consistency.py`.
   Run the full suite before merging. Record unrelated failures without modifying
   unrelated workspace artifacts.
-- [ ] Commit this verification alignment as a focused change.
+- [x] Commit this verification alignment as a focused change.
 
 **Acceptance:** CI no longer demands retired research results or workarounds.
-Preserve all workflow and SQL safety checks unrelated to retired documentation. No runtime, strategy, or API semantics change. This resolves the intentional
-documentation-test mismatch left by the documentation-only cleanup.
+Preserve all workflow and SQL safety checks unrelated to retired documentation. No runtime, strategy, or API semantics change. Verification: 456 tests passed; release consistency, compilation, cache benchmark,
+and independent review passed. Application runtime behavior is unchanged.
 
 ## Task 1: Compile strict strategy configuration
 
@@ -322,7 +324,7 @@ Record weak or negative findings without expanding the search after the fact.
 
 ## Handoff and completion
 
-Start the next code phase at Task 0. Resolve provider-specific wire contracts and
+Start the next code phase at Task 1. Resolve provider-specific wire contracts and
 entitlements at their adapter tasks, not by inventing support now.
 
 After each phase, report files changed, tests, capability status, and remaining
