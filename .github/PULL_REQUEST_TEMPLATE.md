@@ -1,33 +1,20 @@
-## Summary
+## Change
 
-Describe the outcome and why this change is needed.
-
-Closes #
+Describe the problem and resulting behavior. Link the implementation-plan task
+and an issue when applicable.
 
 ## Verification
 
-- [ ] Focused tests pass
-- [ ] Full test suite passes
-- [ ] Release-consistency check passes
-- [ ] Relevant manual or production checks are recorded below
+List checks run and their results. Explain any unverified behavior or failing
+check. Distinguish local verification from production acceptance.
 
-Commands and results:
+## Research and compatibility impact
 
-```text
-Record exact commands and concise results here.
-```
+Describe changes to strategy versions, evidence availability, model questions,
+cache identity, execution assumptions, or public contracts. State when there
+is no such change. Confirm that documentation distinguishes implemented behavior
+from planned capability.
 
-## Impact
+## Delivery
 
-- [ ] Trading semantics
-- [ ] Market data or cache contract
-- [ ] API or schema
-- [ ] Documentation and changelog
-- [ ] Deployment or operations
-- [ ] No impact in these areas
-
-Explain every checked impact, including version changes where required.
-
-## Deployment and rollback
-
-State how this reaches production and the exact safe rollback. Write `No deployment change` only when the change cannot affect deployment.
+Describe deployment needs and rollback, or state that this is documentation only.

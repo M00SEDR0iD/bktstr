@@ -1,26 +1,46 @@
 # Contributing to BKTSTR
 
-BKTSTR uses GitHub Issues, short-lived branches, pull requests, squash merges, and production-gated releases. `main` must remain deployable.
+Read [agent instructions](AGENTS.md), the [system design](docs/BKTSTR_SYSTEM_MANUAL.md),
+and the [implementation plan](docs/IMPLEMENTATION_PLAN.md). BKTSTR is independent
+of fund-specific strategies, portfolios, and accounts.
 
-## Normal workflow
+## Scope changes
 
-1. Select an Issue with acceptance criteria.
-2. Branch from current `main` using `feat/<issue>-<slug>`, `fix/<issue>-<slug>`, `docs/<issue>-<slug>`, or `chore/<issue>-<slug>`.
-3. Make focused changes and tests.
-4. Open a pull request containing `Closes #<issue>`.
-5. Require all CI checks and conversations to pass.
-6. Squash-merge with a clear Conventional Commit-style title.
-7. Delete the merged branch.
+Use a focused `codex/<topic>` branch unless the task specifies another name.
+Keep public API changes, execution-semantic changes, and unrelated refactors
+separate. Preserve other work in the checkout. Do not commit credentials,
+generated experiment artifacts, caches, or local environments.
 
-## Before opening a pull request
+Strategy revisions normally change versioned configuration. Code changes are
+needed for new providers, measurements, execution behaviors, or unsupported
+strategy structures. Freeze inputs and expected behavior before implementation.
+
+## Verification
+
+For code changes, run focused behavioral tests followed by the relevant suite.
+Tests should establish causality, replay fidelity, API behavior, and recovery,
+rather than freeze incidental prose or old research results.
 
 ```powershell
-& '.\.venv\Scripts\python.exe' -m pytest
-& '.\.venv\Scripts\python.exe' scripts/check_release_consistency.py
-& '.\.venv\Scripts\python.exe' benchmarks/benchmark_cache.py
-git status --short
+python -m pytest -q
+python scripts/check_release_consistency.py
+python -m compileall -q bktstr bktstr_cache integration scripts
+python benchmarks/benchmark_cache.py
 ```
 
-Never commit credentials, `.venv`, caches, bytecode, generated manifests, or machine-local output.
+For documentation-only edits, verify links, runtime-versus-plan wording, current
+API examples, and release consistency. Do not claim that a documentation review
+validates trading behavior or deployment.
 
-Read [the detailed Git workflow](docs/development/git-workflow.md), [the release procedure](docs/development/releases.md), and [the v1 release plan](docs/roadmap/v1-release-plan.md) before changing delivery behavior.
+The existing `tests/test_docs.py` includes obsolete assertions about retired
+release snapshots and network workarounds. Its revision is the first task in the
+implementation plan; do not restore obsolete material merely to satisfy them.
+
+## Review and delivery
+
+Describe the concrete change, its motivation, checks performed, and remaining
+limitations. Link an issue when one exists. Required repository checks must pass
+before merge; a known obsolete test is not permission to bypass CI.
+
+Keep `main` deployable. Do not rewrite published history or move release tags.
+Follow [the release procedure](docs/development/releases.md) when shipping.
