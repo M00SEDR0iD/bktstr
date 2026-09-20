@@ -158,8 +158,10 @@ larger model autonomy would add complexity before closing the current gaps.
 ## Delivery sequence and evidence
 
 Tasks 0-2 establish documentation checks, strict strategy configuration, and macro
-evidence contracts. Task 3 is next: bounded Jev acquisition with persisted responses
-and offline replay. Tasks 4-6 turn those components into shared decisions, controlled
+evidence contracts. The user has now prioritized
+[trade idea containers and research foundations](TRADE_IDEA_CONTAINERS.md) before
+Task 3. This closes the durable-workflow and controlled-comparison gaps identified
+above. Jev acquisition and replay follow that milestone. Tasks 4-6 turn the components into shared decisions, controlled
 research, and forward paper testing. Task 7 adds the separate broker demo.
 
 The most valuable standalone milestone is a saved theory that produces a controlled

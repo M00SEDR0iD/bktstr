@@ -36,6 +36,10 @@ brokerage orders. Live-money trading is outside the next implementation scope.
 
 ## Intended workflow
 
+The next priority is [reusable trade ideas and controlled research](docs/TRADE_IDEA_CONTAINERS.md):
+document a thesis once, organize variations beneath it, apply the recipe to explicit
+stocks, and preserve controlled comparisons. This foundation comes before Jev.
+
 1. State a hypothesis and specify what would count as evidence against it.
 2. Freeze the strategy, data requirements, costs, test periods, and search budget.
 3. Compare a technical baseline, numerical context filters, and optional Jev judgments.

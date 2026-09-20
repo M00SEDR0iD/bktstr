@@ -72,6 +72,10 @@ new database, or web application until there is a demonstrated need.
 
 ## Strategy configuration
 
+The next proposed layer is [reusable trade idea containers](TRADE_IDEA_CONTAINERS.md):
+stable theses and recipes, categorized immutable variants, explicit applications,
+and controlled campaigns. These research foundations precede Jev integration.
+
 The [local configuration interface](STRATEGY_CONFIGURATION.md) implements the
 Task 1 numerical subset. The broader contract below remains the target design;
 macro/model filters, comparison enforcement, and paper execution are future tasks.

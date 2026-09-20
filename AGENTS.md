@@ -11,6 +11,13 @@ classification through OpenRouter, reproducible comparisons, and bounded paper
 testing. Prioritize minute bars and holding periods of minutes to hours.
 The existing bearish-regime strategy is one baseline, not a required worldview.
 
+Current priority: reusable [trade idea containers](docs/TRADE_IDEA_CONTAINERS.md)
+and [controlled research foundations](docs/plans/2026-09-20-trade-idea-research.md)
+come before Jev Task 3. These documents are proposed designs until implemented.
+Keep the thesis and typed modifiers separate from stock/date/data bindings;
+preserve every variant revision and research attempt. Never execute a narrative
+macro assumption as though it were observed evidence.
+
 ## Read in this order
 
 1. [Documentation index](docs/README.md)

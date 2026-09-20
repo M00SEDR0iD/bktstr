@@ -14,6 +14,8 @@ research contracts, and implementation sequence, not a fund portfolio.
 | [Strategy configuration](STRATEGY_CONFIGURATION.md) | Local JSON/Python compilation and supported numerical filters |
 | [Macro evidence](MACRO_EVIDENCE.md) | Point-in-time selection, replay, and verified BLS adapter coverage |
 | [Project status report](PROJECT_STATUS.md) | Standalone usefulness, personal research fit, and remaining structural gaps |
+| [Trade idea containers](TRADE_IDEA_CONTAINERS.md) | Proposed reusable thesis, categorized variants, and controlled research design |
+| [Research foundation plan](plans/2026-09-20-trade-idea-research.md) | Proposed implementation sequence before Jev Task 3 |
 | [Cache architecture](CACHE_ARCHITECTURE.md) | Data reuse and reproducibility boundaries |
 | [Cache integration](../integration/INTEGRATION_GUIDE.md) | Existing code integration points |
 | [Local credentials](development/local-credentials.md) | Existing Windows key helper |
@@ -21,7 +23,8 @@ research contracts, and implementation sequence, not a fund portfolio.
 | [Releases](development/releases.md) | Deployment and release verification |
 | [Changelog](../CHANGELOG.md) | Concise compatibility record |
 
-The system design and implementation plan are the sole forward roadmap.
+The system design, implementation plan, and linked research foundation plan form
+the forward roadmap. The research foundation milestone now precedes Jev Task 3.
 Proposed interfaces are labelled as planned; they are not runnable API contracts.
 Current source, OpenAPI, and authenticated capabilities define what can run today.
 

@@ -18,6 +18,11 @@ BKTSTR caches and worker. Use existing dependencies where possible.
 **Spec:** [BKTSTR system design](BKTSTR_SYSTEM_MANUAL.md)
 
 **Status:** Tasks 0-2 implemented. Tasks 3-7 remain unstarted.
+**Next priority:** Close reusable-idea organization and controlled-research gaps
+before Task 3, as requested by the user. The proposed
+[trade idea design](TRADE_IDEA_CONTAINERS.md) and
+[research foundation plan](plans/2026-09-20-trade-idea-research.md) define RF-A through
+RF-H. These are planning artifacts, not delivered capabilities.
 No strategy, Jev, macro-feed, paper-runner, or broker integration was added by
 Task 0. Do not infer that planned API fields already exist.
 
@@ -51,7 +56,9 @@ Task 0. Do not infer that planned API fields already exist.
 | Phase | Tasks | Deliverable and gate |
 | --- | --- | --- |
 | Foundation | 0-1 | Current docs checks and validated strategy manifests |
-| Evidence | 2-3 | Causal macro snapshots and immutable Jev response records |
+| Macro evidence | 2 | Causal macro snapshots |
+| Research foundation | RF-A through RF-H | Reusable idea containers, durable configured runs, controlled comparisons, and searchable history |
+| Model evidence | 3 | Immutable Jev response records, after the research foundation gate |
 | Research | 4-5 | Shared decisions and an auditable three-way comparison |
 | Forward test | 6 | Bounded internal paper session and deterministic replay |
 | Broker integration | 7 | Separate Clear Street demo workflow test |
@@ -192,6 +199,10 @@ compilation, cache benchmark, and live BLS acquisition/store/replay checks passe
 
 ## Task 3: Integrate Jev acquisition and replay
 
+Do not start until the [research foundation milestone](plans/2026-09-20-trade-idea-research.md)
+passes. Jev must become another explicit evidence component in an already usable
+idea/variant/experiment workflow.
+
 **Files:** Create `bktstr/judgments.py`, `bktstr/judgment_store.py`,
 `bktstr/jev.py`, `tests/test_jev.py`, and `tests/test_judgment_store.py`.
 Modify `bktstr/runtime.py` to inject the adapter and store.
@@ -250,6 +261,14 @@ Both are pure. Execution consumes intents only after `eligible_at`.
 The original baseline retains its identity and behavior.
 
 ## Task 5: Run controlled research and expose evidence
+
+**Reordered scope:** Generic protocols, configured experiment persistence,
+attempt budgets, data-exposure tracking, history, cancellation, and restart
+reconciliation move into RF-A through RF-H before Task 3. The checklist below is
+the original overall contract; mark its shared items complete when those earlier
+tasks deliver them, rather than implementing duplicate services. After Tasks 3-4,
+finish the three-way numerical/Jev comparison, decision artifacts, and metrics
+that require those new consumers and execution behaviors.
 
 **Files:** Create `bktstr/services/research_protocol.py`,
 `tests/test_research_protocol.py`. Modify `bktstr/services/backtest.py`,
