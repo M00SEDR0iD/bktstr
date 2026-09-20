@@ -24,7 +24,12 @@ Local [strategy documents](docs/STRATEGY_CONFIGURATION.md) now compile to frozen
 fingerprinted configurations and run through the existing engine. Numerical entry
 and daily regime gates are supported without changing trading code.
 
-Jev integration, macro release ingestion,
+Local [macro evidence](docs/MACRO_EVIDENCE.md) now supports publication/receipt
+cutoffs, revision selection, immutable packets, and offline source replay.
+The first BLS CPI adapter supports prospective collection; it cannot reconstruct
+historical release vintages or drive strategy gates yet.
+
+Jev integration, historical macro release ingestion,
 continuous paper testing, and Clear Street connectivity are planned and are not implemented.
 The current application places no
 brokerage orders. Live-money trading is outside the next implementation scope.

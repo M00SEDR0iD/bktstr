@@ -13,6 +13,64 @@ MASSIVE_BASE_URL = "https://api.massive.com"
 _TIMEFRAME = re.compile(r"^(?P<n>[1-9][0-9]*)(?P<unit>[mhd])$")
 
 
+class BLSMacroProvider:
+    """Public CPI-U all-items NSA levels, usable only after actual receipt.
+
+    BLS v1 returns period/value/footnotes, not point-in-time vintages or release
+    timestamps. Never infer them from the observation month or release calendar.
+    """
+    BASE = 'https://api.bls.gov/publicAPI/v1/timeseries/data'
+    SERIES = {'CUUR0000SA0': 'macro.bls.cpi_u_all_items_nsa'}
+
+    def __init__(self, *, transport=None, clock=None, timeout_seconds=20.0):
+        self.transport = transport
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.timeout_seconds = timeout_seconds
+
+    async def fetch_snapshots(self, series_id: str):
+        from .macro import EvidenceSnapshot, utc
+        import calendar
+        import math
+
+        if series_id not in self.SERIES:
+            raise ValueError('unsupported BLS macro series')
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, transport=self.transport,
+                                     follow_redirects=False) as client:
+            response = await client.get(f'{self.BASE}/{series_id}')
+            response.raise_for_status()
+            payload = response.json()
+            received = utc(self.clock())
+        if payload.get('status') != 'REQUEST_SUCCEEDED':
+            raise ValueError('BLS macro request did not succeed')
+        series = payload.get('Results', {}).get('series', [])
+        if len(series) != 1 or series[0].get('seriesID') != series_id:
+            raise ValueError('BLS returned unexpected series')
+        snapshots = []
+        for row in series[0].get('data', []):
+            period = row.get('period', '')
+            if period == 'M13':
+                continue  # Annual averages are not monthly observations.
+            if not re.fullmatch(r'M(?:0[1-9]|1[0-2])', period):
+                raise ValueError('BLS returned an unsupported observation period')
+            year, month = int(row['year']), int(period[1:])
+            observed = datetime(year, month, calendar.monthrange(year, month)[1], tzinfo=timezone.utc)
+            if observed > received:
+                raise ValueError('BLS returned a future observation')
+            raw_value = row.get('value')
+            value = None if raw_value in (None, '-', '') else float(raw_value)
+            if isinstance(raw_value, bool) or (value is not None and not math.isfinite(value)):
+                raise ValueError('invalid BLS macro value')
+            snapshots.append(EvidenceSnapshot(
+                source_id='bls.public-api.v1', series_id=self.SERIES[series_id],
+                value=value, units='index', observed_at=observed,
+                published_at=None, ingested_at=received, available_at=received, vintage=None,
+                payload={'series_id': series_id, 'row': row, 'source_url': f'{self.BASE}/{series_id}'},
+            ))
+        if not snapshots:
+            raise ValueError('BLS returned no monthly observations')
+        return tuple(snapshots)
+
+
 def iter_date_chunks(start: date, end: date, days: int = 30):
     if end < start:
         raise ValueError("end must be on or after start")

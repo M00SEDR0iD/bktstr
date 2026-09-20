@@ -17,7 +17,7 @@ BKTSTR caches and worker. Use existing dependencies where possible.
 
 **Spec:** [BKTSTR system design](BKTSTR_SYSTEM_MANUAL.md)
 
-**Status:** Tasks 0-1 implemented. Tasks 2-7 remain unstarted.
+**Status:** Tasks 0-2 implemented. Tasks 3-7 remain unstarted.
 No strategy, Jev, macro-feed, paper-runner, or broker integration was added by
 Task 0. Do not infer that planned API fields already exist.
 
@@ -148,6 +148,13 @@ benchmark passed. The existing baseline remains compatible with caches on/off.
 
 ## Task 2: Add point-in-time macro evidence
 
+Delivered as local evidence selection, immutable packets, deterministic context,
+and an append-only source store. The first adapter is BLS API v1 CPI-U NSA,
+verified with a live unauthenticated request and recorded response. It is
+prospective-only: missing publication/vintage metadata excludes it from canonical
+historical use. See [macro evidence](MACRO_EVIDENCE.md) for exact coverage.
+Strategy gates and the public experiment workflow do not consume packets yet.
+
 **Files:** Create `bktstr/macro.py`, `bktstr/evidence_packets.py`,
 `tests/test_macro_evidence.py`, and fixture records under
 `tests/fixtures/macro/`. Modify `bktstr/measurements.py`,
@@ -157,22 +164,31 @@ benchmark passed. The existing baseline remains compatible with caches on/off.
 `build_packet(snapshots, cutoff, mode) -> EvidencePacket`.
 Mode is explicitly `historical_publication` or `prospective_receipt`.
 
-- [ ] Write a fixture with a first release, a later revision, and late ingestion.
+- [x] Write a fixture with a first release, a later revision, and late ingestion.
   Assert the selected value before/after each availability boundary.
-- [ ] Implement immutable source identity and as-of joins, with missing publication
+- [x] Implement immutable source identity and as-of joins, with missing publication
   timestamps or unavailable vintages rejected for canonical historical use.
-- [ ] Add explicit unit normalization and deterministic numerical context fields.
+- [x] Add explicit unit normalization and deterministic numerical context fields.
   Missing expectations cannot be treated as zero surprise.
-- [ ] Test timezone/DST boundaries, non-trading days, delayed releases, missing
+- [x] Test timezone/DST boundaries, non-trading days, delayed releases, missing
   values, duplicate source events, and stale evidence.
-- [ ] Run `python -m pytest tests/test_macro_evidence.py -q`.
-- [ ] Select the first provider only after confirming access, retention/licensing,
+- [x] Run `python -m pytest tests/test_macro_evidence.py -q`.
+- [x] Select the first provider only after confirming access, retention/licensing,
   release timestamps, and revision history. Integrate one adapter and validate it
   against recorded fixtures; keep unsupported datasets unavailable.
-- [ ] Update provider documentation with verified coverage, then commit.
+- [x] Update provider documentation with verified coverage, then commit.
 
 **Acceptance:** No future revision or late-received event enters an earlier
 canonical decision. Domain behavior is testable without provider credentials.
+
+Ruling: use BLS only prospectively because its time-series response lacks verified
+release timestamps and vintage history. Historical macro trading research still
+needs an archive-capable adapter. Forecast differences require a documented initial
+release and a forecast usable before it. Review regression tests prevent a later
+revision from legitimizing a post-release forecast. A live persistence/replay test
+also caught and fixed explicit SQLite connection closure on Windows.
+Verification: 521 tests passed (35 macro-evidence tests); release consistency,
+compilation, cache benchmark, and live BLS acquisition/store/replay checks passed.
 
 ## Task 3: Integrate Jev acquisition and replay
 

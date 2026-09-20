@@ -1,0 +1,4 @@
+[
+  {"source_id":"fixture.release","series_id":"macro.inflation","value":3.0,"units":"percent","observed_at":"2026-02-28T00:00:00Z","published_at":"2026-03-06T13:30:00Z","ingested_at":"2026-03-06T13:35:00Z","available_at":"2026-03-06T13:30:00Z","vintage":"first","release_kind":"initial","payload":{"kind":"synthetic first release"}},
+  {"source_id":"fixture.release","series_id":"macro.inflation","value":3.2,"units":"percent","observed_at":"2026-02-28T00:00:00Z","published_at":"2026-03-09T12:30:00Z","ingested_at":"2026-03-09T12:32:00Z","available_at":"2026-03-09T12:30:00Z","vintage":"revision","release_kind":"revision","payload":{"kind":"synthetic revision after DST transition"}}
+]

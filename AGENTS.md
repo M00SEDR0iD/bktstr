@@ -21,8 +21,12 @@ The existing bearish-regime strategy is one baseline, not a required worldview.
 
 The design describes intended behavior; the API reference describes implemented
 behavior. Inspect source and authenticated capabilities before assuming a feature
-exists. No Jev, macro-feed, paper-runner, or Clear Street feature is currently
-implemented. This documentation pass does not authorize live-money trading.
+exists. No Jev, paper-runner, or Clear Street feature is currently implemented.
+Live-money trading remains outside the authorized implementation scope.
+
+Local [macro evidence](docs/MACRO_EVIDENCE.md) supports causal selection and
+record/replay. The BLS adapter is prospective-only; do not invent historical
+publication timestamps or vintages. Evidence is not yet wired to strategy gates.
 
 Local numerical strategy documents are implemented through
 [strategy configuration](docs/STRATEGY_CONFIGURATION.md). Keep their runtime on

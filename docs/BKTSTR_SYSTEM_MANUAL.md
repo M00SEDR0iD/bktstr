@@ -101,6 +101,10 @@ SOXX, semiconductor, bearish, or fund-specific defaults apply to all strategies.
 
 ## Evidence and macro timing
 
+Task 2 implements the local source/packet contracts described in
+[macro evidence](MACRO_EVIDENCE.md), with a prospective-only BLS CPI adapter.
+Historical archive coverage and strategy-filter consumers remain pending.
+
 Store source identity, content digest, units, observation/event time, publication
 time, ingestion time, availability time, revision/vintage, and coverage.
 Historical joins use the version actually available at the decision cutoff.
