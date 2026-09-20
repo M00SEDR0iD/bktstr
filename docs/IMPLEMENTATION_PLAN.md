@@ -17,7 +17,7 @@ BKTSTR caches and worker. Use existing dependencies where possible.
 
 **Spec:** [BKTSTR system design](BKTSTR_SYSTEM_MANUAL.md)
 
-**Status:** Task 0 complete. Tasks 1-7 remain unstarted.
+**Status:** Tasks 0-1 implemented. Tasks 2-7 remain unstarted.
 No strategy, Jev, macro-feed, paper-runner, or broker integration was added by
 Task 0. Do not infer that planned API fields already exist.
 
@@ -106,6 +106,12 @@ and independent review passed. Application runtime behavior is unchanged.
 
 ## Task 1: Compile strict strategy configuration
 
+Delivered through a local file/Python interface documented in
+[strategy configuration](STRATEGY_CONFIGURATION.md). Runtime uses the existing
+orchestrator. Paper limits apply only to paper documents. Model/question fields
+are disabled planning metadata; unsupported execution versions can be compiled
+but cannot run. The public HTTP baseline registry is unchanged.
+
 **Files:** Create `bktstr/strategy_config.py`,
 `examples/strategies/macro-context-v1.json`,
 `tests/test_strategy_config.py`. Modify `bktstr/strategies.py` and
@@ -115,21 +121,30 @@ and independent review passed. Application runtime behavior is unchanged.
 The returned manifest is immutable and contains its canonical digest. The example
 must use simulation inputs, explicit symbols, and no private portfolio data.
 
-- [ ] Write tests rejecting unknown fields, booleans in numeric limits, unsupported
+- [x] Write tests rejecting unknown fields, booleans in numeric limits, unsupported
   variables, contradictory windows, absent paper limits, and model aliases.
   Confirm failures occur before provider access.
-- [ ] Implement normalization, units, semantic version validation, and immutable
+- [x] Implement normalization, units, semantic version validation, and immutable
   manifests using existing strategy/variable contracts.
-- [ ] Add a generic minute-strategy identity alongside the existing baseline.
+- [x] Add a generic minute-strategy identity alongside the existing baseline.
   Configuration changes cannot mutate registered baseline definitions.
-- [ ] Verify JSON key order does not change a digest; a rule, model question,
+- [x] Verify JSON key order does not change a digest; a rule, model question,
   execution version, or risk limit change does.
-- [ ] Run `python -m pytest tests/test_strategy_config.py tests/test_direct_research.py -q`.
+- [x] Run `python -m pytest tests/test_strategy_config.py tests/test_direct_research.py -q`.
   Verify the old baseline remains equivalent with numerical caches on and off.
-- [ ] Update capabilities only for implemented configuration support, then commit.
+- [x] Update capabilities only for implemented configuration support, then commit.
 
 **Acceptance:** A theory expressible with registered components can be loaded
 without editing trading code. Unsupported theories receive a precise error.
+
+Task 1 review record: added regression coverage and fixed strict semantic-version
+validation, early rejection of daily crossing rules, and immutable returned
+manifest evidence. Local configuration tests cover numerical regime gates,
+unsupported execution modes, duplicate JSON keys, and baseline compatibility.
+Ruling: future semantic execution versions may compile for fingerprinting but
+cannot execute; compilation alone is not a runtime capability check.
+Verification: 486 tests passed; release consistency, compilation, and the cache
+benchmark passed. The existing baseline remains compatible with caches on/off.
 
 ## Task 2: Add point-in-time macro evidence
 

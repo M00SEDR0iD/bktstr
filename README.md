@@ -20,9 +20,13 @@ inspection, deterministic caches, and evidence provenance. Its registered
 strategy is `bktstr.bearish-regime-scalp` version `1.0.0`, using one-minute bars.
 That strategy is a supported baseline, not the identity of the project.
 
-Jev integration, macro release ingestion, configurable strategy documents,
-continuous paper testing, and Clear Street connectivity are planned and are not
-implemented by this documentation update. The current application places no
+Local [strategy documents](docs/STRATEGY_CONFIGURATION.md) now compile to frozen,
+fingerprinted configurations and run through the existing engine. Numerical entry
+and daily regime gates are supported without changing trading code.
+
+Jev integration, macro release ingestion,
+continuous paper testing, and Clear Street connectivity are planned and are not implemented.
+The current application places no
 brokerage orders. Live-money trading is outside the next implementation scope.
 
 ## Intended workflow

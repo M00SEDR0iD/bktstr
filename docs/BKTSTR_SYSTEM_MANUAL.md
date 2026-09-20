@@ -70,7 +70,11 @@ caches. Use a separate process for the continuous paper runner so HTTP latency
 and research jobs do not control candle timing. Do not add a distributed queue,
 new database, or web application until there is a demonstrated need.
 
-## Strategy configuration, planned
+## Strategy configuration
+
+The [local configuration interface](STRATEGY_CONFIGURATION.md) implements the
+Task 1 numerical subset. The broader contract below remains the target design;
+macro/model filters, comparison enforcement, and paper execution are future tasks.
 
 A versioned strategy document contains:
 

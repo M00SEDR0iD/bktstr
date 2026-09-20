@@ -19,6 +19,11 @@ Use the current registered baseline only when it expresses the hypothesis.
 Unsupported strategy behavior requires implementation; do not approximate a
 different idea silently to fit the available endpoint.
 
+For configurable numerical research in the local checkout, use the
+[strategy document interface](docs/STRATEGY_CONFIGURATION.md). Save the normalized
+manifest and digest with the result. This local interface does not submit an HTTP
+experiment or automatically persist it in the service's experiment store.
+
 ## Connect to the current service
 
 Use the [local credential helper](docs/development/local-credentials.md).

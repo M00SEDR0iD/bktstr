@@ -24,6 +24,11 @@ behavior. Inspect source and authenticated capabilities before assuming a featur
 exists. No Jev, macro-feed, paper-runner, or Clear Street feature is currently
 implemented. This documentation pass does not authorize live-money trading.
 
+Local numerical strategy documents are implemented through
+[strategy configuration](docs/STRATEGY_CONFIGURATION.md). Keep their runtime on
+the shared orchestrator; the HTTP baseline registry remains a separate public
+contract. Model/question metadata in a disabled policy is not executed.
+
 ## Research invariants
 
 - Freeze strategy configuration, question definitions, data versions, and execution
