@@ -74,5 +74,45 @@ def _execute_study(record, store):
     return result, provenance
 
 
+def _execute_policy(record, store):
+    import asyncio
+    from ..idea_resolution import resolve_variant, bind_policy
+    from ..dataset_snapshots import SnapshotProvider
+    from ..runtime import run_configured_strategy
+    from .research_protocol import check_cancelled
+    catalog = ResearchCatalog(store)
+    check_cancelled(record.experiment_id, catalog)
+    request = to_json_value(record.request)
+    policy = catalog.require(request['specification'])
+    if policy.kind == 'variant':
+        policy = resolve_variant(policy, catalog)
+    app = catalog.require(request['application'], 'application')
+    manifest = bind_policy(policy, app, (request['start'], request['end']))
+    for evidence_id in policy.document['evidence'] + policy.document['contrary_evidence']:
+        evidence = store.load_experiment(evidence_id)
+        if evidence.operation != 'event_study' or evidence.status != 'completed' or evidence.request['idea']['id'] != request['idea']['id']:
+            raise ValueError('policy evidence must be a completed study for this idea')
+    snapshot = load_snapshot(app.document['dataset'], catalog.datasets)
+    # Legacy execution uses complete sessions. Reject intra-session split boundaries.
+    for session in snapshot.document['schedule']:
+        if instant(session['open']) < instant(request['end']) and instant(session['close']) > instant(request['start']):
+            if instant(session['open']) < instant(request['start']) or instant(session['close']) > instant(request['end']):
+                raise ValueError('policy split must include complete pinned sessions')
+    result = asyncio.run(run_configured_strategy(manifest, inputs=SnapshotProvider(snapshot)))
+    check_cancelled(record.experiment_id, catalog)
+    payload = dict(kind='configured_backtest', policy=policy.document, application=app.document,
+        manifest={'digest':manifest.digest, 'document':to_json_value(manifest.document)},
+        summary=to_json_value(result.summary), trades=to_json_value(result.trades),
+        event_mapping='unavailable: policy and event-study paths are separate; no implied one-to-one mapping',
+        limitations=['Fixed-bps costs and next-bar execution; existing stop/gap assumptions remain.',
+                     'Independent symbol simulation, not a shared-cash portfolio.'])
+    provenance = dict(dataset=snapshot.id, build=snapshot.document['build'],
+        consumed_inputs=[snapshot.id, policy.digest, app.digest],
+        attached_evidence=policy.document['evidence'] + policy.document['contrary_evidence'],
+        runtime=to_json_value(result.provenance))
+    return payload, provenance
+
+
 def research_operations(store):
-    return {'event_study': lambda record: _execute_study(record, store)}
+    return {'event_study': lambda record: _execute_study(record, store),
+            'configured_backtest': lambda record: _execute_policy(record, store)}
