@@ -58,6 +58,24 @@ def register_protocol(document, catalog):
             raise ValueError('candidate kind mismatch')
         if candidate.kind == 'variant' and (candidate.document['kind'] != expected_kind or candidate.document['idea'] != parsed['idea']):
             raise ValueError('variant belongs to another idea or kind')
+    from ..idea_resolution import resolve_variant, differences
+    def effective(revision):
+        return resolve_variant(revision, catalog) if revision.kind == 'variant' else revision
+    baseline = effective(catalog.require(parsed['baseline']))
+    base_doc = baseline.document if expected_kind == 'study' else baseline.document['recipe']
+    for candidate in candidates:
+        resolved = effective(candidate)
+        candidate_doc = resolved.document if expected_kind == 'study' else resolved.document['recipe']
+        changes = differences(base_doc, candidate_doc)
+        changes = {k:v for k,v in changes.items() if k not in {'id', 'version'}}
+        if any(not any(k == allowed or k.startswith(allowed + '.') for allowed in parsed['allowed_differences']) for k in changes):
+            raise ValueError('undeclared candidate difference')
+        if expected_kind == 'study' and parsed['analysis']:
+            label_id = parsed['analysis'].get('label')
+            a = [x for x in base_doc['labels'] if x['id'] == label_id]
+            b = [x for x in candidate_doc['labels'] if x['id'] == label_id]
+            if not a or a != b:
+                raise ValueError('primary label definitions differ; use separate exploratory protocols')
     for ref in parsed['applications']:
         app = catalog.require(ref, 'application')
         snapshot = load_snapshot(app.document['dataset'], catalog.datasets)
@@ -184,3 +202,108 @@ def check_cancelled(experiment_id, catalog):
     if row and row['cancelled']:
         from .experiments import ExperimentOperationError
         raise ExperimentOperationError('research_cancelled', 'Research attempt cancelled; budget remains consumed.')
+
+
+def _study_contrast(base, candidate, catalog, analysis):
+    from .event_studies import StudyAnalysisSpec, block_resamples, _mean, _interval
+    from ..dataset_snapshots import digest
+    spec = StudyAnalysisSpec.model_validate(analysis)
+    combined, keys, definitions = [], [], []
+    for arm, record in enumerate((base, candidate)):
+        events = catalog.load_artifact(record.result['events_artifact'])
+        labels = catalog.load_artifact(record.result['labels_artifact'])
+        definitions.append([x for x in labels['definitions'] if x['id'] == spec.label])
+        outcomes = {x['event_id']: x['values'].get(spec.label) for x in labels['rows']}
+        keys.append({(x['symbol'], x['cutoff']) for x in events['rows']})
+        for event in events['rows']:
+            value = outcomes.get(event['id'])
+            if value is not None:
+                combined.append(dict(session=event['session'], value=value, arm=arm))
+    if definitions[0] != definitions[1]:
+        raise ValueError('cannot compare different label definitions')
+    def contrast(rows):
+        a = _mean([x['value'] for x in rows if x['arm'] == 0])
+        b = _mean([x['value'] for x in rows if x['arm'] == 1])
+        return None if a is None or b is None else b-a
+    draws = block_resamples(combined, spec)
+    return dict(effect=contrast(combined), interval=_interval([contrast(x) for x in draws], len(draws)),
+        common_events=len(keys[0] & keys[1]), added_events=len(keys[1]-keys[0]),
+        removed_events=len(keys[0]-keys[1]), estimand='candidate mean minus baseline mean',
+        pairing='same event sample' if keys[0] == keys[1] else 'different samples; no paired-row claim')
+
+
+def run_protocol(protocol_id, store, *, execute=True):
+    from .research_store import ResearchCatalog
+    from .configured_research import research_operations
+    from .experiments import ExperimentWorker
+    from .backtest import to_json_value
+    catalog = ResearchCatalog(store)
+    protocol = get_protocol(protocol_id, catalog).document
+    records, cells = [], []
+    for window in protocol['splits']:
+        candidates = protocol['final_candidates'] if window['stage'] == 'final' else protocol['candidates']
+        for application in protocol['applications']:
+            for candidate in candidates:
+                try:
+                    record = admit_attempt(protocol_id, candidate, application, window['name'], 'once', catalog)
+                    records.append(record)
+                except ValueError as error:
+                    cells.append(dict(candidate=candidate, application=application, split=window['name'],
+                                      status='blocked', error={'code':'admission_blocked', 'message':str(error)}))
+    if execute:
+        worker = ExperimentWorker(store, research_operations(store))
+        owned, acquired = worker._ensure_lease()
+        if owned:
+            if acquired:
+                store.recover_incomplete(worker.owner_id, now=worker.clock())
+            stop, heartbeat = worker._start_heartbeat()
+            try:
+                for record in records:
+                    if store.load_experiment(record.experiment_id).status == 'queued':
+                        worker.run(record.experiment_id)
+            finally:
+                stop.set()
+                heartbeat.join()
+                worker.release_lease()
+    records = [store.load_experiment(r.experiment_id) for r in records]
+    comparisons = []
+    for record in records:
+        inspect_experiment(catalog, record, reason='campaign report')
+        request = record.request
+        cells.append(dict(experiment_id=record.experiment_id, candidate=to_json_value(request['specification']),
+            application=to_json_value(request['application']), split=request['protocol']['split'],
+            status=record.status.value, result=to_json_value(record.result), error=to_json_value(record.error)))
+        if record.status != 'completed' or dict(request['specification']) == protocol['baseline']:
+            continue
+        baseline = next((r for r in records if r.status == 'completed'
+            and dict(r.request['specification']) == protocol['baseline']
+            and r.request['application'] == request['application']
+            and r.request['protocol']['split'] == request['protocol']['split']), None)
+        if baseline is None:
+            continue
+        if baseline.provenance['dataset'] != record.provenance['dataset']:
+            raise ValueError('comparison dataset mismatch')
+        detail = dict(candidate=request['specification']['digest'], application=request['application']['digest'],
+                      split=request['protocol']['split'], symbol=record.result['application']['instruments']['subject'])
+        if protocol['kind'] == 'study':
+            detail.update(_study_contrast(baseline, record, catalog, protocol['analysis']))
+            counts = [r.result['analysis']['usable'] for r in (baseline, record)]
+        else:
+            detail['effect'] = record.result['summary']['total_pnl_dollars'] - baseline.result['summary']['total_pnl_dollars']
+            counts = [r.result['summary']['trades'] for r in (baseline, record)]
+        detail['status'] = 'descriptive' if min(counts) >= protocol['minimum_samples'] else 'inconclusive_sample_size'
+        comparisons.append(detail)
+    aggregate = []
+    import numpy as np
+    for split in {x['split'] for x in comparisons}:
+        for candidate in {x['candidate'] for x in comparisons}:
+            values = [x['effect'] for x in comparisons if x['split'] == split and x['candidate'] == candidate and x['effect'] is not None]
+            aggregate.append(dict(split=split, candidate=candidate, instruments=len(values),
+                expected_applications=len(protocol['applications']), mean=float(np.mean(values)) if values else None,
+                dispersion=float(np.std(values)) if values else None,
+                complete=len(values) == len(protocol['applications'])))
+    with closing(store._connect()) as db:
+        count = db.execute('SELECT count(*) FROM research_attempts WHERE protocol_id=?', (protocol_id,)).fetchone()[0]
+    status = 'completed' if cells and all(c['status'] == 'completed' for c in cells) else 'incomplete'
+    return dict(protocol=protocol, status=status, attempts=count, cells=cells, comparisons=comparisons,
+                aggregate=aggregate, interpretation='Equal-instrument descriptive comparison; not shared-portfolio performance.')
