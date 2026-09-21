@@ -42,6 +42,8 @@ def submit_research_run(store, request, idempotency_key):
 
 def _execute_study(record, store):
     catalog = ResearchCatalog(store)
+    from .research_protocol import check_cancelled
+    check_cancelled(record.experiment_id, catalog)
     request = to_json_value(record.request)
     study = catalog.require(request['specification'])
     if study.kind == 'variant':
@@ -56,8 +58,17 @@ def _execute_study(record, store):
         study=study.document, application=app.document,
         interpretation='Forward observations, not executable trading profit.')
     if request.get('analysis') is not None:
-        from .event_studies import summarize_study
-        result['analysis'] = summarize_study(events, labels, request['analysis'])
+        from .event_studies import summarize_study, fit_quantile_groups
+        grouping = request['analysis'].get('grouping')
+        if grouping and grouping.get('fitted_artifact'):
+            from ..event_research import EventDataset
+            from ..research_ideas import canonical
+            training = EventDataset(canonical(catalog.load_artifact(grouping['fitted_artifact'])))
+            if fit_quantile_groups(training, grouping['context'], grouping['quantiles']) != grouping:
+                raise ValueError('fitted group provenance mismatch')
+        result['analysis'] = summarize_study(events, labels, request['analysis'],
+            stage=request.get('protocol', {}).get('stage', 'development'))
+    check_cancelled(record.experiment_id, catalog)
     provenance = dict(dataset=snapshot.id, build=snapshot.document['build'],
                       consumed_inputs=[snapshot.id, study.digest, app.digest], attached_evidence=[])
     return result, provenance
