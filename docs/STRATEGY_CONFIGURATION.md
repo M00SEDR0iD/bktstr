@@ -1,8 +1,9 @@
 # Local strategy configuration
 
 Task 1 adds a Python/file interface for deterministic minute-bar research. The
-HTTP API continues to expose the existing baseline; there is no strategy upload
-endpoint. See the [example](../examples/strategies/macro-context-v1.json).
+HTTP baseline remains supported. The [research workflow](IDEA_RESEARCH_GUIDE.md)
+also registers policy revisions and queues durable configured backtests. See the
+[example](../examples/strategies/macro-context-v1.json).
 
 ```python
 import asyncio
@@ -42,7 +43,8 @@ portfolio exposure or buying-power enforcement feature.
   and annotation filters are not supported by this configuration interface yet.
   Daily regime rules use comparison operators only, not crossings.
 - `evaluation.start` and `end` select the historical run. `variant_budget` records
-  research intent; cross-experiment enforcement and held-out comparisons are Task 5.
+  research intent. Controlled research protocols enforce their own cross-experiment
+  budgets and held-out comparisons.
 - `model_policy` must be disabled. An optional pinned Jev identifier and question
   are fingerprinted planning metadata and do not affect trades.
 - Paper documents must declare `paper_limits`; execution rejects paper mode until
@@ -62,4 +64,8 @@ Result provenance includes the complete normalized document and digest.
 Changing rules, risk settings, model questions, or execution assumptions changes
 the digest. Increment the strategy version when revising a theory. Local loading
 does not maintain a persistent identity/version registry: cross-run revision
-enforcement and durable experiment integration remain later work.
+enforcement is provided by the research catalog. Use the durable configured research
+operation for experiment history and generated Markdown reports. Passing a
+`SnapshotProvider` as `inputs` runs offline with derived caching disabled; missing
+inputs do not fall back to live providers. Frozen snapshots currently contain minute
+bars only, so daily regime policies need a separately supported input adapter.

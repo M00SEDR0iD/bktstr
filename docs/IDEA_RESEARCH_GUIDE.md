@@ -64,3 +64,60 @@ do not form a shared-cash portfolio. Event-to-trade mapping is explicitly unavai
 The component catalog is registered code, not arbitrary executable formulas.
 Unimplemented macro/scenario evaluators block selected variants. Replay requires
 the original pinned numerical build and fails on missing/corrupt artifacts.
+
+## Offline demonstration and archive
+
+Run from the repository root in the project environment:
+
+```powershell
+python -m scripts.research_demo --root .bktstr-research/demo --reports docs/examples/research-demo
+```
+
+Use a new root after changing numerical code; immutable dataset/revision identities
+are not overwritten. The demonstration uses two synthetic instruments, a base study
+and two study variations, then a base policy and two policy variations on later
+sessions. A final baseline runs on a further period. Prices and shortened sessions
+are artificial. The output demonstrates software behavior, not profitable trading.
+
+Local archive functions accept explicit paths:
+
+```python
+from bktstr.services.experiments import ExperimentStore
+from bktstr.services.research_archive import backup_research, restore_research, replay_research
+
+store = ExperimentStore(".bktstr-research/demo")
+backup_research(store, ".bktstr-research/demo-backup")
+restored = restore_research(".bktstr-research/demo-backup", ".bktstr-research/demo-restored")
+# Use an actual experiment ID from the generated idea card:
+# replay = replay_research(experiment_id, restored)
+```
+
+Backup and restore require new destination directories. The bundle includes the
+database and referenced market, event, label, result, and report files, with hashes.
+Keep the original repository revision and Python dependency environment as well.
+
+The checked-in [synthetic demonstration](examples/research-demo/README.md) includes
+an [idea card](examples/research-demo/vwap-reclaim-idea-card.md) and linked individual
+test reports. These files are examples of the generated human review artifacts.
+
+## Controlled workflow details
+
+Studies and policies initialize numerical indicators at the first scored session.
+The frozen convention is `scored_sessions_only`. Earlier snapshot sessions do not
+silently provide warm-up to one path but not the other. Within a scored session,
+earlier bars can initialize later measurements. Initial missing measurements remain
+explicit, and no warm-up observation contributes a scored event or trade.
+
+Budgets belong to an idea lineage and research kind, across protocol names and
+revisions. Study and policy budgets are separate. Increasing a family budget requires
+`amendment_of` and `amendment_reason`; prior attempts and blocked admissions remain
+visible. Changing analysis choices consumes the same family's candidate budget.
+
+Final scopes are reserved transactionally. Only the predeclared cells in the same
+frozen protocol can share that reservation. External exposure after admission blocks
+execution. An exact replay retains the original protocol/stage and an explicit
+`replay_of` link; it is never a fresh final test.
+
+Uncertainty resampling preserves the pinned session axis, including sessions with
+no usable events. Backup holds a database write boundary while copying the bundle,
+so published reports cannot outrun their persisted exposure history.

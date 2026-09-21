@@ -72,5 +72,5 @@ def bind_policy(policy, application, run_window):
     recipe.update(instruments=app['instruments'], calendar=app['calendar'],
         timezone=app['timezone'], timeframe=app['timeframe'],
         evaluation=dict(start=str(start.tz_convert(app['timezone']).date()),
-                        end=str((end - pd.Timedelta(nanoseconds=1)).tz_convert(app['timezone']).date()), variant_budget=1))
+                        end=str(pd.Timestamp(end.value - 1, tz='UTC').tz_convert(app['timezone']).date()), variant_budget=1))
     return compile_strategy(recipe)

@@ -49,9 +49,11 @@ def _mean(values):
     return float(np.mean(values)) if len(values) else None
 
 
-def block_resamples(rows, spec):
+def block_resamples(rows, spec, *, session_axis=None):
     """Aligned session draws preserve within-session and cross-symbol clustering."""
-    dates = sorted({r['session'] for r in rows})
+    dates = sorted(set(session_axis)) if session_axis is not None else sorted({r['session'] for r in rows})
+    if not {r['session'] for r in rows}.issubset(dates):
+        raise ValueError('outcomes outside pinned session axis')
     if len(dates) // spec.block_sessions < spec.minimum_blocks:
         return []
     by_date = {d: [r for r in rows if r['session'] == d] for d in dates}
@@ -100,7 +102,8 @@ def summarize_study(events, labels, analysis, *, stage='development'):
                 group = int(np.searchsorted(spec.grouping.edges, context, side='right'))
         rows.append(dict(id=event['id'], session=event['session'], symbol=event['symbol'], value=value, group=group))
     values = [r['value'] for r in rows]
-    samples = block_resamples(rows, spec)
+    axis = events.document.get('session_axis', sorted({r['session'] for r in events.document['rows']}))
+    samples = block_resamples(rows, spec, session_axis=axis)
     means = [_mean([r['value'] for r in sample]) for sample in samples]
     grouped, difference = {}, None
     if spec.grouping:
@@ -116,7 +119,7 @@ def summarize_study(events, labels, analysis, *, stage='development'):
                           description='Highest context group minus lowest; association, not causal effect.')
     sessions = sorted({r['session'] for r in rows})
     return dict(primary_label=spec.label, event_count=len(events.document['rows']), usable=len(rows),
-        sessions=len(sessions), blocks=len(sessions) // spec.block_sessions, censored=missing,
+        sessions=len(axis), usable_sessions=len(sessions), blocks=len(axis) // spec.block_sessions, censored=missing,
         mean=_mean(values), median=float(np.median(values)) if values else None,
         quantiles=[float(x) for x in np.quantile(values, [.1, .25, .75, .9])] if values else [],
         interval=_interval(means, len(samples)),

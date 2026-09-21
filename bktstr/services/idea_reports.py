@@ -16,6 +16,18 @@ def _text(value):
     return html.escape(str(value)).replace('|', '\\|').replace('\n', ' ')
 
 
+def _display(value):
+    if value is None:
+        return 'Unavailable'
+    if isinstance(value, float):
+        return f'{value:.6g}'
+    if isinstance(value, dict):
+        return '; '.join(f'{_text(k).replace("_", " ")}: {_display(v)}' for k, v in value.items()) or 'None'
+    if isinstance(value, list):
+        return ', '.join(_display(v) for v in value)
+    return _text(value)
+
+
 def list_research_experiments(store, *, idea_id=None, kind=None, variant=None, instrument=None,
                               campaign=None, status=None, start=None, end=None, limit=50, cursor=None):
     if not 1 <= limit <= 200:
@@ -85,11 +97,22 @@ def idea_report(idea_id, store):
     with closing(store._connect()) as db:
         exposures = db.execute('SELECT count(*) FROM research_exposures').fetchone()[0]
         protocols = [json.loads(row[0]) for row in db.execute('SELECT document FROM research_protocols ORDER BY id')]
+        linked = [p['id'] for p in protocols if p['idea']['id'] == idea_id]
+        blocked = [dict(protocol_id=r['protocol_id'], created_at=r['created_at'], **json.loads(r['document']))
+                   for r in db.execute('SELECT * FROM research_admission_failures ORDER BY created_at,id') if r['protocol_id'] in linked]
+        family_ids = {r['family'] for r in db.execute('SELECT * FROM research_protocols') if r['id'] in linked}
+        families = []
+        for family in sorted(family_ids):
+            budget = dict(db.execute('SELECT * FROM research_families WHERE id=?', (family,)).fetchone())
+            budget['attempts_used'] = db.execute('SELECT count(*) FROM research_attempts WHERE family=?', (family,)).fetchone()[0]
+            budget['candidates_used'] = db.execute('SELECT count(DISTINCT semantic_candidate) FROM research_attempts WHERE family=?', (family,)).fetchone()[0]
+            budget['amendments'] = [json.loads(r[0]) for r in db.execute('SELECT document FROM research_budget_amendments WHERE family=?', (family,))]
+            families.append(budget)
     return dict(idea_id=idea_id, revisions=[x.document for x in revisions], variants=variants,
-        modifiers=modifiers, attempts=evidence, assessments=catalog.assessments(idea_id),
+        modifiers=modifiers, attempts=evidence, blocked_admissions=blocked, assessments=catalog.assessments(idea_id),
         protocols=[p for p in protocols if p['idea']['id'] == idea_id],
         search_history=dict(attempts=len(evidence), specifications=len({x['specification']['digest'] for x in evidence}),
-                            archive_exposure_events=exposures),
+                            archive_exposure_events=exposures, research_families=families),
         limitations=['Counts include failed and repeated work; external/manual inspection must be disclosed.',
                      'Research associations and simulated trading profit are separate evidence.'])
 
@@ -106,7 +129,9 @@ def render_experiment_markdown(record):
         '## What was tested', '',
         f'Specification: {_text(request["specification"]["id"])} at {_text(request["specification"]["version"])}', '',
         f'Application: {_text(request["application"]["id"])}', '',
-        f'Protocol: {_text(request.get("protocol", "Uncontrolled exploration"))}', '']
+        f'Protocol: {_display(request.get("protocol", "Uncontrolled exploration"))}', '']
+    if request.get('replay_of'):
+        lines += [f'Exact replay of {_text(request["replay_of"])}. This is not an independent final test.', '']
     if record.error:
         lines += ['## Failure or cancellation', '', _text(record.error['message']), '']
     if result.get('kind') == 'event_study':
@@ -116,13 +141,18 @@ def render_experiment_markdown(record):
         if analysis:
             lines += ['| Measure | Result |', '| --- | --- |']
             for key in ('primary_label', 'usable', 'sessions', 'blocks', 'mean', 'median', 'interval', 'uncertainty_status', 'context_difference', 'censored'):
-                lines.append(f'| {_text(key)} | {_text(analysis.get(key))} |')
+                label = key.replace('_', ' ').capitalize()
+                if key in {'mean', 'median'}:
+                    label += ' (%)'
+                if key == 'interval':
+                    label = 'Mean interval (%)'
+                lines.append(f'| {label} | {_display(analysis.get(key))} |')
             lines += ['', 'Percent outcomes use the event close as reference. Confidence intervals do not establish profitability.', '']
         lines += ['### Exact study definition', '', '```json', json.dumps(result['study'], indent=2), '```', '']
     elif result.get('kind') == 'configured_backtest':
         lines += ['## Simulated trading results', '', '| Measure | Result |', '| --- | --- |']
         for key, value in result['summary'].items():
-            lines.append(f'| {_text(key)} | {_text(value)} |')
+            lines.append(f'| {_text(key).replace("_", " ").capitalize()} | {_display(value)} |')
         lines += ['', '### Policy and rationale', '', '```json', json.dumps(result['policy'], indent=2), '```', '']
     lines += ['## Limitations', '']
     for limitation in result.get('limitations', []) + result.get('analysis', {}).get('limitations', []):
@@ -156,19 +186,50 @@ def export_idea_markdown(idea_id, store):
         lines += [f'## {_text(idea["title"])} / {_text(idea["version"])}', '',
             '### Thesis', '', _text(idea['thesis']), '', '### Proposed mechanism', '', _text(idea['mechanism']), '',
             '### Disproof criteria', '', _text(idea['falsification']), '', '### Applicability', '', _text(idea['applicability']), '']
+    studies = [attempt['result']['study'] for attempt in report['attempts']
+               if attempt.get('result') and attempt['result'].get('kind') == 'event_study']
+    if studies:
+        baseline = studies[0]
+        lines += ['## Research specification', '',
+                  f'First tested event rule: `{baseline["event_rules"]}`', '',
+                  'Context: ' + ', '.join(_text(x) for x in baseline['contexts']) + '.', '',
+                  '| Outcome | Measurement | Horizon |', '| --- | --- | --- |']
+        for label in baseline['labels']:
+            lines.append(f'| {_text(label["id"])} | {_text(label["kind"])} from event close | {label["minutes"]} minutes |')
+        lines += ['', 'Future outcomes are separate from decision-time inputs. Missing and boundary-crossing outcomes remain visible in the test reports.', '']
     lines += ['## Categorized variations', '']
     for modifier in report['modifiers']:
         lines += [f'- {_text(modifier["kind"])} / {_text(modifier["category"])}: {_text(modifier["id"])}. {_text(modifier["rationale"])}']
         lines += ['', '```json', json.dumps(modifier['changes'], indent=2), '```', '']
-    lines += ['', '```json', json.dumps(report['variants'], indent=2), '```', '',
-              '## Tests and results', '', '| Experiment | Kind | Specification | Status |', '| --- | --- | --- | --- |']
+    lines += ['', '| Variant | Kind | Based on | Modifiers |', '| --- | --- | --- | --- |']
+    for variant in report['variants']:
+        parent = variant['parent'] or variant['base']
+        lines.append(f'| {_text(variant["id"])} | {_text(variant["kind"])} | {_text(parent["id"])} @ {_text(parent["version"])} | {", ".join(_text(x["id"]) for x in variant["modifiers"])} |')
+    lines += ['', '## Tests and results', '', '| Test | Instrument | Kind | Specification | Period | Status |', '| --- | --- | --- | --- | --- | --- |']
     for attempt in report['attempts']:
         experiment_id = attempt['experiment_id']
         export_experiment_markdown(experiment_id, store)
-        lines.append(f'| [{experiment_id}]({experiment_id}-results.md) | {_text(attempt["operation"])} | {_text(attempt["specification"]["id"])} | {_text(attempt["status"])} |')
-    lines += ['', '## Assessment history', '', '```json', json.dumps(report['assessments'], indent=2), '```', '',
-              '## Search history', '', '```json', json.dumps(report['search_history'], indent=2), '```', '',
-              'A failed or inconclusive study remains part of this card. Results are specific to the tested inputs.', '']
+        period = attempt['protocol']['split'] if attempt['protocol'] else 'exploratory'
+        lines.append(f'| [{experiment_id[4:12]}]({experiment_id}-results.md) | {_text(attempt["instruments"]["subject"])} | {_text(attempt["operation"])} | {_text(attempt["specification"]["id"])} | {_text(period)} | {_text(attempt["status"])} |')
+    lines += ['', '## Blocked admissions', '']
+    for blocked in report['blocked_admissions']:
+        lines.append(f'- {_text(blocked["protocol_id"])} / {_text(blocked["split"])}: {_text(blocked["reason"])}')
+    if not report['blocked_admissions']: lines.append('None recorded.')
+    lines += ['', '## Assessment history', '']
+    for assessment in report['assessments']:
+        lines += [f'### {_text(assessment["author"])}', '', _text(assessment['conclusion']), '',
+                  'Limitations: ' + _text(assessment['limitations']), '',
+                  'Evidence: ' + ', '.join(f'[{x}]({x}-results.md)' for x in assessment['evidence']), '']
+    if not report['assessments']: lines.append('No assessment recorded yet.')
+    history = report['search_history']
+    lines += ['', '## Search history', '',
+              f'{history["attempts"]} recorded experiments; {history["specifications"]} distinct specification revisions.', '',
+              '| Research family | Candidates used / budget | Attempts used / budget | Budget amendments |', '| --- | --- | --- | --- |']
+    for family in history['research_families']:
+        lines.append(f'| {_text(family["id"])} | {family["candidates_used"]} / {family["candidate_budget"]} | {family["attempts_used"]} / {family["attempt_budget"]} | {len(family["amendments"])} |')
+        for amendment in family['amendments']:
+            lines += ['', f'Budget amendment {_text(amendment["id"])}: {_text(amendment["amendment_reason"])}', '']
+    lines += ['', 'A failed or inconclusive study remains part of this card. Results are specific to the tested inputs.', '']
     path = catalog.reports / f'{idea_id}-idea-card.md'
     atomic_text(path, '\n'.join(lines))
     return path

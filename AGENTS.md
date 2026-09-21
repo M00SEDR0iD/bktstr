@@ -11,11 +11,12 @@ classification through OpenRouter, reproducible comparisons, and bounded paper
 testing. Prioritize minute bars and holding periods of minutes to hours.
 The existing bearish-regime strategy is one baseline, not a required worldview.
 
-Current priority: reusable [trade idea containers](docs/TRADE_IDEA_CONTAINERS.md)
-and [controlled research foundations](docs/plans/2026-09-20-trade-idea-research.md)
-come before Jev Task 3. The adopted sequence is thesis, events, causal context,
+The [trade idea containers](docs/TRADE_IDEA_CONTAINERS.md) and
+[research foundation implementation](docs/plans/2026-09-20-trade-idea-research.md)
+precede Jev Task 3. The adopted sequence is thesis, events, causal context,
 separate outcome labels, exploratory study, frozen policy, controlled backtest,
-and later paper validation. RF-A through RF-K are planned, not implemented.
+and later paper validation. Use the [research guide](docs/IDEA_RESEARCH_GUIDE.md)
+for implemented local/API operations and generated Markdown review files.
 Keep research variants separate from policy variants and stock/date/data bindings.
 Preserve every eligible event, variant revision, and research attempt. Future labels
 must never enter predictor or entry-rule interfaces. Never execute a narrative
@@ -42,6 +43,8 @@ Local numerical strategy documents are implemented through
 [strategy configuration](docs/STRATEGY_CONFIGURATION.md). Keep their runtime on
 the shared orchestrator; the HTTP baseline registry remains a separate public
 contract. Model/question metadata in a disabled policy is not executed.
+Use durable configured research for saved results. After tests, review the generated
+idea card and linked Markdown test reports. Publishing reports records data exposure.
 
 ## Research invariants
 

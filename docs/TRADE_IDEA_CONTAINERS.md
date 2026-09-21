@@ -1,7 +1,8 @@
 # Reusable trade ideas and event research
 
-Status: adopted direction, September 20, 2026. The research foundation is planned,
-not implemented. Tasks 0-2 remain delivered; Jev Task 3 follows this milestone.
+Status: research foundation implemented locally, September 20, 2026. Tasks 0-2
+remain delivered; Jev Task 3 follows this milestone. See the
+[research guide](IDEA_RESEARCH_GUIDE.md) for supported operations and limits.
 The [implementation plan](plans/2026-09-20-trade-idea-research.md) defines RF-A through RF-K.
 
 ## Intent and research sequence
@@ -165,6 +166,10 @@ validation, and final periods: remove samples whose outcomes enter the next spli
 Past-only warm-up is allowed but contributes no scored events or trades. A scored
 trade cannot cross a split. Any later learned model will require its own versioned
 training and validation contract; automated model search is outside this milestone.
+
+The initial implemented warm-up convention is explicitly `scored_sessions_only`
+for both study and policy paths. Initialization begins with the first scored
+session; any broader prior-session warm-up requires a new supported convention.
 
 ## Immutable records
 

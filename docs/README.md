@@ -15,7 +15,10 @@ research contracts, and implementation sequence, not a fund portfolio.
 | [Macro evidence](MACRO_EVIDENCE.md) | Point-in-time selection, replay, and verified BLS adapter coverage |
 | [Project status report](PROJECT_STATUS.md) | Standalone usefulness, personal research fit, and remaining structural gaps |
 | [Trade idea containers](TRADE_IDEA_CONTAINERS.md) | Adopted event research structure, reusable theses, study variants, and linked policies |
-| [Research foundation plan](plans/2026-09-20-trade-idea-research.md) | Planned RF-A through RF-K implementation before Jev Task 3 |
+| [Research foundation plan](plans/2026-09-20-trade-idea-research.md) | RF-A through RF-K implementation and acceptance requirements |
+| [Idea research guide](IDEA_RESEARCH_GUIDE.md) | Run studies, review Markdown idea cards and tests, and replay frozen evidence |
+| [Synthetic research example](examples/research-demo/README.md) | Generated idea card, study results, and policy test reports using artificial data |
+| [Research verification](RESEARCH_FOUNDATION_VERIFICATION.md) | Recorded test results, independent review fixes, and implementation limits |
 | [Cache architecture](CACHE_ARCHITECTURE.md) | Data reuse and reproducibility boundaries |
 | [Cache integration](../integration/INTEGRATION_GUIDE.md) | Existing code integration points |
 | [Local credentials](development/local-credentials.md) | Existing Windows key helper |

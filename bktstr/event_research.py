@@ -1,9 +1,10 @@
 """Position-independent event observations and separately materialized outcomes."""
 from dataclasses import dataclass
+from datetime import timedelta
 import json
 import math
 import pandas as pd
-from .dataset_snapshots import instant
+from .dataset_snapshots import instant, validate_scope
 from .engine import add_indicators
 from .research_components import resolve_study
 from .research_ideas import Revision, canonical, digest, Label
@@ -36,12 +37,18 @@ def build_events(study, application, snapshot, *, start=None, end=None):
     study = resolve_study(study)
     app = application.document if isinstance(application, Revision) else application
     symbol = app['instruments']['subject']
-    frame = add_indicators(snapshot.frame(symbol))
+    scored_start, scored_end, sessions = validate_scope(snapshot, start, end, app['instruments'].values())
+    raw = snapshot.frame(symbol)
+    local_dates = raw.index.tz_convert('America/New_York').date
+    first_day = instant(sessions[0]['open']).tz_convert('America/New_York').date()
+    last_day = instant(sessions[-1]['close']).tz_convert('America/New_York').date()
+    raw = raw.loc[(local_dates >= first_day) & (local_dates <= last_day)]
+    frame = add_indicators(raw)
     session = pd.Series(frame.index.date, index=frame.index)
     selected = evaluate_rules(frame, parse_rules(study.document['event_rules']), session)
     rows = []
     for timestamp, row in frame.loc[selected].iterrows():
-        cutoff = instant(timestamp) + pd.Timedelta(minutes=1)
+        cutoff = instant(timestamp) + timedelta(minutes=1)
         if (start is not None and cutoff < instant(start)) or (end is not None and cutoff >= instant(end)):
             continue
         values, missing = {}, {}
@@ -57,9 +64,15 @@ def build_events(study, application, snapshot, *, start=None, end=None):
         rows.append(dict(id=digest(identity), symbol=symbol, session=str(timestamp.date()),
             bar_open=instant(timestamp).isoformat(), cutoff=cutoff.isoformat(), values=values,
             available_at={key: cutoff.isoformat() for key in values}, missing=missing))
+    expected = [t for s in sessions for t in pd.date_range(s['open'],s['close'],freq='min',inclusive='left')
+                if scored_start <= t + timedelta(minutes=1) < scored_end]
+    missing = [t for t in expected if t not in raw.index]
     return EventDataset(canonical(dict(study=study.document, study_digest=study.digest,
         dataset=snapshot.id, symbol=symbol, start=start, end=end,
-        coverage=snapshot.document['coverage'][symbol], rows=rows)))
+        warmup='scored_sessions_only', session_axis=[s['date'] for s in sessions],
+        coverage=dict(expected=len(expected), actual=len(expected)-len(missing), missing=len(missing),
+                      missing_timestamps=[t.isoformat() for t in missing]),
+        snapshot_coverage=snapshot.document['coverage'][symbol], rows=rows)))
 
 
 def label_events(events, label_specs, outcome_inputs, *, end=None):
@@ -79,7 +92,7 @@ def label_events(events, label_specs, outcome_inputs, *, end=None):
         reference = event['values']['close']
         for label in definitions:
             key = label['id']
-            target = cutoff + pd.Timedelta(minutes=label['minutes'])
+            target = cutoff + timedelta(minutes=label['minutes'])
             spans[key] = target.isoformat()
             reason = None
             if scored_end and target > instant(scored_end):

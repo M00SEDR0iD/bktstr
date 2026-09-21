@@ -29,6 +29,11 @@ cutoffs, revision selection, immutable packets, and offline source replay.
 The first BLS CPI adapter supports prospective collection; it cannot reconstruct
 historical release vintages or drive strategy gates yet.
 
+[Idea research](docs/IDEA_RESEARCH_GUIDE.md) now adds reusable idea cards, causal
+event studies, frozen datasets, controlled campaigns, durable configured backtests,
+and searchable history. Completed jobs generate Markdown idea cards and test-result
+reports for human review. The direct numerical runtime remains available.
+
 Jev integration, historical macro release ingestion,
 continuous paper testing, and Clear Street connectivity are planned and are not implemented.
 The current application places no
@@ -36,9 +41,9 @@ brokerage orders. Live-money trading is outside the next implementation scope.
 
 ## Intended workflow
 
-The next priority is [reusable trade ideas and controlled research](docs/TRADE_IDEA_CONTAINERS.md):
+Use [reusable trade ideas and controlled research](docs/TRADE_IDEA_CONTAINERS.md) to
 document a thesis once, study its events and context across explicit stocks, then
-develop and test a trading policy. This planned foundation comes before Jev.
+develop and test a trading policy. This research foundation comes before Jev.
 
 1. State a hypothesis and specify what would count as evidence against it.
 2. Define candidate events, context available at the time, and separate future outcomes.
@@ -50,6 +55,12 @@ develop and test a trading policy. This planned foundation comes before Jev.
 Keep research variations and trading-policy variations beneath the same idea card.
 Every change creates a traceable revision. A study can end as inconclusive or rejected
 without producing a trading policy. See the [updated plan](docs/plans/2026-09-20-trade-idea-research.md).
+
+Set `BKTSTR_EXPERIMENT_DIR` to an explicit persistent folder. Human review files
+are saved under its `research/reports/` directory. See the
+[research guide](docs/IDEA_RESEARCH_GUIDE.md) for the offline demonstration and replay.
+The [synthetic example](docs/examples/research-demo/README.md) includes a complete
+Markdown idea card and linked test reports. Its prices are artificial.
 
 ## Start here
 

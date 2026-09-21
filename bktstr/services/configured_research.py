@@ -42,8 +42,9 @@ def submit_research_run(store, request, idempotency_key):
 
 def _execute_study(record, store):
     catalog = ResearchCatalog(store)
-    from .research_protocol import check_cancelled
+    from .research_protocol import check_cancelled, validate_attempt_execution
     check_cancelled(record.experiment_id, catalog)
+    validate_attempt_execution(record, catalog)
     request = to_json_value(record.request)
     study = catalog.require(request['specification'])
     if study.kind == 'variant':
@@ -77,11 +78,12 @@ def _execute_study(record, store):
 def _execute_policy(record, store):
     import asyncio
     from ..idea_resolution import resolve_variant, bind_policy
-    from ..dataset_snapshots import SnapshotProvider
+    from ..dataset_snapshots import SnapshotProvider, validate_scope
     from ..runtime import run_configured_strategy
-    from .research_protocol import check_cancelled
+    from .research_protocol import check_cancelled, validate_attempt_execution
     catalog = ResearchCatalog(store)
     check_cancelled(record.experiment_id, catalog)
+    validate_attempt_execution(record, catalog)
     request = to_json_value(record.request)
     policy = catalog.require(request['specification'])
     if policy.kind == 'variant':
@@ -93,6 +95,7 @@ def _execute_policy(record, store):
         if evidence.operation != 'event_study' or evidence.status != 'completed' or evidence.request['idea']['id'] != request['idea']['id']:
             raise ValueError('policy evidence must be a completed study for this idea')
     snapshot = load_snapshot(app.document['dataset'], catalog.datasets)
+    validate_scope(snapshot, request['start'], request['end'], app.document['instruments'].values())
     # Legacy execution uses complete sessions. Reject intra-session split boundaries.
     for session in snapshot.document['schedule']:
         if instant(session['open']) < instant(request['end']) and instant(session['close']) > instant(request['start']):
