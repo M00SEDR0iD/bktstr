@@ -1,0 +1,10 @@
+{
+  "id": "vwap-reclaim",
+  "version": "1.0.0",
+  "title": "Continuation after a VWAP reclaim",
+  "thesis": "A same-session close crossing above VWAP may precede continuation.",
+  "mechanism": "Participation returning above the session average may sustain direction.",
+  "falsification": "Reject if forward differences do not persist across held-out sessions and instruments, or a policy fails after costs.",
+  "applicability": "Liquid equity/ETF minute bars; portability must be tested.",
+  "roles": ["subject"]
+}
