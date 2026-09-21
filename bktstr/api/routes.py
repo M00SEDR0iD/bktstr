@@ -301,6 +301,8 @@ def experiment_operations(store: ExperimentStore | None = None) -> dict:
     """Return operation handlers shared by inline submission and the durable worker."""
     operations = {"backtest": _execute_backtest_experiment}
     if store is not None:
+        from bktstr.services.configured_research import research_operations
+        operations.update(research_operations(store))
         operations.update(
             {
                 "parameter_sweep": lambda record: _execute_parameter_sweep_experiment(
