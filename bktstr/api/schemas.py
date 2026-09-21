@@ -789,6 +789,14 @@ class PendingExperimentResponse(ExperimentEnvelope):
         return cls.model_validate(payload)
 
 
+class EventStudyExperimentResponse(ExperimentEnvelope):
+    operation: Literal['event_study']
+
+
+class ConfiguredBacktestExperimentResponse(ExperimentEnvelope):
+    operation: Literal['configured_backtest']
+
+
 # Keep the canonical polling contract explicitly discriminated. Pending remains
 # the safe representation for unknown future operations and old malformed rows.
 ExperimentResponse = Annotated[
@@ -797,6 +805,8 @@ ExperimentResponse = Annotated[
         ParameterSweepExperimentResponse,
         CompareExperimentResponse,
         RegimeComparisonExperimentResponse,
+        EventStudyExperimentResponse,
+        ConfiguredBacktestExperimentResponse,
         PendingExperimentResponse,
     ],
     Field(discriminator="operation"),

@@ -7,17 +7,17 @@ Read [AGENTS.md](AGENTS.md) and the [system design](docs/BKTSTR_SYSTEM_MANUAL.md
 For planned Jev and paper workflows, follow the
 [implementation plan](docs/IMPLEMENTATION_PLAN.md).
 
-## Planned research organization
+## Idea research organization
 
 The adopted [idea structure](docs/TRADE_IDEA_CONTAINERS.md) starts with a thesis,
 event definition, causal context, and separate future outcome labels. Study these
 observations before selecting a trading policy. Keep study variations and policy
 variations under the same idea, with explicit evidence and revision links.
 
-The [research foundation plan](docs/plans/2026-09-20-trade-idea-research.md) adds
-durable event studies, search budgets, controlled comparisons, and history before
-Jev. These operations are not implemented yet. The instructions below describe
-the currently available backtest workflow.
+The [idea research guide](docs/IDEA_RESEARCH_GUIDE.md) documents durable event
+studies, search budgets, controlled comparisons, history, and generated Markdown
+review files. Use the idea card and linked test reports to inspect results after
+jobs finish. The baseline workflow below remains supported.
 
 ## Define an experiment
 
@@ -33,8 +33,9 @@ different idea silently to fit the available endpoint.
 
 For configurable numerical research in the local checkout, use the
 [strategy document interface](docs/STRATEGY_CONFIGURATION.md). Save the normalized
-manifest and digest with the result. This local interface does not submit an HTTP
-experiment or automatically persist it in the service's experiment store.
+manifest and digest with the result. The direct runtime returns an in-memory result;
+use `submit_research_run` or the configured-backtest endpoint for durable experiments
+and automatic Markdown reports.
 
 ## Connect to the current service
 

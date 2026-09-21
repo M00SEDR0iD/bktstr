@@ -209,3 +209,32 @@ Historical raw-cache keys are provider, symbol, timeframe, and day. Historical e
 `POST /api/v1/compare` accepts 2 through 20 unique candidates. A candidate is either a completed backtest experiment ID beginning with `exp_`, or a named variant containing a complete typed backtest request. The first candidate is the reference. Named variants create linked child backtests. `metric_deltas` subtract the reference metric from each candidate metric, and `changed_inputs` compares canonical backtest requests.
 
 `POST /api/v1/regime-comparison` accepts 2 through 12 labels. Each label supplies a name, date range, and optional rule. Set `disjoint_periods` to require labelled ranges not to overlap. Both comparison operations create experiment records and return their results through the same polling lifecycle.
+# Idea research extension
+
+The following authenticated operations extend the existing baseline API. Bodies
+and exact schemas are published in OpenAPI. All revision references pin ID,
+semantic version, and content digest.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET/POST /api/v1/ideas` | List/create immutable idea revisions |
+| `GET/POST /api/v1/research/revisions/{kind}` | Study, policy, modifier, variant, and application records |
+| `GET /api/v1/research/components` | Supported causal numerical components |
+| `POST /api/v1/research/datasets` | Freeze supplied OHLCV and explicit session schedules |
+| `POST /api/v1/event-studies` | Queue a study; requires `Idempotency-Key` |
+| `POST /api/v1/configured-backtests` | Queue a configured policy; requires `Idempotency-Key` |
+| `POST /api/v1/research-protocols` | Freeze a controlled campaign |
+| `POST /api/v1/research-protocols/{id}/run` | Admit the fixed matrix and queue its jobs |
+| `GET /api/v1/research-protocols/{id}` | Campaign status and comparisons |
+| `GET /api/v1/experiments` | Paginated research history with idea, variant, instrument, campaign, status, date filters |
+| `GET /api/v1/ideas/{id}/report` | Idea history and results as JSON |
+| `GET /api/v1/ideas/{id}/markdown` | Human-readable idea card |
+| `GET /api/v1/experiments/{id}/markdown` | Human-readable test results |
+| `GET /api/v1/experiments/{id}/artifacts/{kind}` | Event or label artifact with inspection logging |
+| `POST /api/v1/experiments/{id}/cancel` | Cooperative campaign-attempt cancellation; no budget refund |
+| `POST /api/v1/ideas/{id}/assessments` | Append a conclusion with evidence and limitations |
+| `POST /api/v1/research/inspections` | Disclose external/manual data exposure |
+
+Canonical experiment polling supports `event_study` and `configured_backtest`.
+Completed/failed research jobs generate Markdown under the persistent research
+root. See the [idea research guide](IDEA_RESEARCH_GUIDE.md) for interpretation.

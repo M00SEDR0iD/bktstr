@@ -213,4 +213,6 @@ def create_app() -> FastAPI:
         return health_payload()
 
     app.include_router(api_router, prefix="/api/v1")
+    from .research_routes import research_router
+    app.include_router(research_router, prefix='/api/v1')
     return app

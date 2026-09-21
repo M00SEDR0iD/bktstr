@@ -232,7 +232,7 @@ def _study_contrast(base, candidate, catalog, analysis):
         pairing='same event sample' if keys[0] == keys[1] else 'different samples; no paired-row claim')
 
 
-def run_protocol(protocol_id, store, *, execute=True):
+def run_protocol(protocol_id, store, *, execute=True, admit=True):
     from .research_store import ResearchCatalog
     from .configured_research import research_operations
     from .experiments import ExperimentWorker
@@ -245,7 +245,17 @@ def run_protocol(protocol_id, store, *, execute=True):
         for application in protocol['applications']:
             for candidate in candidates:
                 try:
-                    record = admit_attempt(protocol_id, candidate, application, window['name'], 'once', catalog)
+                    if admit:
+                        record = admit_attempt(protocol_id, candidate, application, window['name'], 'once', catalog)
+                    else:
+                        logical = digest(dict(protocol=protocol_id, candidate=candidate, application=application,
+                                              split=window['name'], replication='once'))
+                        with closing(store._connect()) as db:
+                            row = db.execute('SELECT experiment_id FROM research_attempts WHERE logical_key=?', (logical,)).fetchone()
+                        if row is None:
+                            cells.append(dict(candidate=candidate, application=application, split=window['name'], status='not_submitted'))
+                            continue
+                        record = store.load_experiment(row['experiment_id'])
                     records.append(record)
                 except ValueError as error:
                     cells.append(dict(candidate=candidate, application=application, split=window['name'],

@@ -1182,7 +1182,7 @@ class ExperimentWorker:
         self, record: ExperimentRecord, error: Mapping[str, Any]
     ) -> ExperimentRecord:
         try:
-            return self.store.fail(
+            completed = self.store.fail(
                 record.experiment_id,
                 error,
                 owner_id=(
@@ -1191,10 +1191,24 @@ class ExperimentWorker:
                     else self.owner_id
                 ),
             )
+            self._publish_research_reports(completed)
+            return completed
         except ExperimentStateError:
             # Another owner may have terminalized or recovered this row while a
             # stale handler was returning. Its authoritative SQLite state wins.
             return self.store.load_experiment(record.experiment_id)
+
+    def _publish_research_reports(self, record: ExperimentRecord) -> None:
+        if record.operation not in {'event_study', 'configured_backtest'}:
+            return
+        try:
+            from .idea_reports import publish_research_reports
+            publish_research_reports(self.store, record)
+        except Exception:
+            # A derivative report failure must not rewrite a committed result.
+            # Authenticated report endpoints regenerate it from canonical records.
+            import logging
+            logging.getLogger(__name__).warning('Research Markdown publication failed for %s; regenerate through the report endpoint.', record.experiment_id)
 
     def _execute(self, record: ExperimentRecord) -> ExperimentRecord:
         operation = self.operations.get(record.operation)
@@ -1249,7 +1263,7 @@ class ExperimentWorker:
                 },
             )
         try:
-            return self.store.complete(
+            completed = self.store.complete(
                 record.experiment_id,
                 result,
                 provenance,
@@ -1259,6 +1273,8 @@ class ExperimentWorker:
                     else self.owner_id
                 ),
             )
+            self._publish_research_reports(completed)
+            return completed
         except ExperimentStateError:
             return self.store.load_experiment(record.experiment_id)
         except Exception as exc:

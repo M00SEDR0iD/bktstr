@@ -20,7 +20,7 @@ def test_capabilities_publish_api_limits_and_exact_execution_policy(monkeypatch,
     assert body["api"]["limits"]["market_data_page_size"] == {"minimum": 1, "maximum": 1000}
     assert body["experiments"]["execution_policy"] == {
         "auto_inline": ["backtest"],
-        "auto_queues": ["parameter_sweep", "compare", "regime_comparison"],
+        "auto_queues": ["parameter_sweep", "compare", "regime_comparison", "event_study", "configured_backtest"],
         "sync_max_calendar_days": 31,
         "sync_refusal_code": "execution_not_available",
     }
@@ -41,6 +41,11 @@ def test_capabilities_retain_registered_v05_contracts_and_publish_operations(mon
         "compare",
         "regime_comparison",
         "market_data",
+        "event_study",
+        "configured_backtest",
+        "idea_history",
+        "research_protocol",
+        "research_markdown",
     ]
     assert body["experiments"]["idempotency"] == {
         "header": "Idempotency-Key",
