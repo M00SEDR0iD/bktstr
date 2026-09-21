@@ -2,7 +2,7 @@
 
 This demonstrates software behavior. Every price is synthetic; these results are not evidence of a trading edge.
 
-[Open the idea card](vwap-reclaim-idea-card.md)
+[Open the visual idea card](vwap-reclaim-idea-card.html) · [Markdown export](vwap-reclaim-idea-card.md)
 
 Study campaign: completed, 6 attempts.
 

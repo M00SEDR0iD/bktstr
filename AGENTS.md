@@ -44,7 +44,9 @@ Local numerical strategy documents are implemented through
 the shared orchestrator; the HTTP baseline registry remains a separate public
 contract. Model/question metadata in a disabled policy is not executed.
 Use durable configured research for saved results. After tests, review the generated
-idea card and linked Markdown test reports. Publishing reports records data exposure.
+visual HTML idea card and secondary Markdown test reports. Publishing reports records
+data exposure. Short-sample Sharpe warnings are presentation cues; never cap or
+silently rescale saved metrics to make them look plausible.
 
 ## Research invariants
 

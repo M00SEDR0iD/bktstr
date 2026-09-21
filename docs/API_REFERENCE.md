@@ -228,6 +228,7 @@ semantic version, and content digest.
 | `GET /api/v1/research-protocols/{id}` | Campaign status and comparisons |
 | `GET /api/v1/experiments` | Paginated research history with idea, variant, instrument, campaign, status, date filters |
 | `GET /api/v1/ideas/{id}/report` | Idea history and results as JSON |
+| `GET /api/v1/ideas/{id}/html` | Default offline visual idea card; exposure-aware, authenticated |
 | `GET /api/v1/ideas/{id}/markdown` | Human-readable idea card |
 | `GET /api/v1/experiments/{id}/markdown` | Human-readable test results |
 | `GET /api/v1/experiments/{id}/artifacts/{kind}` | Event or label artifact with inspection logging |

@@ -82,7 +82,8 @@ and controlled campaigns. These research foundations precede Jev integration.
 The [local configuration interface](STRATEGY_CONFIGURATION.md) implements the
 Task 1 numerical subset. The broader contract below remains the target design;
 macro/model filters and paper execution are future tasks. Controlled numerical
-campaigns and Markdown review files are documented in the [research guide](IDEA_RESEARCH_GUIDE.md).
+campaigns, visual HTML cards, and secondary Markdown review files are documented
+in the [research guide](IDEA_RESEARCH_GUIDE.md).
 
 A versioned strategy document contains:
 

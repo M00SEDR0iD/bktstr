@@ -19,7 +19,7 @@ measurements remain the core architecture.
 | Studies | Distributions, context groups, direct differences, session-block uncertainty | Exploratory statistics, declared dependence assumptions, no automatic edge certification |
 | Policies | Strict compiler, durable configured backtests, numerical entry/risk/exit variations | Existing simplified execution and accounting |
 | Controlled campaigns | Frozen candidates, budgets, split boundaries, exposure history, stable child identities | External/manual inspection must be disclosed |
-| Human review | Automatic Markdown idea cards and test reports, authenticated API exports, searchable history | No full browser workspace |
+| Human review | Automatic offline visual idea cards, secondary Markdown exports, authenticated API access, searchable history | No full browser workspace |
 | Archive | Database/artifact backup, verified restore, explicit offline replay | Original numerical build is required |
 | Macro evidence | Point-in-time records, revision selection, immutable packets, BLS prospective acquisition | No active macro trading gates or historical release archive |
 | Jev and forward execution | Defined next steps | No Jev calls, continuous paper runner, or broker connection |
@@ -41,7 +41,7 @@ If the evidence warrants a policy, freeze its entry, risk, sizing, exits, and co
 assumptions. Compare it on declared instruments and periods through the existing
 engine. A stock binding changes the application, not the underlying recipe.
 
-The Markdown card and linked test reports are the human review layer. They show
+The visual HTML card and secondary Markdown reports are the human review layer. They show
 the specification, attempted variations, failures, outcome counts, numerical
 results, limitations, and replay references. The archive retains contrary and
 inconclusive assessments.

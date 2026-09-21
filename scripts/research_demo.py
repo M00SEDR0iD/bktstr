@@ -12,18 +12,19 @@ from bktstr.dataset_snapshots import freeze_dataset, atomic_text
 from bktstr.services.experiments import ExperimentStore
 from bktstr.services.research_store import ResearchCatalog
 from bktstr.services.research_protocol import register_protocol, run_protocol
-from bktstr.services.idea_reports import export_idea_markdown
+from bktstr.services.idea_reports import export_idea_markdown, export_idea_html
 
 
 def write_demo_reports(catalog, destination, study_results, policy_results, card):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    for path in catalog.reports.glob('*.md'):
-        shutil.copy2(path, destination / path.name)
+    for pattern in ('*.md', '*.html'):
+        for path in catalog.reports.glob(pattern):
+            shutil.copy2(path, destination / path.name)
     names = {r.digest:r.id for kind in ('study', 'policy', 'variant') for r in catalog.revisions(kind)}
     lines = ['# Synthetic research demonstration', '',
         'This demonstrates software behavior. Every price is synthetic; these results are not evidence of a trading edge.', '',
-        '[Open the idea card](vwap-reclaim-idea-card.md)', '',
+        '[Open the visual idea card](vwap-reclaim-idea-card.html) · [Markdown export](vwap-reclaim-idea-card.md)', '',
         f'Study campaign: {study_results["status"]}, {len(study_results["cells"])} attempts.', '',
         f'Policy campaign: {policy_results["status"]}, {len(policy_results["cells"])} attempts.', '',
         'Development, validation, and final sessions are chronological and disjoint.', '',
@@ -113,7 +114,8 @@ def run_demo(root, reports=None):
                 dict(name='final',stage='final',start=schedule[9]['open'],end=schedule[11]['close'])],
         primary_metric='ev_r_per_trade', allowed_differences=['entry.rules','risk.max_hold_minutes']), catalog)
     policy_results = run_protocol(policy_protocol.id, store)
-    card = export_idea_markdown(idea.id, store)
+    export_idea_markdown(idea.id, store)
+    card = export_idea_html(idea.id, store)
     if reports:
         card = write_demo_reports(catalog, reports, study_results, policy_results, card)
     return dict(study=study_results, policy=policy_results, card=card)

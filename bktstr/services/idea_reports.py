@@ -62,7 +62,7 @@ def list_research_experiments(store, *, idea_id=None, kind=None, variant=None, i
             operation=row['operation'], status=row['status'], idea=request['idea'],
             specification=request['specification'], application=request['application'],
             instruments=app.document['instruments'], protocol=request.get('protocol'),
-            start=request['start'], end=request['end']))
+            start=request['start'], end=request['end'], replay_of=request.get('replay_of')))
     items = matched[:limit]
     next_cursor = None
     if len(matched) > limit:
@@ -277,3 +277,34 @@ def publish_research_reports(store, record):
     if record.operation in {'event_study', 'configured_backtest'}:
         export_experiment_markdown(record.experiment_id, store)
         export_idea_markdown(record.request['idea']['id'], store)
+        export_idea_html(record.request['idea']['id'], store)
+
+
+def export_idea_html(idea_id, store):
+    """Self-contained human edition; canonical results and exposure rules are shared."""
+    report = idea_report(idea_id, store)
+    from ..dataset_snapshots import load_snapshot
+    catalog = ResearchCatalog(store)
+    sources = {}
+    # Keep every attempt, but omit large trade arrays and duplicate runtime manifests.
+    for attempt in report['attempts']:
+        dataset = catalog.require(attempt['application'], 'application').document['dataset']
+        if dataset not in sources:
+            try:
+                sources[dataset] = load_snapshot(dataset, catalog.datasets, verify_build=False).document['source']
+            except (ValueError, FileNotFoundError):
+                sources[dataset] = 'Source metadata unavailable; inspect the saved provenance.'
+        attempt['data_source'] = sources[dataset]
+        result = attempt.get('result')
+        if result:
+            attempt['result'] = {key: result[key] for key in (
+                'kind', 'metrics', 'metric_definitions', 'metric_unavailable_reasons',
+                'daily_equity', 'policy', 'study', 'analysis', 'event_count',
+                'summary', 'limitations') if key in result}
+    embedded = json.dumps(report, ensure_ascii=True, allow_nan=False)
+    embedded = embedded.replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e')
+    template = Path(__file__).with_name('idea_card.html').read_text(encoding='utf-8')
+    content = template.replace('__IDEA_REPORT_JSON__', embedded)
+    path = catalog.reports / f'{idea_id}-idea-card.html'
+    atomic_text(path, content)
+    return path

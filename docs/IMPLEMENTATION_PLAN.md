@@ -20,8 +20,9 @@ BKTSTR caches and worker. Use existing dependencies where possible.
 
 **Status:** Tasks 0-2 and the local research foundation are implemented. Tasks 3-7
 remain unstarted. [RF-A through RF-K](plans/2026-09-20-trade-idea-research.md) add
-idea records, event studies, controlled numerical campaigns, and Markdown review
-files. The [research guide](IDEA_RESEARCH_GUIDE.md) describes delivered interfaces.
+idea records, event studies, controlled numerical campaigns, and visual HTML cards
+with secondary Markdown exports. The [research guide](IDEA_RESEARCH_GUIDE.md)
+describes delivered interfaces.
 **Next planned task:** Task 3, recorded Jev acquisition and replay. The research
 sequence studies events, causal context, and separate outcome labels before
 developing a frozen trading policy. Paper and broker operations remain future work.

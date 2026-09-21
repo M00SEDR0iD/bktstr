@@ -35,7 +35,7 @@ For configurable numerical research in the local checkout, use the
 [strategy document interface](docs/STRATEGY_CONFIGURATION.md). Save the normalized
 manifest and digest with the result. The direct runtime returns an in-memory result;
 use `submit_research_run` or the configured-backtest endpoint for durable experiments
-and automatic Markdown reports.
+and automatic visual idea cards with secondary Markdown reports.
 
 ## Connect to the current service
 

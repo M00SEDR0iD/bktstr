@@ -33,6 +33,23 @@ intraminute extremes. Commission and borrow costs remain unmodeled.
 
 ## Results
 
+### Visual card follow-up, September 21, 2026
+
+- The visual HTML card is generated automatically, with an authenticated HTML
+  export endpoint. The earlier Markdown exports remain available.
+- Full suite: 587 passed with the same five warnings. Following review fixes,
+  eight focused report/API/archive tests passed; 42 export/documentation checks
+  also passed. Compilation, release consistency, and the cache benchmark passed.
+- Browser checks verified instrument/period/variation selection, final-candidate
+  filtering, event-study versus policy outcomes, and layouts at 320, 736, and
+  1,024 pixels without overflow or script errors.
+- Independent review corrections preserve exact-replay lineage and display study
+  uncertainty, intervals, censoring, and limitations in the visual report.
+- The short-sample Sharpe label is a presentation cue below 30 sessions. It neither
+  caps the saved Sharpe nor makes 30 sessions a statistical validity threshold.
+
+### Original foundation checks
+
 | Check | Observed result |
 | --- | --- |
 | Complete repository suite | 575 passed; 5 existing dependency/cache deprecation warnings |

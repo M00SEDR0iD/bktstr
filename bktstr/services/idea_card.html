@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>BKTSTR idea card</title>
+<style>
+
+#idea-preview { --paper:light-dark(#f7f8fa,#13191e); --surface:light-dark(#ffffff,#1b242b); --ink:light-dark(#17232b,#edf3f6); --subtle:light-dark(#53636e,#adbcc6); --line:light-dark(#d8e1e5,#35434c); --signal:light-dark(#00715f,#70dac4); --loss:light-dark(#a44125,#ffa487); --tag:light-dark(#e9efed,#263b35); color:var(--ink); font:14px/1.5 system-ui,sans-serif; background:var(--paper); border:1px solid var(--line); border-radius:18px; padding:24px; color-scheme:light dark; }
+#idea-preview * { box-sizing:border-box; }
+#idea-preview h2 { font-size:25px; line-height:1.2; letter-spacing:-.6px; font-weight:600; margin:8px 0; color:var(--ink); }
+#idea-preview h3 { font-size:15px; font-weight:600; margin:0 0 12px; color:var(--ink); }
+#idea-preview p { margin:0; }
+#idea-preview .eyebrow { font-size:11px; letter-spacing:1.4px; text-transform:uppercase; color:var(--subtle); }
+#idea-preview .muted { color:var(--subtle); }
+#idea-preview .topline, #idea-preview .row { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+#idea-preview .badge { background:var(--tag); color:var(--ink); padding:5px 10px; border-radius:30px; font-size:12px; }
+#idea-preview .lead { max-width:560px; margin-top:10px; }
+#idea-preview .controls { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:22px 0 14px; }
+#idea-preview label { display:grid; gap:5px; color:var(--subtle); font-size:12px; }
+#idea-preview select { width:100%; min-height:40px; padding:8px 12px; background:var(--surface); color:var(--ink); border:1px solid var(--line); border-radius:8px; font:inherit; font-size:14px; }
+#idea-preview .variants { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+#idea-preview button { min-height:40px; border:1px solid var(--line); border-radius:8px; padding:8px 12px; background:var(--surface); color:var(--ink); font:inherit; }
+#idea-preview button[aria-pressed="true"] { background:var(--ink); color:var(--surface); border-color:var(--ink); }
+#idea-preview button:disabled { opacity:.45; }
+#idea-preview .outcomes { display:grid; grid-template-columns:1.25fr 1fr 1fr 1fr; gap:10px; }
+#idea-preview .metric { padding:16px; border-radius:12px; background:var(--surface); border:1px solid var(--line); min-width:0; }
+#idea-preview .metric.primary { border-top:3px solid var(--signal); }
+#idea-preview .label { font-size:12px; color:var(--subtle); }
+#idea-preview .number { font-size:25px; letter-spacing:-1px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; margin:8px 0; }
+#idea-preview .number.loss { color:var(--loss); }
+#idea-preview .small { font-size:12px; color:var(--subtle); }
+#idea-preview .caption { margin:14px 0 20px; font-size:12px; color:var(--subtle); }
+#idea-preview .section { padding-top:20px; border-top:1px solid var(--line); margin-top:18px; }
+#idea-preview .chart { width:100%; height:190px; display:block; }
+#idea-preview .chart text { font:12px system-ui,sans-serif; fill:var(--subtle); }
+#idea-preview .chart .series { fill:none; stroke:var(--signal); stroke-width:2.5; }
+#idea-preview .chart .grid { stroke:var(--line); stroke-width:1; }
+#idea-preview .summary { margin-top:12px; color:var(--ink); }
+#idea-preview details { margin-top:18px; border-top:1px solid var(--line); padding-top:15px; }
+#idea-preview summary { font-weight:500; }
+#idea-preview .recipe { display:grid; grid-template-columns:110px 1fr; gap:10px 15px; margin-top:14px; }
+#idea-preview .recipe span:nth-child(odd) { color:var(--subtle); }
+#idea-preview .footer { margin-top:20px; color:var(--subtle); font-size:12px; }
+@media(max-width:700px) { #idea-preview .outcomes { grid-template-columns:1fr 1fr; } }
+@media(max-width:380px) { #idea-preview { padding:16px; } #idea-preview .controls { grid-template-columns:1fr; } #idea-preview .metric { padding:12px; } #idea-preview .number { font-size:22px; } #idea-preview .recipe { grid-template-columns:1fr; gap:4px; } }
+@media(pointer:coarse) { #idea-preview button,#idea-preview select { min-height:44px; } }
+
+body { margin:0; padding:20px; background:light-dark(#eef2f4,#10161b); color-scheme:light dark; }
+#idea-preview { max-width:1000px; margin:auto; }
+#idea-preview .warning { margin:12px 0; padding:10px 14px; color:var(--ink); background:var(--tag); border-radius:8px; }
+#idea-preview .test-controls { margin:12px 0 20px; }
+#idea-preview pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; color:var(--subtle); }
+#idea-preview a { color:var(--signal); }
+#idea-preview .number { font-size:clamp(18px,3.3vw,25px); }
+#idea-preview .history { padding-left:18px; }
+#idea-preview .history li { margin-bottom:10px; }
+#idea-preview .chart[hidden] { display:none; }
+@media print { body { padding:0; } #idea-preview { border:0; } }
+</style>
+</head>
+<body>
+<main id="idea-preview">
+  <div class="topline"><span class="eyebrow">BKTSTR / research idea</span><span class="badge" id="idea-status">Research record</span></div>
+  <h2 id="idea-title">Idea card</h2>
+  <p class="lead muted" id="idea-thesis"></p>
+  <div class="controls">
+    <label>Instrument<select id="idea-symbol" aria-label="Instrument"></select></label>
+    <label>Test period / campaign<select id="idea-period" aria-label="Test period and campaign"></select></label>
+  </div>
+  <label class="test-controls">Variation / recorded test<select id="idea-test" aria-label="Variation and recorded test"></select></label>
+  <div aria-live="polite">
+    <div class="outcomes">
+      <div class="metric primary"><div class="label">EV · primary measure</div><div class="number" id="idea-ev">Unavailable</div><div class="small" id="idea-dollar">R per trade</div></div>
+      <div class="metric"><div class="label">Reward / risk</div><div class="number" id="idea-rr">Unavailable</div><div class="small" id="idea-realized">Realized: unavailable</div></div>
+      <div class="metric"><div class="label">Daily Sharpe</div><div class="number" id="idea-sharpe">Unavailable</div><div class="small" id="idea-sessions"></div></div>
+      <div class="metric"><div class="label">Max drawdown</div><div class="number" id="idea-dd">Unavailable</div><div class="small" id="idea-dd-dollar"></div></div>
+    </div>
+    <p class="warning" id="idea-warning" hidden></p>
+    <p class="caption" id="idea-sample">No tests recorded</p>
+    <div class="row"><h3>Selected test</h3><span class="badge" id="idea-delta"></span></div><p id="idea-change"></p>
+    <p id="idea-study" class="caption" hidden></p>
+  </div>
+  <div class="section">
+    <div class="row"><h3>Equity through this test</h3><span class="small" id="idea-equity-label"></span></div>
+    <svg id="idea-equity" class="chart" role="img" aria-label="Session-end equity"></svg>
+    <p class="small" id="idea-curve-note">Session-end points · maximum drawdown uses minute-close equity</p>
+  </div>
+  <details><summary>Idea recipe and assessment</summary><div id="idea-recipe" class="recipe"></div></details>
+  <details><summary>All recorded tests and failures</summary><ul id="idea-history" class="history"></ul><p id="idea-blocked"></p></details>
+  <details><summary>Metric definitions and limitations</summary>
+    <p class="caption">Sharpe is not bounded by ±5. A tiny standard deviation can produce extreme values. Annualization assumes 252 sessions and zero risk-free return. The 30-session display flag is a review cue, not a statistical guarantee or a change to the saved value.</p>
+    <pre id="idea-definitions"></pre>
+  </details>
+  <p class="footer">Offline visual report · saved research evidence · no automatic trading approval</p>
+  <noscript>This interactive card needs JavaScript. The Markdown export and canonical research records remain available.</noscript>
+</main>
+<script id="idea-data" type="application/json">__IDEA_REPORT_JSON__</script>
+<script>
+(() => {
+  'use strict';
+  const data=JSON.parse(document.getElementById('idea-data').textContent);
+  const root=document.getElementById('idea-preview'), q=id=>root.querySelector('#'+id);
+  const attempts=data.attempts || [], number=n=>typeof n==='number' && Number.isFinite(n);
+  const fmt=(n,d=2)=>number(n)?n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'Unavailable';
+  const money=n=>number(n)?(n<0?'−':'')+'$'+fmt(Math.abs(n)):'Unavailable';
+  const readableRules=rules=>String(rules || '').split(',').map(rule=>{
+    if(rule==='close.cross_above:vwap')return 'close crosses above VWAP';
+    if(rule==='close.cross_below:vwap')return 'close crosses below VWAP';
+    if(rule==='volume_ratio20.gt:1')return 'volume is above its 20-bar average';
+    return rule.replace('rsi14','RSI').replace('.gt:', ' above ').replace('.lt:', ' below ');
+  }).join(' and ');
+  const period=a=>JSON.stringify([a.protocol?.id || 'Exploratory',a.protocol?.split || 'exploratory',a.start,a.end]);
+  const symbol=a=>a.instruments.subject;
+  const options=(select,entries,wanted)=>{
+    select.replaceChildren(); entries.forEach(([value,label])=>{const o=document.createElement('option');o.value=value;o.textContent=label;select.append(o);});
+    if(entries.some(x=>x[0]===wanted))select.value=wanted;
+    select.disabled=!entries.length;
+  };
+  let selected=attempts.find(a=>a.status==='completed'&&a.operation==='configured_backtest') || attempts[0];
+  let activePoints=[];
+  function draw() {
+    const svg=q('idea-equity');svg.replaceChildren();svg.hidden=!activePoints.length;
+    if(!activePoints.length)return;
+    const w=Math.max(230,svg.getBoundingClientRect().width),h=190,left=72,right=12,top=20,bottom=42;
+    svg.setAttribute('viewBox',`0 0 ${w} ${h}`);
+    const values=activePoints.map(p=>p.value), min=Math.min(...values),max=Math.max(...values), pad=Math.max((max-min)*.12,Math.abs(max)*.001,1);
+    const low=min-pad,high=max+pad,x=i=>left+i*(w-left-right)/Math.max(1,values.length-1),y=v=>top+(high-v)/(high-low)*(h-top-bottom);
+    const add=(tag,attrs,text)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));if(text!==undefined)e.textContent=text;svg.append(e);return e;};
+    add('title',{},'Session-end equity in dollars; drawdown is computed separately from minute-close equity');
+    [0,.5,1].forEach(f=>{const v=low+f*(high-low);add('line',{x1:left,x2:w-right,y1:y(v),y2:y(v),class:'grid'});add('text',{x:left-8,y:y(v)+4,'text-anchor':'end'},fmt(v,0));});
+    [...new Set([0,Math.floor((values.length-1)/2),values.length-1])].forEach(i=>add('text',{x:x(i),y:h-20,'text-anchor':i===0?'start':i===values.length-1?'end':'middle'},activePoints[i].date));
+    add('text',{x:left,y:12},'Equity ($)');
+    add('polyline',{class:'series',points:values.map((v,i)=>`${x(i)},${y(v)}`).join(' ')});
+    if(values.length<15)values.forEach((v,i)=>add('circle',{cx:x(i),cy:y(v),r:3.5,fill:'var(--signal)'}));
+    svg.setAttribute('aria-label',`Equity from ${money(values[0])} to ${money(values.at(-1))} across ${values.length-1} sessions`);
+  }
+  function render() {
+    const a=selected,r=a?.result || {},m=r.metrics || {},policy=a?.operation==='configured_backtest';
+    const idea=data.revisions.find(x=>x.version===a?.idea.version) || data.revisions.at(-1);
+    q('idea-title').textContent=idea?.title || data.idea_id;
+    q('idea-thesis').textContent=idea?.thesis || '';
+    const synthetic=String(a?.data_source || '').toLowerCase().includes('synthetic');
+    q('idea-status').textContent=a ? `${synthetic?'Synthetic example · ':''}${a.replay_of?'Exact replay · ':''}${a.status} · ${policy?'Policy test':'Event study'}` : 'Untested idea';
+    q('idea-ev').textContent=number(m.ev_r_per_trade)?fmt(m.ev_r_per_trade,3)+'R':'—';
+    q('idea-ev').classList.toggle('loss',number(m.ev_r_per_trade)&&m.ev_r_per_trade<0);
+    q('idea-dollar').textContent=number(m.ev_dollars_per_trade)?money(m.ev_dollars_per_trade)+' per trade':'No trade EV recorded';
+    q('idea-rr').textContent=number(m.planned_reward_risk)?fmt(m.planned_reward_risk)+':1':'—';
+    q('idea-realized').textContent='Planned · realized '+(number(m.realized_reward_risk)?fmt(m.realized_reward_risk)+':1':'unavailable');
+    q('idea-sharpe').textContent=number(m.sharpe)?fmt(m.sharpe):'—';
+    q('idea-sessions').textContent=number(m.sessions)?`${m.sessions} sessions${m.sessions<30?' · short sample':''}`:'No daily estimate';
+    q('idea-dd').textContent=number(m.max_drawdown_pct)?fmt(m.max_drawdown_pct)+'%':'—';
+    q('idea-dd-dollar').textContent=number(m.max_drawdown_dollars)?money(m.max_drawdown_dollars)+' peak-to-trough':'No marked drawdown recorded';
+    const warning=q('idea-warning');warning.hidden=!(policy&&number(m.sessions)&&m.sessions<30);
+    warning.textContent=`Short sample: ${m.sessions} sessions. Sharpe can become extreme when daily returns barely vary. Treat this as a diagnostic, not a reliable performance estimate.`;
+    q('idea-sample').textContent=a ? `${symbol(a)} · ${a.start.slice(0,10)} to ${a.end.slice(0,10)} · ${policy?(m.trade_count??r.summary?.trades??'Unknown')+' trades':(r.event_count??'Unknown')+' eligible events'}` : 'No tests recorded';
+    const variant=data.variants.find(v=>v.id===a?.specification.id&&v.version===a?.specification.version);
+    const risk=r.policy?.recipe?.risk;
+    const description=readableRules(r.policy?.recipe?.entry?.rules || r.study?.event_rules);
+    q('idea-change').textContent=a ? `${a.specification.id} @ ${a.specification.version}. ${description?description+'. ':''}${risk?'Stop '+risk.stop_pct+'%, target '+risk.target_pct+'%, hold up to '+risk.max_hold_minutes+' minutes. ':''}${a.error?a.error.message:''}`:'Register an idea study to begin collecting evidence.';
+    if(a?.replay_of)q('idea-change').textContent+=` Exact replay of ${a.replay_of}; not an independent final test.`;
+    const protocol=data.protocols.find(p=>p.id===a?.protocol?.id);
+    const baseline=attempts.find(b=>protocol&&b.protocol?.id===protocol.id&&b.application.digest===a.application.digest&&b.start===a.start&&b.end===a.end&&b.specification.digest===protocol.baseline.digest&&b.status==='completed');
+    const baseEV=baseline?.result?.metrics?.ev_r_per_trade;
+    q('idea-delta').textContent=baseline?.experiment_id===a?.experiment_id&&a?'Baseline':number(baseEV)&&number(m.ev_r_per_trade)?'EV change: '+fmt(m.ev_r_per_trade-baseEV,3)+'R':'No matched policy baseline';
+    const study=q('idea-study');study.hidden=r.kind!=='event_study';
+    const censored=Object.values(r.analysis?.censored || {}).reduce((sum,n)=>sum+(number(n)?n:0),0);
+    const interval=Array.isArray(r.analysis?.interval)?r.analysis.interval.map(n=>fmt(n,4)+'%').join(' to '):'unavailable';
+    study.textContent=`Forward outcomes, not trading profit. ${r.analysis?.primary_label || ''} mean: ${fmt(r.analysis?.mean,4)}%. Usable: ${r.analysis?.usable??'unavailable'}. Censored: ${r.analysis?censored:'unavailable'}. Interval: ${interval}. Uncertainty: ${r.analysis?.uncertainty_status || 'unavailable'}.`;
+    const daily=r.daily_equity || [],capital=r.policy?.recipe?.risk?.starting_capital;
+    activePoints=daily.filter(p=>number(p.equity)).map(p=>({date:p.date.slice(5),value:p.equity}));
+    if(activePoints.length&&number(capital))activePoints.unshift({date:'Start',value:capital});
+    q('idea-equity-label').textContent=activePoints.length?money(activePoints[0].value)+' → '+money(activePoints.at(-1).value):'Unavailable';
+    q('idea-curve-note').textContent=activePoints.length?'Session-end points · maximum drawdown uses minute-close equity':'No equity series is recorded for this test.';
+    const recipe=q('idea-recipe');recipe.replaceChildren();
+    const fields=[['Mechanism',idea?.mechanism],['Reject if',idea?.falsification],['Applicability',idea?.applicability],['Data source',a?.data_source],['Entry rule',r.policy?.recipe?.entry?.rules || r.study?.event_rules],['Variation',variant?.rationale],['Assessment',data.assessments.map(x=>x.conclusion+' '+x.limitations).join(' / ')||'No assessment recorded']];
+    fields.forEach(([key,value])=>{if(value){[key,value].forEach(t=>{const s=document.createElement('span');s.textContent=t;recipe.append(s);});}});
+    q('idea-definitions').textContent=JSON.stringify({definitions:r.metric_definitions || {},unavailable:r.metric_unavailable_reasons || {},limitations:[...(r.limitations || []),...(r.analysis?.limitations || [])],study_analysis:r.analysis || null,policy:r.policy || r.study || {}},null,2);
+    draw();
+  }
+  function selectTests(wanted) {
+    const available=attempts.filter(a=>symbol(a)===q('idea-symbol').value&&period(a)===q('idea-period').value);
+    options(q('idea-test'),available.map(a=>[a.experiment_id,`${a.specification.id} @ ${a.specification.version} · ${a.replay_of?'exact replay · ':''}${a.status} · ${a.experiment_id.slice(4,12)}`]),wanted);
+    selected=available.find(a=>a.experiment_id===q('idea-test').value);render();
+  }
+  function selectPeriods(wanted,test) {
+    const periods=new Map();attempts.filter(a=>symbol(a)===q('idea-symbol').value).forEach(a=>periods.set(period(a),`${a.protocol?.split || 'exploratory'} · ${a.start.slice(0,10)}–${a.end.slice(0,10)} · ${a.protocol?.id || 'direct'}`));
+    options(q('idea-period'),[...periods],wanted);selectTests(test);
+  }
+  options(q('idea-symbol'),[...new Set(attempts.map(symbol))].map(s=>[s,s]),selected?symbol(selected):null);
+  q('idea-symbol').addEventListener('change',()=>selectPeriods());
+  q('idea-period').addEventListener('change',()=>selectTests());
+  q('idea-test').addEventListener('change',()=>{selected=attempts.find(a=>a.experiment_id===q('idea-test').value);render();});
+  attempts.forEach(a=>{const li=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=`${symbol(a)} / ${a.specification.id} / ${a.protocol?.split || 'exploratory'} / ${a.replay_of?'exact replay / ':''}${a.status}`;button.addEventListener('click',()=>{q('idea-symbol').value=symbol(a);selectPeriods(period(a),a.experiment_id);});li.append(button);if(a.error)li.append(document.createTextNode(' '+a.error.message));q('idea-history').append(li);});
+  q('idea-blocked').textContent=data.blocked_admissions.length?data.blocked_admissions.map(x=>`${x.protocol_id}: ${x.reason}`).join(' / '):'No blocked admissions recorded.';
+  new ResizeObserver(draw).observe(q('idea-equity'));
+  selectPeriods(selected?period(selected):null,selected?.experiment_id);
+})();
+</script>
+</body>
+</html>

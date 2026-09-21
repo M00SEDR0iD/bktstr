@@ -65,15 +65,26 @@ The stored engine PnL has six-decimal precision; normalized metrics inherit that
 precision. Initial risk uses the unrounded fixed notional from the policy.
 
 See the [R-metric example](examples/r-metrics-demo/README.md) and its linked
-[idea card](examples/r-metrics-demo/vwap-reclaim-idea-card.md). The older synthetic
+[visual idea card](examples/r-metrics-demo/vwap-reclaim-idea-card.html). The older synthetic
 demonstration is retained as a record of the prior metric contract.
 
 ## Files a human reviews
 
 Use an explicit persistent `BKTSTR_EXPERIMENT_DIR`. Its `research/reports/` directory
-contains `<idea-id>-idea-card.md` and `<experiment-id>-results.md`. The worker
-generates these after completion or failure. The card links every attempt and
-records categorized variations, disproof criteria, and assessment history.
+contains the default `<idea-id>-idea-card.html`, a secondary
+`<idea-id>-idea-card.md`, and `<experiment-id>-results.md`. The worker generates
+these after completion or failure. The visual card works offline and provides
+instrument, period/campaign, and variation selectors, headline outcomes, a
+session-end equity chart, and expandable history, definitions, and assessments.
+Failed and untested results remain visible; event observations are never presented
+as trade EV. The Markdown edition retains links to individual result exports.
+
+The visual card flags fewer than 30 sessions as a short sample. This is a display
+cue, not a statistical sufficiency threshold or a modification to stored metrics.
+Sharpe is unbounded; the synthetic example's near-identical daily losses create
+a tiny denominator and an extreme negative value. The full number remains visible.
+Publication uses the same exposure ledger as other exports. The authenticated
+`GET /api/v1/ideas/{id}/html` endpoint returns the same standalone page.
 
 Each test report contains the exact specification, period, application, results,
 limitations, pinned data/build references, and stored replay request. A report
