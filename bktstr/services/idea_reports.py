@@ -10,6 +10,7 @@ from ..research_ideas import canonical
 from .research_store import ResearchCatalog
 from .research_protocol import inspect_experiment
 from .backtest import to_json_value
+from .policy_metrics import HEADLINE_METRICS
 
 
 def _text(value):
@@ -130,6 +131,23 @@ def render_experiment_markdown(record):
         f'Specification: {_text(request["specification"]["id"])} at {_text(request["specification"]["version"])}', '',
         f'Application: {_text(request["application"]["id"])}', '',
         f'Protocol: {_display(request.get("protocol", "Uncontrolled exploration"))}', '']
+    if result.get('kind') == 'configured_backtest':
+        objective = ('Primary objective: net EV in R/trade.' if result.get('metric_definitions')
+                     else 'Historical result: original objective retained; current R-based metrics were not recorded.')
+        headline = ['## Primary outcomes', '', objective, '',
+                    '| Metric | Result |', '| --- | --- |']
+        for key, label in HEADLINE_METRICS:
+            headline.append(f'| {label} | {_display(result.get("metrics", {}).get(key))} |')
+        headline += ['', f'Trades: {result.get("metrics", {}).get("trade_count", result["summary"].get("trades"))}. '
+                      f'Scored sessions: {_display(result.get("metrics", {}).get("sessions"))}.', '',
+                      'R is initial planned stop risk. Net results include modeled slippage; commissions and borrow fees are not modeled.', '',
+                      'Drawdown samples minute-close marked equity. Sharpe uses all scored daily returns, 252 sessions/year and a zero risk-free rate.', '',
+                      'Historical results without this metric definition remain unavailable; they are not recalculated silently.', '']
+        for key, reason in result.get('metric_unavailable_reasons', {}).items():
+            headline += [f'- {_text(key)} unavailable: {_text(reason)}']
+        headline += ['']
+        at = lines.index('## What was tested')
+        lines[at:at] = headline
     if request.get('replay_of'):
         lines += [f'Exact replay of {_text(request["replay_of"])}. This is not an independent final test.', '']
     if record.error:
@@ -150,10 +168,13 @@ def render_experiment_markdown(record):
             lines += ['', 'Percent outcomes use the event close as reference. Confidence intervals do not establish profitability.', '']
         lines += ['### Exact study definition', '', '```json', json.dumps(result['study'], indent=2), '```', '']
     elif result.get('kind') == 'configured_backtest':
-        lines += ['## Simulated trading results', '', '| Measure | Result |', '| --- | --- |']
+        lines += ['## Supporting engine summary', '',
+                  'Legacy engine drawdown below uses closed trades and a negative sign. Use the marked-equity maximum drawdown above for new comparisons.', '',
+                  '| Measure | Result |', '| --- | --- |']
         for key, value in result['summary'].items():
             lines.append(f'| {_text(key).replace("_", " ").capitalize()} | {_display(value)} |')
-        lines += ['', '### Policy and rationale', '', '```json', json.dumps(result['policy'], indent=2), '```', '']
+        lines += ['', '### Metric definitions', '', '```json', json.dumps(result.get('metric_definitions', {}), indent=2), '```', '',
+                  '### Policy and rationale', '', '```json', json.dumps(result['policy'], indent=2), '```', '']
     lines += ['## Limitations', '']
     for limitation in result.get('limitations', []) + result.get('analysis', {}).get('limitations', []):
         lines.append('- ' + _text(limitation))
@@ -182,6 +203,23 @@ def export_idea_markdown(idea_id, store):
     catalog = ResearchCatalog(store)
     report = idea_report(idea_id, store)
     lines = [f'# Idea card: {_text(idea_id)}', '', 'Status: research record; no live-trading approval.', '']
+    lines += ['## Primary outcomes', '',
+              'Iterate on net EV (R/trade). Review RR, Sharpe, maximum drawdown, sample size and held-out evidence alongside it. Higher EV alone does not promote a variant.', '',
+              '| Test / specification | Instrument | Period | EV (R/trade) | EV ($/trade) | Planned RR | Realized RR (R) | Daily Sharpe | Max drawdown (%) | Max drawdown ($) | Trades |',
+              '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
+    for attempt in report['attempts']:
+        result = attempt.get('result') or {}
+        if result.get('kind') != 'configured_backtest':
+            continue
+        m = result.get('metrics', {})
+        experiment_id = attempt['experiment_id']
+        period = attempt['protocol']['split'] if attempt['protocol'] else 'exploratory'
+        values = ' | '.join(_display(m.get(key)) for key, _ in HEADLINE_METRICS)
+        name = f'{attempt["specification"]["id"]} @ {attempt["specification"]["version"]}'
+        period += f' / {attempt["start"][:10]} to {attempt["end"][:10]}'
+        lines.append(f'| [{_text(name)}]({experiment_id}-results.md) | {_text(attempt["instruments"]["subject"])} | {_text(period)} | {values} | {_display(result["summary"].get("trades"))} |')
+    lines += ['', 'Policy metrics require a trading simulation. Event studies retain forward-outcome statistics. Results stay separate by instrument and period; they are not a portfolio score.', '',
+              'Drawdown uses minute-close marked equity. Sharpe uses daily returns including inactive sessions, 252 sessions/year, and zero risk-free return. RR reports reward divided by risk.', '']
     for idea in report['revisions']:
         lines += [f'## {_text(idea["title"])} / {_text(idea["version"])}', '',
             '### Thesis', '', _text(idea['thesis']), '', '### Proposed mechanism', '', _text(idea['mechanism']), '',

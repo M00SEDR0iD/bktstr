@@ -17,6 +17,7 @@ research contracts, and implementation sequence, not a fund portfolio.
 | [Trade idea containers](TRADE_IDEA_CONTAINERS.md) | Adopted event research structure, reusable theses, study variants, and linked policies |
 | [Research foundation plan](plans/2026-09-20-trade-idea-research.md) | RF-A through RF-K implementation and acceptance requirements |
 | [Idea research guide](IDEA_RESEARCH_GUIDE.md) | Run studies, review Markdown idea cards and tests, and replay frozen evidence |
+| [R-based outcome example](examples/r-metrics-demo/README.md) | Primary EV in R/trade with RR, daily Sharpe, and marked-equity drawdown |
 | [Synthetic research example](examples/research-demo/README.md) | Generated idea card, study results, and policy test reports using artificial data |
 | [Research verification](RESEARCH_FOUNDATION_VERIFICATION.md) | Recorded test results, independent review fixes, and implementation limits |
 | [Cache architecture](CACHE_ARCHITECTURE.md) | Data reuse and reproducibility boundaries |

@@ -7,6 +7,12 @@ The [implementation plan](plans/2026-09-20-trade-idea-research.md) defines RF-A 
 
 ## Intent and research sequence
 
+The primary objective for trading-policy feature iteration is net EV in R/trade.
+Headline outcomes also include dollar EV, planned and realized reward/risk, daily
+Sharpe, and maximum drawdown. The [metric contract](IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes)
+defines each measure. Outcome estimates, sample size, and held-out evidence inform
+an assessment; a higher point estimate never automatically promotes a variation.
+
 An idea container holds a repeatable thesis, the observations used to investigate
 it, its categorized variations, and the evidence for any resulting trading policy.
 The owner should be able to explain an idea once and study it across explicitly

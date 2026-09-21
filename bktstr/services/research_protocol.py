@@ -30,7 +30,7 @@ class Protocol(Definition):
     attempt_budget: int = Field(gt=0)
     minimum_samples: int = Field(gt=0)
     stopping_rule: str = Field(min_length=1)
-    primary_metric: Literal['mean', 'total_pnl_dollars']
+    primary_metric: Literal['mean', 'total_pnl_dollars', 'ev_r_per_trade'] | None = None
     aggregation: Literal['equal_instrument']
     allowed_differences: list[str]
     analysis: dict | None = None
@@ -67,6 +67,8 @@ def _family_key(protocol, catalog):
 def register_protocol(document, catalog):
     _initialize(catalog)
     parsed = Protocol.model_validate(document).model_dump(mode='json')
+    if parsed['primary_metric'] is None:
+        parsed['primary_metric'] = 'mean' if parsed['kind'] == 'study' else 'ev_r_per_trade'
     catalog.require(parsed['idea'], 'idea')
     candidates = [catalog.require(x) for x in parsed['candidates']]
     if len({x.digest for x in candidates}) != len(candidates) or len(candidates) > parsed['candidate_budget']:
@@ -120,8 +122,12 @@ def register_protocol(document, catalog):
         previous_end, previous_stage = end, stages[split['stage']]
     if parsed['kind'] == 'study' and (parsed['analysis'] is None or parsed['primary_metric'] != 'mean'):
         raise ValueError('study analysis and primary mean required')
-    if parsed['kind'] == 'backtest' and parsed['primary_metric'] != 'total_pnl_dollars':
-        raise ValueError('backtest primary metric must be total_pnl_dollars')
+    if parsed['kind'] == 'backtest' and parsed['primary_metric'] != 'ev_r_per_trade':
+        # Historical immutable protocols remain readable and retryable as authored.
+        with closing(catalog.store._connect()) as db:
+            old = db.execute('SELECT document FROM research_protocols WHERE id=?', (parsed['id'],)).fetchone()
+        if not old or json.loads(old['document']) != parsed:
+            raise ValueError('new backtest primary metric must be ev_r_per_trade')
     revision = Revision('protocol', canonical(parsed))
     family = _family_key(parsed, catalog)
     if parsed['amendment_of']:
@@ -391,7 +397,19 @@ def run_protocol(protocol_id, store, *, execute=True, admit=True):
             detail.update(_study_contrast(baseline, record, catalog, protocol['analysis']))
             counts = [r.result['analysis']['usable'] for r in (baseline, record)]
         else:
-            detail['effect'] = record.result['summary']['total_pnl_dollars'] - baseline.result['summary']['total_pnl_dollars']
+            metric = protocol['primary_metric']
+            detail['metric'] = metric
+            detail['unit'] = 'R/trade' if metric == 'ev_r_per_trade' else 'dollars'
+            def value(r, key):
+                return r.result['summary'].get(key) if key == 'total_pnl_dollars' else r.result.get('metrics', {}).get(key)
+            a, b = value(baseline, metric), value(record, metric)
+            detail['effect'] = b - a if a is not None and b is not None else None
+            from .policy_metrics import HEADLINE_METRICS
+            detail['metric_changes'] = {}
+            for key, _ in HEADLINE_METRICS:
+                a, b = value(baseline, key), value(record, key)
+                detail['metric_changes'][key] = dict(baseline=a, candidate=b,
+                    difference=b-a if a is not None and b is not None else None)
             counts = [r.result['summary']['trades'] for r in (baseline, record)]
         detail['status'] = 'descriptive' if min(counts) >= protocol['minimum_samples'] else 'inconclusive_sample_size'
         comparisons.append(detail)
@@ -401,6 +419,7 @@ def run_protocol(protocol_id, store, *, execute=True, admit=True):
         for candidate in {x['candidate'] for x in comparisons}:
             values = [x['effect'] for x in comparisons if x['split'] == split and x['candidate'] == candidate and x['effect'] is not None]
             aggregate.append(dict(split=split, candidate=candidate, instruments=len(values),
+                metric=protocol['primary_metric'],
                 expected_applications=len(protocol['applications']), mean=float(np.mean(values)) if values else None,
                 dispersion=float(np.std(values)) if values else None,
                 complete=len(values) == len(protocol['applications'])))

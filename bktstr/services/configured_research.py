@@ -103,12 +103,19 @@ def _execute_policy(record, store):
                 raise ValueError('policy split must include complete pinned sessions')
     result = asyncio.run(run_configured_strategy(manifest, inputs=SnapshotProvider(snapshot)))
     check_cancelled(record.experiment_id, catalog)
+    from .policy_metrics import policy_metrics
+    outcomes = policy_metrics(trades=to_json_value(result.trades),
+        bars=snapshot.frame(app.document['instruments']['subject']),
+        schedule=[s for s in snapshot.document['schedule'] if instant(s['open']) >= instant(request['start']) and instant(s['close']) <= instant(request['end'])],
+        risk=manifest.document['risk'], slippage_bps=manifest.document['execution']['slippage_bps'])
     payload = dict(kind='configured_backtest', policy=policy.document, application=app.document,
         manifest={'digest':manifest.digest, 'document':to_json_value(manifest.document)},
-        summary=to_json_value(result.summary), trades=to_json_value(result.trades),
+        summary=to_json_value(result.summary), trades=outcomes['trades'],
+        metrics=outcomes['metrics'], metric_definitions=outcomes['definitions'],
+        metric_unavailable_reasons=outcomes['unavailable_reasons'], daily_equity=outcomes['daily_equity'],
         event_mapping='unavailable: policy and event-study paths are separate; no implied one-to-one mapping',
         limitations=['Fixed-bps costs and next-bar execution; existing stop/gap assumptions remain.',
-                     'Independent symbol simulation, not a shared-cash portfolio.'])
+                     'Independent symbol simulation, not a shared-cash portfolio.'] + outcomes['limitations'])
     provenance = dict(dataset=snapshot.id, build=snapshot.document['build'],
         consumed_inputs=[snapshot.id, policy.digest, app.digest],
         attached_evidence=policy.document['evidence'] + policy.document['contrary_evidence'],

@@ -3,6 +3,34 @@
 Verified locally on September 20, 2026. This records software tests and a synthetic
 workflow demonstration. It does not certify market performance or a hosted deployment.
 
+## R-based policy outcomes update, September 21, 2026
+
+Net EV in R/trade is now the default and required objective for new policy
+campaigns. Headline results include dollar EV, planned/realized reward-to-risk,
+daily Sharpe, and minute-close marked-equity maximum drawdown. Existing stored
+results and the older baseline API retain their historical metric definitions.
+
+- Complete suite: **584 passed**, with the same five pre-existing warnings.
+- Nine new metric tests cover hand-calculated R expectancy and reward/risk,
+  size invariance, open-position drawdown, daily returns with inactive sessions,
+  undefined outcomes, nonpositive equity, same-bar exits, missing marks, campaign
+  objectives, headline reports, and legacy protocol registration.
+- Final documentation checks: **39 passed**. Release consistency and Python
+  compilation passed. The cache benchmark retained one computation for 120,000
+  rows followed by a cache hit.
+- Independent review found no blocking calculation issues. Report labels were
+  corrected for historical objectives, and headline rows now include version/date
+  information.
+- The [R-based example](examples/r-metrics-demo/README.md) completed six studies
+  and eight policy runs, with a [generated idea card](examples/r-metrics-demo/vwap-reclaim-idea-card.md)
+  and linked individual results. Earlier example files remain unchanged.
+
+The example's three-session policy splits and artificial prices are unsuitable for
+market conclusions. Metric assumptions and undefined-value behavior are recorded
+in the [research guide](IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes). Missing
+scored minute marks fail a configured policy run. Drawdown sampling misses
+intraminute extremes. Commission and borrow costs remain unmodeled.
+
 ## Results
 
 | Check | Observed result |

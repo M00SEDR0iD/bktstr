@@ -216,6 +216,12 @@ Production broker order endpoints remain outside scope.
 
 ## Evaluation
 
+Net EV in R/trade is the primary objective when iterating on trading-policy
+features. Idea cards and test reports also show dollar EV, planned and realized
+reward/risk, daily Sharpe, and maximum drawdown. New configured research uses the
+[versioned metric contract](IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes), while
+historical results and the legacy baseline API retain their original definitions.
+
 Compare technical-only, numerical-context, and numerical-plus-Jev variants with
 identical dates, data, sizing, costs, and exits. Count rejected opportunities,
 trades, exposure, net performance, open-position drawdown, and sensitivity to costs.

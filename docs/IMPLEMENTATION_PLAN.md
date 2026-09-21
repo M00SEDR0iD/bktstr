@@ -34,6 +34,8 @@ Task 0. Do not infer that planned API fields already exist.
 - Initial scope is equity/ETF minute bars and holding periods of minutes to hours.
 - Live-money trading is outside the next implementation scope.
 - Strategies stay frozen during runs; revisions create new versions.
+- Policy iteration optimizes net EV in R/trade, with RR, daily Sharpe, maximum
+  drawdown, dollar EV, sample size, and held-out evidence reported alongside it.
 - Use deterministic numerical calculations and explicitly bounded Jev judgments.
 - Source availability, revisions, model-response timing, and causal fills are required.
 - Jev evidence has a Tier C floor and cannot upgrade lower-trust inputs.

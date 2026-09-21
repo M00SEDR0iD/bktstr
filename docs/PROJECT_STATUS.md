@@ -56,8 +56,10 @@ improve reuse but do not establish transferability between stocks.
 
 Fixed-bps costs and simplified stop/target behavior remain. Spread, commissions,
 borrow costs, partial fills, adverse gap treatment, shared cash, and exposure
-limits need a versioned execution/accounting model. Current drawdown uses closed
-trade P&L; the legacy Sharpe is a trade-return statistic.
+limits need a versioned execution/accounting model. New configured research leads
+with net EV in R/trade, planned/realized RR, daily Sharpe, and minute-close marked
+drawdown. The older baseline API retains closed-trade drawdown and its trade-return
+Sharpe. The [research guide](IDEA_RESEARCH_GUIDE.md) defines the distinction.
 
 The new archive does not make those assumptions realistic. Independent symbol
 tests are not a shared-account portfolio. Minute OHLC bars do not reliably establish

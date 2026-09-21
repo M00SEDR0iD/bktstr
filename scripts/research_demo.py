@@ -28,6 +28,7 @@ def write_demo_reports(catalog, destination, study_results, policy_results, card
         f'Policy campaign: {policy_results["status"]}, {len(policy_results["cells"])} attempts.', '',
         'Development, validation, and final sessions are chronological and disjoint.', '',
         'The two artificial instruments use scaled versions of the same prices. Matching results demonstrate consistent application, not independent market confirmation.', '',
+        'Each policy split has only three synthetic sessions. Extremely large Sharpe values reflect this artificial, low-variance sample and cannot establish market performance.', '',
         '## Study comparisons', '',
         'Differences are candidate minus baseline mean five-minute return, in percentage points. Intervals use session-block resampling and remain exploratory.', '',
         '| Variation | Instrument | Difference | Interval | Common / added / removed events |',
@@ -36,10 +37,11 @@ def write_demo_reports(catalog, destination, study_results, policy_results, card
         interval = 'Unavailable' if row['interval'] is None else ' to '.join(f'{v:.6f}' for v in row['interval'])
         lines.append(f'| {names[row["candidate"]]} | {row["symbol"]} | {row["effect"]:.6f} | {interval} | {row["common_events"]} / {row["added_events"]} / {row["removed_events"]} |')
     lines += ['', '## Policy comparisons', '',
-        'Validation-period differences are candidate minus baseline simulated PnL in dollars, including the configured execution assumptions. Each instrument is tested independently.', '',
-        '| Variation | Instrument | PnL difference ($) | Status |', '| --- | --- | --- | --- |']
+        'Validation-period differences are candidate minus baseline net EV in R/trade. Each instrument is tested independently. The idea card shows RR, daily Sharpe, and marked-equity drawdown alongside EV.', '',
+        '| Variation | Instrument | EV difference (R/trade) | Status |', '| --- | --- | --- | --- |']
     for row in policy_results['comparisons']:
-        lines.append(f'| {names[row["candidate"]]} | {row["symbol"]} | {row["effect"]:.3f} | {row["status"]} |')
+        effect = 'Unavailable' if row['effect'] is None else f'{row["effect"]:.6f}'
+        lines.append(f'| {names[row["candidate"]]} | {row["symbol"]} | {effect} | {row["status"]} |')
     lines += ['', '## Assessment', '',
         'The workflow completed and retained every declared attempt. These manufactured observations support no market conclusion. Review the linked test reports for exact rules, dates, assumptions, limitations, and replay references.', '']
     atomic_text(destination / 'README.md', '\n'.join(lines))
@@ -109,7 +111,7 @@ def run_demo(root, reports=None):
         baseline=policy.ref, candidates=policies, final_candidates=[policy.ref], attempt_budget=8,
         splits=[dict(name='validation',stage='validation',start=schedule[6]['open'],end=schedule[8]['close']),
                 dict(name='final',stage='final',start=schedule[9]['open'],end=schedule[11]['close'])],
-        primary_metric='total_pnl_dollars', allowed_differences=['entry.rules','risk.max_hold_minutes']), catalog)
+        primary_metric='ev_r_per_trade', allowed_differences=['entry.rules','risk.max_hold_minutes']), catalog)
     policy_results = run_protocol(policy_protocol.id, store)
     card = export_idea_markdown(idea.id, store)
     if reports:

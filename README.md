@@ -14,6 +14,11 @@ and execution behaviors require code.
 
 ## Current capability and planned work
 
+Trading-idea policy comparisons use **net EV in R/trade** as their primary
+objective. Generated cards and reports show dollar EV, planned and realized RR,
+daily Sharpe, and maximum drawdown alongside it. See the
+[metric definitions](docs/IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes).
+
 The existing application runs historical equity/ETF research. It provides typed
 backtests, parameter sweeps, comparisons, durable experiments, market-data
 inspection, deterministic caches, and evidence provenance. Its registered

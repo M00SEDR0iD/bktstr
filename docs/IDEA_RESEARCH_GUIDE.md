@@ -3,6 +3,71 @@
 The research foundation supports equity/ETF minute-bar event studies and frozen
 policies. Jev, active macro gates, paper sessions, and broker execution remain pending.
 
+## Primary policy outcomes
+
+New policy campaigns optimize **net EV in R/trade**. This is the default and the
+required primary metric for newly registered backtest protocols. Study protocols
+continue to compare their declared forward-outcome mean. Existing frozen protocols
+and results retain their original metrics; changing objectives requires a new
+protocol and does not reset exposure history or research budgets.
+
+The idea card and individual test reports lead with these outcomes:
+
+| Metric | Version 1 definition |
+| --- | --- |
+| EV, R/trade | Mean of each trade's net PnL divided by its initial planned dollar risk, including breakeven trades |
+| EV, dollars/trade | Mean net PnL per completed trade |
+| Planned reward/risk | Initial target percentage divided by initial stop percentage |
+| Realized reward/risk | Mean positive net R divided by the magnitude of mean negative net R |
+| Daily Sharpe | Mean daily equity return divided by sample standard deviation, multiplied by sqrt(252), using zero risk-free return |
+| Maximum drawdown | Largest equity decline from a previous peak, including starting capital, in dollars and percent as positive loss magnitudes |
+
+For the current fixed-notional policy engine, initial dollar risk is filled-entry
+notional times stop percentage divided by 100. It is frozen at entry and excludes
+prospective exit costs. A 100-dollar planned risk and 25-dollar net profit give
+0.25R. Stop changes alter this denominator; increases in R/trade must still be
+reviewed alongside dollar EV, loss size, and drawdown. Losses can exceed 1R.
+
+Net PnL includes modeled entry and exit slippage. Commissions, borrow fees, and
+other unimplemented costs are not silently estimated. R is computed per trade
+before averaging; position-size changes alone cannot improve normalized EV.
+
+Open positions are marked at each minute close; exited positions settle at the
+engine's recorded net PnL. The resulting marked equity includes unrealized changes
+for drawdown. Daily returns use each scored session's final equity divided by
+previous session equity, with starting capital for the first session. Inactive
+sessions remain in the sample. This does not simulate shared cash across symbols.
+Configured policy metrics require every scored minute; missing marks fail the run
+rather than silently understate drawdown, including with exploratory snapshots.
+Intraminute extremes are not observable from this equity sampling, and square-root
+annualization does not correct for serial dependence or a short sample.
+
+No trades means unavailable EV. Realized RR needs both a winner and a loser.
+Sharpe is unavailable with fewer than two sessions, zero daily-return variance,
+or nonpositive marked equity. Reasons are stored and rendered. A flat, no-trade
+equity path has zero drawdown. Undefined values are never represented as infinity.
+
+Campaign comparisons lead with candidate-minus-baseline EV in R/trade and include
+baseline, candidate, and difference values for every headline metric. Positive
+drawdown differences mean worse drawdown. Trade-count requirements and descriptive
+status remain visible; a high sample EV does not automatically promote a variant.
+Compare the same instruments, data, and chronological windows. Keep total profit,
+trade frequency, uncertainty, and held-out results as supporting evidence.
+
+Structured policy results expose `metrics`, `metric_definitions`,
+`metric_unavailable_reasons`, and `daily_equity`. Each trade adds
+`initial_risk_dollars` and `net_r`. Numerical build identity includes these formulas.
+The legacy `summary.max_drawdown_pct` remains a negative closed-trade statistic;
+the new positive marked-equity metric is `metrics.max_drawdown_pct`. The older
+baseline API's trade-return Sharpe is unchanged and must not be mixed with the new
+daily Sharpe. Historical results without the new fields display unavailable values.
+The stored engine PnL has six-decimal precision; normalized metrics inherit that
+precision. Initial risk uses the unrounded fixed notional from the policy.
+
+See the [R-metric example](examples/r-metrics-demo/README.md) and its linked
+[idea card](examples/r-metrics-demo/vwap-reclaim-idea-card.md). The older synthetic
+demonstration is retained as a record of the prior metric contract.
+
 ## Files a human reviews
 
 Use an explicit persistent `BKTSTR_EXPERIMENT_DIR`. Its `research/reports/` directory

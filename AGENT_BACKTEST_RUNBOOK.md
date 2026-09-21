@@ -61,8 +61,12 @@ Change one layer at a time:
 2. Baseline plus numerical macro/market/sector conditions.
 3. The same strategy plus a frozen Jev interpretation, once implemented.
 
-Report opportunity counts before and after filters, trade counts, exposure,
-net results, drawdown, cost sensitivity, and results by period and instrument.
+Lead policy comparisons with net EV in R/trade and its change from the baseline.
+Show dollar EV, planned and realized reward/risk, daily Sharpe, and maximum
+drawdown alongside it. Use the [metric contract](docs/IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes)
+and distinguish the legacy API's older metric conventions. Report opportunity
+counts before and after filters, trade counts, exposure, cost sensitivity, and
+results by period and instrument. Higher EV alone never promotes a policy.
 Keep unavailable metrics explicitly unavailable. Small samples and zero-trade
 variants are findings, not reasons to discard a run. Separate development results
 from held-out results and record every inspection of final evaluation data.

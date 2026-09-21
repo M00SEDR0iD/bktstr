@@ -238,3 +238,14 @@ semantic version, and content digest.
 Canonical experiment polling supports `event_study` and `configured_backtest`.
 Completed/failed research jobs generate Markdown under the persistent research
 root. See the [idea research guide](IDEA_RESEARCH_GUIDE.md) for interpretation.
+
+New backtest protocols default to and require `primary_metric: "ev_r_per_trade"`.
+Study protocols default to `mean` and still require an analysis label. Previously
+stored protocols retain their declared objectives; they are not migrated in place.
+Configured results include `metrics`, `metric_definitions`,
+`metric_unavailable_reasons`, and `daily_equity`. Trades include
+`initial_risk_dollars` and `net_r`. Policy comparisons provide `metric`, `unit`,
+primary `effect`, and `metric_changes` with baseline/candidate/difference for all
+headline outcomes. Undefined values are null. See the
+[metric contract](IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes) for formulas,
+sampling, modeled costs, and differences from the legacy baseline API.

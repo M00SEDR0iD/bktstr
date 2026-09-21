@@ -48,6 +48,12 @@ idea card and linked Markdown test reports. Publishing reports records data expo
 
 ## Research invariants
 
+- Use net EV in R/trade as the primary objective for new policy comparisons.
+  Keep dollar EV, planned and realized reward/risk, daily Sharpe, and maximum
+  drawdown visible alongside it. R is initial planned stop risk, not realized loss.
+  Review sample size and held-out evidence; higher EV alone never promotes a policy.
+  Use the versioned metric definitions in the research guide. Event observations
+  are not trade EV. Preserve historical metric conventions on saved results.
 - Freeze strategy configuration, question definitions, data versions, and execution
   assumptions for a run. Revisions create new versions and experiments.
 - Compute numerical indicators in code. Use Jev only for explicitly defined
