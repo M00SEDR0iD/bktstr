@@ -160,8 +160,14 @@ larger model autonomy would add complexity before closing the current gaps.
 Tasks 0-2 establish documentation checks, strict strategy configuration, and macro
 evidence contracts. The user has now prioritized
 [trade idea containers and research foundations](TRADE_IDEA_CONTAINERS.md) before
-Task 3. This closes the durable-workflow and controlled-comparison gaps identified
-above. Jev acquisition and replay follow that milestone. Tasks 4-6 turn the components into shared decisions, controlled
+Task 3. The adopted direction adds event studies before policy development:
+thesis, event definition, causal context, separate outcomes, exploratory study,
+then a frozen trading policy. Research variants and policy variants share an idea
+but retain separate definitions and results. RF-A through RF-K remain planned.
+
+This milestone is intended to close the durable-workflow and controlled-comparison
+gaps while adding the missing event-research layer. Jev acquisition and replay
+follow it. Tasks 4-6 turn the components into shared decisions, controlled
 research, and forward paper testing. Task 7 adds the separate broker demo.
 
 The most valuable standalone milestone is a saved theory that produces a controlled

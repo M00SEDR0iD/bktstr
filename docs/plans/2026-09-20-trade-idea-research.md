@@ -1,295 +1,378 @@
-# Trade idea containers and controlled research implementation plan
+# Event research and trade idea implementation plan
 
-> For agentic workers: use superpowers:executing-plans for inline execution,
+> **For agentic workers:** Use superpowers:executing-plans for inline execution,
 > or superpowers:subagent-driven-development if the user chooses delegated work.
-> Implement and verify one task at a time. This is a proposed plan, not completed code.
+> Implement and verify one task at a time. This document is a plan, not delivered code.
 
-**Goal:** Turn reusable trade theses and categorized variants into durable,
-repeatable, controlled experiments before Jev integration.
+**Goal:** Carry a reusable thesis through event research, a frozen trading policy,
+and durable controlled backtests before Jev integration.
 
-**Architecture:** Add typed idea/modifier/application/protocol contracts above
-the current strategy compiler. Extend the existing experiment database and worker
-with durable configured runs, pinned data, campaign admission, and history/report
-operations. Keep the existing simulation and baseline API behavior.
+**Architecture:** Add a research path above the current numerical registry and
+beside the deterministic trading engine. Event studies and configured backtests
+share frozen datasets, one SQLite catalog/experiment lifecycle, campaign admission,
+history, and reporting. Keep the existing baseline API and engine behavior.
 
 **Tech stack:** Python 3.12, Pydantic/frozen dataclasses, FastAPI, SQLite, pandas,
-existing caches and artifact publication. No new service or dependency is required.
+existing caches and artifact storage. No new service is required.
 
-**Spec:** [Reusable trade ideas and controlled research](../TRADE_IDEA_CONTAINERS.md).
+**Spec:** [Reusable trade ideas and event research](../TRADE_IDEA_CONTAINERS.md).
+
+**Status:** RF-A through RF-K are unstarted. This plan replaces the earlier RF-A
+through RF-H recipe-first sequence at the same path. Original Tasks 0-2 are complete.
+Original Tasks 3-7 keep their IDs and follow the research foundation milestone.
 
 ## Global constraints
 
 - BKTSTR remains independent of fund/account-specific assumptions.
-- Templates contain roles and requirements; applications supply explicit symbols.
-- The initial executable scope remains equity/ETF minute bars.
-- Unsupported rules, macro evaluators, and asset profiles fail before acquisition.
-- Prose is documentation; only registered typed components execute.
-- Every effective configuration and every artifact reference is frozen before use.
-- One existing runtime, one experiment lifecycle, one local research archive.
-- Protect baseline semantics; new APIs are additive and capabilities reflect delivery.
-- Preserve all admitted attempts and final-data exposures. No deletion resets evidence.
-- Existing execution economics remain version 1.0.0; this work does not improve fills.
-- No Jev acquisition, live trading, or automatic paper execution in this phase.
+- The first executable scope is equity/ETF minute bars and holding periods of minutes to hours.
+- Templates declare roles; applications bind symbols, calendars, units, and data.
+- Separate causal predictors from future outcome labels in types and artifacts.
+- Persist all eligible events, not only filled trades or profitable observations.
+- Freeze research definitions, datasets, analysis choices, and execution assumptions.
+- Hypothetical macro scenarios cannot become observed evidence or canonical results.
+- Use one existing experiment lifecycle and one local research archive.
+- Preserve baseline API and execution version 1.0.0 semantics.
+- No automated model search, Jev acquisition, broker orders, or paper runner in this phase.
+- First-touch barrier labels are outside this milestone.
+- Public capability metadata changes only when an operation is implemented.
+
+## Delivery units and file ownership
+
+| Unit | Tasks | Independently useful outcome |
+| --- | --- | --- |
+| Idea and event records | A-D | A portable idea creates an inspectable event dataset with causal inputs and separate outcomes |
+| Durable controlled studies | E-G | A stored study reports context relationships, uncertainty, and a complete search history |
+| Policy and research workflow | H-K | Evidence links to a frozen policy, comparisons, searchable history, and offline replay |
+
+| File or group | Responsibility |
+| --- | --- |
+| `bktstr/research_ideas.py`, `idea_resolution.py` | Immutable idea/study/policy/modifier/application records and pure resolution |
+| `bktstr/research_components.py` | Typed component catalog and event/label contracts; reuses numerical registry |
+| `bktstr/dataset_snapshots.py` | Immutable inputs, pinned session schedule, coverage audit, offline provider |
+| `bktstr/event_research.py` | Candidate detection, causal feature materialization, separate labels |
+| `bktstr/services/research_store.py`, `configured_research.py` | Catalog persistence and durable research operations |
+| `bktstr/services/research_protocol.py` | Admission, budgets, splits, exposure, campaign reconciliation |
+| `bktstr/services/event_studies.py` | Declared group comparisons, distributions, uncertainty, diagnostics |
+| `bktstr/services/idea_reports.py` | Readable idea card and combined evidence/history |
+| Existing runtime, engine, registry, API, experiment store | Shared execution, measurements, additive access and worker integration |
+
+All named new files are proposed. Inspect existing seams before each task; do not
+duplicate a registry, backtest engine, or queue under these names.
 
 ## Review focus
 
 | Failure mode | Required behavior | Owner |
 | --- | --- | --- |
-| A changed parent or modifier alters an old result | Resolve pinned revisions; reject identity/content conflicts | A-B |
-| Rebinding a stock silently supplies unsuitable data or units | Validate role requirements and profile before acquisition | B-C |
-| A worker dies between budget admission and child creation | Atomic reservation and stable logical identity; reconcile existing child | D-E |
-| A new campaign hides final-data reuse or variant attempts | Cross-campaign exposure and lineage-aware budget history | E-F |
-| A macro assumption or attached packet appears consumed when it was not | Block unsupported variants; distinguish scenario, reference, and consumed evidence | B, D, G |
+| A future return or revised feature leaks into an event filter | Separate label interface; reject unavailable predictors | B, D, H |
+| Missing minutes or an early close changes a horizon silently | Pinned schedule and explicit coverage/censor reasons | C-D |
+| Different samples, overlapping labels, or searched horizons inflate evidence | Explicit estimand, pairing rules, block uncertainty, full search ledger | F-G |
+| A restart or renamed idea resets budgets or final-data exposure | Atomic admission, stable identities, overlap-aware shared ledger | E-F, I |
+| A context association is presented as executable profit | Separate study and policy reports, promotion rationale, execution limits | G-H, J |
 
-## Current seams to reuse
+## RF-A. Define the idea card and immutable revision model
 
-- `bktstr/strategy_config.py`: `compile_strategy` already returns a frozen manifest.
-- `bktstr/runtime.py`: `run_configured_strategy` already shares the orchestrator,
-  but does not persist an experiment or accept pinned offline data directly.
-- `bktstr/services/experiments.py`: SQLite records, artifacts, submission, and worker
-  leases exist. Extend their lifecycle rather than saving ad hoc result files.
-- `bktstr/services/backtest.py`: typed result projection, sweeps, and comparisons
-  exist; public request validation currently targets the baseline registry.
-- `bktstr/macro.py` / `evidence_packets.py`: frozen source and packet contracts exist;
-  they do not currently power trading gates.
-- `bktstr/api/routes.py`: authenticated submission and retrieval by experiment ID
-  exist; catalog/history/protocol operations are new.
+**Files:** Create `bktstr/research_ideas.py`, `tests/test_research_ideas.py`,
+and `examples/ideas/vwap-continuation.json`.
 
-## A. Define the idea card and revision contracts
+**Interfaces:** Strict frozen `IdeaRevision`, `StudySpec`, `PolicyRevision`,
+`ModifierRevision`, `VariantRevision`, and `ApplicationSpec` types.
+Provide `parse_idea(document) -> IdeaRevision` and equivalent parsers for the other
+five types. Canonical JSON and digests are shared, with distinct narrative and
+semantic identities. `VariantRevision.kind` is `study` or `policy`.
 
-**Files:** Create `bktstr/research_ideas.py`, `tests/test_research_ideas.py`, and
-`examples/ideas/vwap-continuation.json`. Add authoring guidance to
-`docs/TRADE_IDEA_CONTAINERS.md` as features become implemented.
+- [ ] Write tests rejecting unknown fields, mutable nested state, missing disproof
+  criteria, duplicate/conflicting revision identity, unpinned ancestry, and policy
+  fields in a study modifier.
+- [ ] Run `python -m pytest tests/test_research_ideas.py -q`; confirm contract failures.
+- [ ] Implement the records, including an idea with no policy and explicit links
+  from a policy to study results and a promotion rationale.
+- [ ] Add a toy VWAP-reclaim idea. Its event is a same-session close crossing above
+  VWAP; research variants alter declared context/labels, policy variants alter
+  selection or risk. All outcomes in the example are untested.
+- [ ] Verify key-order stability and semantic-versus-wording revisions; commit.
 
-**Interfaces:** `parse_idea(document) -> IdeaRevision`;
-`parse_modifier(document) -> ModifierRevision`;
-`parse_variant(document) -> VariantRevision`;
-`parse_application(document) -> ApplicationSpec`.
-Types are frozen and contain canonical digests. `VariantRevision` pins its idea,
-parent, and ordered modifier IDs/versions/digests. Categories are organization only.
+**Acceptance:** One simple card expresses an idea before any trading rule has been
+chosen. Stock names, dates, and results remain separate bindings and evidence.
 
-- [ ] Write tests for unknown fields, missing falsification, duplicate/conflicting
-  revision identity, mutable nested inputs, invalid units, unresolved references,
-  and secret/account fields outside the schema.
-- [ ] Run `python -m pytest tests/test_research_ideas.py -q`; observe missing-contract failures.
-- [ ] Implement strict records and deterministic canonicalization. Separate semantic
-  recipe digests from descriptive revision digests, so a wording edit is visible
-  without pretending a new numerical strategy was tested.
-- [ ] Include a readable toy idea with base, entry confirmation, benchmark, risk,
-  and unavailable macro variations; no universal return or portability claim.
-- [ ] Verify key-order stability, nested immutability, and fresh revision identities.
-- [ ] Run focused tests and commit the contracts/example together.
+## RF-B. Define reusable event, context, reference, and label components
 
-**Acceptance:** One human-readable card can describe a portable thesis and its
-named variations without embedding actual run dates or instruments in the recipe.
+**Files:** Create `bktstr/research_components.py`,
+`tests/test_research_components.py`; extend `bktstr/measurements.py` and
+`bktstr/variable_registry.py` only for reusable missing numerical definitions.
 
-## B. Resolve variants and bind applications to the existing compiler
+**Interfaces:** `ComponentCatalog` resolves exact `ComponentRevision` references.
+`resolve_study(spec, catalog) -> ResolvedStudy` produces only registered components.
+Predictor inputs are `CausalInputs`; label inputs are `OutcomeInputs`, with no
+conversion into a predictor lookup.
 
-**Files:** Create `bktstr/idea_resolution.py`, `tests/test_idea_resolution.py`.
-Modify `bktstr/strategy_config.py` only if an additive adapter needs a public helper.
+- [ ] Test that role, numeric/boolean/ordinal value type, units, and evidence trust
+  remain independent. Reject a label in a predictor dependency graph, cycles,
+  unknown formulas, and missing availability rules.
+- [ ] Run `python -m pytest tests/test_research_components.py -q`; confirm failures.
+- [ ] Define versioned event detector, context, reference, and label contracts.
+  Include units, inputs, lookback, availability, missing behavior, and profile.
+- [ ] Reuse existing VWAP, RSI, volume ratio, and numerical regime measurements.
+  Add only the fixture's missing measurements with explicit formulas and timing.
+- [ ] Implement initial label definitions for fixed-horizon returns and favorable/
+  adverse excursions, with explicit reference price, elapsed session-time horizon,
+  boundary behavior, and overlap declaration. Defer first-touch barriers.
+- [ ] Run component and existing measurement tests; commit.
 
-**Interfaces:** Consumes A records and an immutable `RevisionCatalog` lookup;
-`resolve_variant(variant, catalog) -> ResolvedRecipe`;
-`bind_recipe(recipe, application, run_window) -> StrategyManifest`.
-`ResolvedRecipe` contains the full effective settings, requirements, ordered
-modifier provenance, and differences against parent/baseline.
+**Acceptance:** A label cannot be used by an entry rule; a context value can remain
+continuous without first becoming a boolean strategy gate.
 
-- [ ] Test cycles, missing pinned revisions, incompatible modifier combinations,
-  field-assignment conflicts, unknown capabilities, missing benchmark bindings,
-  and attempts to execute scenario/unavailable macro declarations.
-- [ ] Run `python -m pytest tests/test_idea_resolution.py -q`; observe resolver failures.
-- [ ] Implement bounded parent resolution with explicit modifier composition and
-  role binding. No implicit sector benchmark, ticker-derived default, or arbitrary code.
-- [ ] Convert supported resolved recipes into today's strict strategy document,
-  then call `compile_strategy`. Preserve existing parameter validation order.
-- [ ] Test the same recipe on two bindings: same recipe digest, different resolved
-  manifest/application identities; changed rules create a different recipe digest.
-- [ ] Run resolver/config/direct-runtime tests and commit.
+## RF-C. Freeze datasets, session schedules, and replay inputs
 
-**Acceptance:** An instrument change is a new application of a fixed recipe;
-changing a trading rule creates a traceable variant. Unsupported intent is explicit.
+**Files:** Create `bktstr/dataset_snapshots.py`,
+`tests/test_dataset_snapshots.py`; modify `bktstr/runtime.py` and
+`bktstr/orchestrator.py` at dependency-injection/provenance boundaries.
 
-## C. Freeze datasets and provide an offline replay input
+**Interfaces:** `freeze_dataset(requests, provider, schedule, artifact_store) -> DatasetSnapshot`;
+`snapshot_provider(snapshot_id, artifact_store) -> SnapshotProvider`.
+Add optional frozen inputs to `run_configured_strategy(document, *, inputs=None)`.
+The supplied session schedule is a versioned, pinned artifact, not inferred from
+the bars. Initial schedules may be explicitly supplied and validated.
 
-**Files:** Create `bktstr/dataset_snapshots.py`, `tests/test_dataset_snapshots.py`.
-Modify `bktstr/runtime.py` and `bktstr/orchestrator.py` only at dependency injection
-and input provenance boundaries; reuse bar/cache serialization where appropriate.
+- [ ] Test changed upstream data, corrupted artifacts, adjustment/unit mismatch,
+  duplicates, out-of-order bars, missing minutes, warm-up, holiday/early-close
+  schedules, and an offline miss.
+- [ ] Run `python -m pytest tests/test_dataset_snapshots.py -q`; confirm failures.
+- [ ] Persist raw/derived hashes, source and formula/build identity, adjustment
+  convention, requested/actual coverage, and schedule provenance. Use safe JSON/CSV
+  for imported data, not untrusted pickle deserialization.
+- [ ] Audit expected bars against the supplied schedule. A controlled study blocks
+  missing required coverage; exploratory exclusions are explicit and counted.
+- [ ] Publish artifacts atomically before marking ready. Replay missing/corrupt
+  inputs fails without network fallback.
+- [ ] Verify current backtests retain numerical equivalence and baseline session
+  semantics; the new research path uses the pinned schedule. Commit.
 
-**Interfaces:** `freeze_dataset(requests, provider, artifact_store) -> DatasetSnapshot`;
-`snapshot_provider(snapshot_id, artifact_store) -> SnapshotProvider`;
-`run_configured_strategy(document, *, inputs=None) -> StrategyRunResult`, where
-optional `inputs` pins provider/snapshot and formula/cache identities.
+**Acceptance:** A study or policy can replay its original inputs after provider data
+changes. A hash establishes identity, not completeness or source accuracy.
 
-- [ ] Test exact replay after upstream values change, missing/corrupt files,
-  wrong instrument/timeframe/adjustment scope, warm-up needs, and offline misses.
-- [ ] Run `python -m pytest tests/test_dataset_snapshots.py -q`; observe missing replay support.
-- [ ] Store immutable raw/derived artifact references with content hashes, source,
-  adjustment convention, timestamps, and requested/actual coverage. Persist safe
-  canonical JSON/CSV for imported data; do not deserialize untrusted pickle files.
-- [ ] Publish artifacts atomically, then mark a dataset ready. Missing ready inputs
-  fail replay; only an explicit new acquisition creates a new dataset identity.
-- [ ] Inject the snapshot provider into the same runtime. Pin derived artifacts or
-  verify formula/build identities before recomputation; no network fallback.
-- [ ] Verify numerical baseline equivalence with caches on/off and commit.
+## RF-D. Build event datasets independently of trading positions
 
-**Acceptance:** Replaying a run cannot silently use today's corrected provider data.
-This supplies reproducibility, not a claim of complete market-data quality.
+**Files:** Create `bktstr/event_research.py`,
+`tests/test_event_research.py`, and `tests/fixtures/research/events.json`.
 
-## D. Add durable configured experiments and catalog persistence
+**Interfaces:** `build_events(study, application, snapshot) -> EventDataset`;
+`label_events(events, label_specs, outcome_inputs) -> LabelDataset`.
+`EventDataset` owns causal rows and coverage diagnostics. `LabelDataset` owns
+future outcomes and censor reasons. Both are immutable artifacts joined by event ID.
+
+- [ ] Write fixtures containing several same-session VWAP reclaims, an event while
+  a sample policy holds a position, a session boundary, missing price, and a late
+  predictor. Assert all detector-eligible events survive regardless of positions.
+- [ ] Run `python -m pytest tests/test_event_research.py -q`; confirm failures.
+- [ ] Materialize event IDs and per-value availability. Keep missing context rows
+  with reasons; apply only the predeclared detector and sampling rule.
+- [ ] Generate labels separately. Require the exact scheduled horizon price, censor
+  an incomplete horizon, and exclude outcomes crossing a scored split. Do not
+  reinterpret 15 minutes as 15 available rows.
+- [ ] Add a future-perturbation test: changing bars strictly after a cutoff leaves
+  events and predictors through the cutoff identical, while affected labels change.
+- [ ] Verify on manually calculated fixture rows, including positive/negative
+  excursions and boundary cases. Commit.
+
+**Acceptance:** We can investigate an event distribution before defining a strategy,
+and trace every included, missing, or censored observation.
+
+## RF-E. Persist catalog records and durable event-study jobs
 
 **Files:** Create `bktstr/services/research_store.py`,
-`bktstr/services/configured_research.py`, `tests/test_configured_research.py`.
-Modify `bktstr/services/experiments.py`, `bktstr/services/backtest.py`, and worker
-operation registration in `bktstr/api/routes.py`.
+`bktstr/services/configured_research.py`, `tests/test_configured_research.py`;
+extend `bktstr/services/experiments.py` and worker registration.
 
-**Interfaces:** `ResearchCatalog` stores immutable A/B revisions in the existing
-`experiments.sqlite3` with additive migrations;
-`submit_configured_run(store, manifest, input_refs, lineage, idempotency_key) -> ExperimentRecord`;
-registered operation `configured_backtest` consumes a frozen request.
+**Interfaces:** `ResearchCatalog` stores immutable revisions in the existing
+`experiments.sqlite3`. `submit_research_run(store, request, idempotency_key)`
+returns an `ExperimentRecord`. `ResearchRunRequest` contains operation, resolved
+specification, input references, lineage, and analysis configuration. Register
+`event_study` now; H adds `configured_backtest` to the same dispatcher.
 
-- [ ] Test conflicting writes to one ID/version, API/local submission parity,
-  missing referenced evidence, malformed manifests, idempotent retries, and
-  provenance that distinguishes attached from consumed evidence.
-- [ ] Run `python -m pytest tests/test_configured_research.py -q`; observe absent durable path.
-- [ ] Add idea/modifier/variant/application and lineage records without altering
-  existing experiment rows or public baseline requests. Use one database for later
-  transactional admission; do not split budget and queue writes across databases.
-- [ ] Persist the resolved manifest and input references before scheduling. Invoke
-  the shared runtime with C inputs; project results without routing through legacy
-  request adapters. All configured runs produce durable artifacts and status.
-- [ ] Persist blocked/preflight failures as inspectable attempts where an idea or
-  campaign was admitted; malformed unauthenticated input still fails at the API boundary.
-- [ ] Test restart, missing artifacts, Windows handle closure, and baseline compatibility;
-  commit the working durable path.
+- [ ] Test conflicting revision writes, input validation, idempotent retries,
+  preflight failures, artifact publication interruption, restart, and handle closure.
+- [ ] Run `python -m pytest tests/test_configured_research.py -q`; confirm failures.
+- [ ] Add catalog/attempt links through additive migrations. Persist exact inputs
+  before execution and dispatch D through the existing worker lifecycle.
+- [ ] Store causal/label artifacts separately. Attachments and consumed inputs have
+  different provenance fields. Persist admitted blocked/failed/empty attempts.
+- [ ] Verify store reopening, legacy experiment retrieval, and Windows file release.
+  Commit the durable event dataset operation before adding statistical reports.
 
-**Acceptance:** A local recipe run is as retrievable and inspectable as a baseline API run.
+**Acceptance:** A research event dataset is retrievable after restart without
+remembering local filenames. Statistical summaries arrive in G.
 
-## E. Enforce research campaigns, budgets, and data exposure
+## RF-F. Enforce study protocols, search budgets, and data exposure
 
 **Files:** Create `bktstr/services/research_protocol.py`,
-`tests/test_research_protocol.py`. Extend `research_store.py` and the existing
-experiment lifecycle in `experiments.py`.
+`tests/test_research_protocol.py`; extend E's catalog and experiment lifecycle.
 
 **Interfaces:** `register_protocol(document, catalog) -> ResearchProtocol`;
 `admit_attempt(protocol_id, variant_ref, application_ref, split, replication_id) -> AttemptRecord`;
 `record_inspection(scope, artifact_id, actor, reason) -> InspectionEvent`.
-Use stable logical keys and a single SQLite transaction for admission, budget
-reservation, attempt creation, and child queue identity.
+Protocol kinds are `study` and `backtest`; both use the same ledger.
 
-- [ ] Test split overlap, boundary-crossing trades, warm-up scored accidentally,
-  predeclared universe changes, two simultaneous reservations at the final budget
-  slot, and retries under a different HTTP idempotency key.
-- [ ] Test renamed/forked ideas and new campaigns against already inspected final
-  instrument/time scopes, plus explicit externally known-data declarations.
-- [ ] Run `python -m pytest tests/test_research_protocol.py -q`; observe missing protocol enforcement.
-- [ ] Freeze baseline/candidates, application matrix, evaluation windows, allowed
-  differences, metrics, minimum trade counts, stopping rules, and budgets.
-  Distinct numerical recipes consume the candidate budget; logical executions
-  consume attempts. Infrastructure retries resume the same attempt. Budget changes
-  are recorded protocol amendments, never retroactive erasure of failed attempts.
-- [ ] Expose development freely; log validation inspection; lock candidate revisions
-  before final runs. Record final result exposure before returning/exporting its
-  metrics through protocol APIs. Maintain overlap-aware exposure across campaigns.
-- [ ] Enforce these guarantees for controlled workflows and disclose legacy/manual
-  activity; do not claim filesystem access can be prevented for the local owner.
-- [ ] Run protocol, experiment, and recovery tests; commit.
+- [ ] Test overlapping splits/label spans, warm-up scored by mistake, changed
+  universes, two concurrent reservations for one slot, repeated HTTP keys, renamed
+  ideas, and overlapping final-data exposure.
+- [ ] Run `python -m pytest tests/test_research_protocol.py -q`; confirm failures.
+- [ ] Freeze candidates, universe, splits, metrics, sample minima, analysis choices,
+  stopping rules, and candidate/attempt budgets. Count changed horizons, subgroups,
+  transforms, thresholds, and combinations as research choices.
+- [ ] Reserve budget, create attempt, and assign queue/child identity in one SQLite
+  transaction. Retries reconcile the same attempt; amendments retain prior history.
+- [ ] Restrict controlled final access until candidate freeze. Log exposure before
+  metrics, raw labels, plots, or exports are returned. Shared benchmark/source
+  dependencies participate in scope overlap checks.
+- [ ] Record external/manual inspection disclosures and distinguish uncontrolled
+  legacy work. Do not promise protection against direct owner filesystem access.
+- [ ] Run protocol/recovery tests; commit.
 
-**Acceptance:** Repeated experimentation remains visible, and final-data reuse
-cannot receive an untouched label within the controlled research archive.
+**Acceptance:** Exploration is visible, and relabeling a study or inspecting raw
+final labels cannot manufacture an untouched test.
 
-## F. Execute controlled comparisons with restart reconciliation
+## RF-G. Produce interpretable event-study comparisons
 
-**Files:** Extend `bktstr/services/research_protocol.py`,
-`bktstr/services/backtest.py`, `bktstr/services/experiments.py`;
-create `tests/test_research_campaigns.py`.
+**Files:** Create `bktstr/services/event_studies.py`,
+`tests/test_event_studies.py`; extend the E event-study operation.
 
-**Interface:** `run_protocol(protocol_id, store) -> ProtocolResult` consumes E's
-frozen matrix and D's operation. Each cell's stable identity includes protocol,
-variant, application, split, and deliberate replication identity.
+**Interfaces:** `StudyAnalysisSpec` freezes primary label, reference/comparison,
+group definitions, development-fitted transforms, uncertainty settings, minima,
+and seed. `summarize_study(events, labels, analysis) -> StudyResult` returns
+counts, distributions, effect estimates, intervals, coverage, and limitations.
 
-- [ ] Write fixture tests for one idea, base plus two variants, two symbols,
-  zero trades, incomplete candidate work, cancellation, and mismatched input hashes.
-- [ ] Run `python -m pytest tests/test_research_campaigns.py -q`; observe missing campaign execution.
-- [ ] Acquire C datasets once per declared scope and run each comparison cell on
-  matched inputs. Reject undeclared differences; label exploratory comparisons.
-  Show risk/cost changes in declared sensitivity panels rather than conflating them
-  with evidence for an unrelated filter.
-- [ ] Reconcile child identities after interruption. Reuse completed children,
-  resume pending work, and preserve failures/cancellation. Recover abandoned inline
-  configured work or mark it explicitly interrupted instead of leaving it running.
-- [ ] Report per-symbol paired effects and declared aggregation with dispersion,
-  sample counts, and unavailable metrics. Never infer shared-portfolio returns.
-- [ ] Verify attempt/budget counts survive crashes at admission, child completion,
-  and artifact publication; commit.
+- [ ] Test a known-effect fixture, null fixture, missing groups, small sample,
+  correlated same-session events, changed event samples, and different horizons.
+- [ ] Run `python -m pytest tests/test_event_studies.py -q`; confirm failures.
+- [ ] Report event/session counts, mean/median/quantiles, favorable/adverse excursions,
+  missing/censored counts, and predeclared instrument/period stability.
+- [ ] Fit quantile groups/scaling on development data only and pin parameters before
+  later splits. Label context-group contrasts as associations.
+- [ ] Implement deterministic contiguous-session block resampling. Freeze block
+  length, resample count, seed, and minimum usable blocks. Resample the full declared
+  statistic and aligned dates across stocks, then report uncertainty assumptions.
+- [ ] Estimate differences directly using shared resamples. Fixed-event variants
+  pair on event IDs; changed detectors disclose common/added/removed samples.
+  Incompatible label definitions cannot enter one primary comparison.
+- [ ] Attach search counts and exposure status. Unavailable uncertainty remains
+  unavailable; no automatic significance-to-promotion decision. Commit.
 
-**Acceptance:** A campaign produces an auditable comparison and resumes without
-duplicating completed tests or concealing incomplete work.
+**Acceptance:** We can see where an event relationship appears, its size and
+uncertainty, and how much searching produced it without calling it trading profit.
 
-## G. Expose idea history and a readable research report
+## RF-H. Link evidence to a frozen policy and the existing engine
 
-**Files:** Create `bktstr/services/idea_reports.py`,
-`tests/test_idea_reports.py`, `tests/test_api_ideas.py`.
-Extend `bktstr/api/schemas.py`, `bktstr/api/routes.py`,
-`docs/API_REFERENCE.md`, and `AGENT_BACKTEST_RUNBOOK.md`.
+**Files:** Create `bktstr/idea_resolution.py`,
+`tests/test_idea_resolution.py`; extend `configured_research.py`,
+`tests/test_configured_research.py`, and `strategy_config.py` only as needed.
 
-**Interfaces:** `idea_report(idea_id, store) -> IdeaReport` and additive authenticated
-routes for idea revisions, modifier/variant revisions, application registration,
-protocol registration/submission, and paginated history. Proposed route families:
-`/api/v1/ideas`, `/api/v1/modifiers`, `/api/v1/variants`, `/api/v1/applications`,
-`/api/v1/research-protocols`, `/api/v1/configured-backtests`, and
-`/api/v1/experiments`. Existing retrieval routes retain behavior.
+**Interfaces:** `resolve_variant(variant, catalog) -> ResolvedSpecification`
+returns a discriminated study or policy specification.
+`bind_policy(policy, application, run_window) -> StrategyManifest`
+calls the existing `compile_strategy`. E's dispatcher gains `configured_backtest`.
 
-- [ ] Test lineage discovery, stable pagination, filters, validation/authentication,
-  progress, cooperative cancellation, final-inspection logging on exports, and
-  correct blocked/scenario labels.
+- [ ] Test cycles, conflicting modifiers, missing pinned references, unknown
+  capabilities, missing benchmark bindings, future-label rules, and unsupported
+  macro/scenario execution before provider access.
+- [ ] Run `python -m pytest tests/test_idea_resolution.py tests/test_configured_research.py -q`;
+  confirm missing policy-path failures.
+- [ ] Resolve one parent and explicit typed changes. Require study evidence links,
+  contrary findings, selection rationale, and limits for a promoted policy.
+  A manually authored exploratory policy is allowed with an untested status.
+- [ ] Map only supported policy fields to today's strict strategy document and
+  run through the shared runtime with C inputs. Preserve early entry validation.
+- [ ] Persist manifests/results and link signals to event IDs when definitions
+  match. Disclose unmatched/unavailable mappings rather than claiming equivalence.
+- [ ] Verify next-bar eligibility, unchanged baseline behavior, and two applications
+  sharing a policy digest with distinct resolved manifests. Commit.
+
+**Acceptance:** A discovered relationship can inform a tested trading policy.
+The study result and simulated trade return remain separate evidence.
+
+## RF-I. Run controlled campaigns with restart reconciliation
+
+**Files:** Extend `research_protocol.py`, `services/backtest.py`,
+`services/experiments.py`; create `tests/test_research_campaigns.py`.
+
+**Interface:** `run_protocol(protocol_id, store) -> ProtocolResult` executes the
+frozen matrix. Stable child identity includes protocol, variant, application, split,
+and declared replication. It consumes E operations and F admission.
+
+- [ ] Test base plus two variants on two symbols, zero events/trades, cancellation,
+  partial completion, mismatched inputs, and crashes before/after publication.
+- [ ] Run `python -m pytest tests/test_research_campaigns.py -q`; confirm failures.
+- [ ] Reuse pinned inputs within comparison cells. Reconcile completed/pending
+  children and recover interrupted inline work without duplicate admitted attempts.
+- [ ] Report per-symbol effects and predeclared aggregation with dispersion.
+  Keep study associations, policy PnL, and cost/risk sensitivities in separate panels.
+- [ ] Verify budgets and exposure survive retries and restart; commit.
+
+**Acceptance:** Controlled studies and backtests share a durable campaign mechanism.
+Independent stock tests never imply shared-account portfolio returns.
+
+## RF-J. Expose searchable idea history and readable reports
+
+**Files:** Create `bktstr/services/idea_reports.py`, `tests/test_idea_reports.py`,
+`tests/test_api_ideas.py`; extend API schemas/routes, `docs/API_REFERENCE.md`,
+and `AGENT_BACKTEST_RUNBOOK.md`.
+
+**Interfaces:** `idea_report(idea_id, store) -> IdeaReport`; additive authenticated
+routes for ideas, components, study/policy variants, applications, protocols,
+event studies, configured backtests, and paginated experiments.
+Local and HTTP clients use the same service and exposure checks.
+
+- [ ] Test lineage, pagination/filters, auth/validation, progress/cancellation,
+  blocked/scenario labels, and exposure recording on raw-label/report exports.
 - [ ] Run `python -m pytest tests/test_idea_reports.py tests/test_api_ideas.py -q`;
-  observe absent report/routes.
-- [ ] Generate a simple JSON plus Markdown idea card: thesis, recipe, categorized
-  variants, effective differences, stock applications, every attempt, matched
-  comparisons, exposure status, known limitations, and assessment history.
-- [ ] Provide status/history/report operations to both local and HTTP clients with
-  one service implementation. List filters include idea, variant, instrument,
-  campaign, status, and date; follow existing auth/error/pagination conventions.
-- [ ] Update capabilities and OpenAPI for delivered operations only. Keep baseline
-  compatibility and explicitly label today's metric definitions. Commit.
+  confirm failures.
+- [ ] Generate JSON and Markdown idea cards containing thesis, study components,
+  categorized changes, evidence, promotion rationale, policies, every attempt,
+  comparisons, exposure state, and append-only assessments.
+- [ ] Add history filters for idea, kind, variant, instrument, campaign, status,
+  and date. Show current metric definitions and execution limits.
+- [ ] Update delivered capabilities and OpenAPI only; commit.
 
-**Acceptance:** The owner can find an idea, understand its variations and failures,
-and reproduce a result without retaining experiment IDs manually.
+**Acceptance:** The owner can find an idea, understand what changed and what failed,
+and retrieve either research observations or trading results without stored IDs.
 
-## H. Verify the standalone research milestone and update the roadmap
+## RF-K. Verify the complete standalone research milestone
 
-**Files:** Create `tests/test_idea_research_workflow.py`; update `README.md`,
-`docs/TRADE_IDEA_CONTAINERS.md`, `docs/IMPLEMENTATION_PLAN.md`,
-`docs/PROJECT_STATUS.md`, and `docs/development/local-credentials.md` only if local
-setup instructions require cross-linking. Do not change credential handling.
+**Files:** Create `tests/test_idea_research_workflow.py`; update README, design,
+roadmap, project status, and runbook to distinguish delivered and pending features.
 
-- [ ] Build an offline end-to-end fixture from A-G: create idea, branch modifiers,
-  bind two stocks, freeze data, register splits and budgets, run a campaign,
-  interrupt/resume, inspect report, and replay an earlier revision after a new edit.
-- [ ] Include failures for unavailable macro execution, corrupted pinned data,
-  overlapping final exposure, budget races, and mismatched comparison inputs.
-- [ ] Document one explicit persistent research root; test backup/restore of the
-  database plus referenced artifacts and evidence bundles, not just SQLite alone.
-- [ ] Run focused tests, `python -m pytest tests -q`, release consistency,
-  compilation, and the cache benchmark. Obtain an independent final review.
-- [ ] Update completed capabilities and preserve the still-pending execution-realism,
-  macro evaluator, Jev, and paper work. Commit only the completed milestone.
+- [ ] Demonstrate one VWAP-reclaim thesis, base plus two study variants, two stocks,
+  context/label reports, an inconclusive assessment, and a documented policy choice.
+- [ ] Run the policy base plus two variants through a controlled frozen-data campaign.
+  Interrupt/resume, edit a revision, retrieve all attempts, and replay an older run.
+- [ ] Include failures for leakage, invalid pairing, missing/corrupt data, unavailable
+  macro consumption, budget races, and reused final data claimed as untouched.
+- [ ] Configure an explicit persistent research root. Back up and restore the SQLite
+  database together with every referenced data, schedule, evidence, and result artifact.
+- [ ] Run focused tests, `python -m pytest tests -q`,
+  `python scripts/check_release_consistency.py`,
+  `python -m compileall -q bktstr bktstr_cache integration scripts`, and
+  `python benchmarks/benchmark_cache.py`. Obtain one independent final review.
+- [ ] Record delivered capabilities and known execution/metric limitations; commit.
 
-**Acceptance:** The design's completion gate is demonstrated without network or
-Jev. Only then return to Task 3.
+**Acceptance:** The spec's completion gate works offline without Jev or a broker.
+It demonstrates research correctness and reproducibility, not a profitable strategy.
 
-## Dependencies and self-review
+## Dependency order and later work
 
-Execute A -> B -> C -> D -> E -> F -> G -> H. C's runtime injection is consumed
-by D; E uses the same SQLite database as D so admission and queue identity are
-atomic; G's report/export endpoints participate in E's inspection ledger.
+Execute A -> B -> C -> D -> E -> F -> G -> H -> I -> J -> K.
+Each task has a focused verification gate; K verifies integration. Use the existing
+project virtual environment. Windows sandbox restrictions on temporary test folders
+may require the normal permission mechanism; do not weaken tests to bypass them.
 
-The proposal closes gaps 1 and 2. It does not require Task 4's new fill model or
-macro gates, and must not pretend those capabilities exist. Original Task 5's
-generic protocol, history, and recovery work moves here; its later work is limited
-to consuming real Jev/decision records and new execution metrics through these
-interfaces. This avoids building a second protocol system after Task 3.
+Then resume original Task 3 for recorded Jev context and replay. Tasks 4-5 add shared
+macro decisions and execution improvements, using this research catalog and protocol.
+Task 6 adds bounded internal paper validation. Task 7 tests Clear Street demo
+workflows separately. There is no requirement to use Jev for a numerical study.
 
-The user-facing container remains one idea with variations and results. Separate
-internal records serve reproducibility, not a requirement for a large dashboard.
-No production implementation is part of this planning change.
+Generic history, budgets, exposure, and restart work formerly assigned to Task 5
+are delivered here. Later Task 5 adds actual model/decision records and updated
+execution metrics to these interfaces, not a second campaign system.
+
+Automatic feature selection, complex ML, a broad dashboard, universal asset execution,
+and first-touch barrier inference remain outside this milestone. The first useful
+deliverable is an honest, replayable event study for one idea.

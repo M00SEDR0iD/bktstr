@@ -4,12 +4,13 @@
 > or superpowers:subagent-driven-development if the user selects delegated execution.
 > Complete and verify one task at a time. Implement only the tasks authorized in the current request.
 
-**Goal:** Carry one theory from explicit configuration through historical comparisons
-and a bounded forward paper session, with optional Jev macro interpretation.
+**Goal:** Carry one theory through event research, a fixed trading policy, historical
+comparisons, and a bounded forward paper session, with optional Jev macro interpretation.
 
 **Architecture:** Keep BKTSTR's deterministic research core and existing stores.
-Add strict versioned strategy configuration, as-of macro evidence, a recorded
-OpenRouter Decisions adapter, and a shared policy evaluator. Run paper sessions
+Add reusable idea/event-study records, strict versioned strategy configuration,
+as-of macro evidence, a recorded OpenRouter Decisions adapter, and a shared policy
+evaluator. Run paper sessions
 in a separate process and keep broker-demo execution distinct.
 
 **Tech stack:** Python 3.12, FastAPI, Pydantic, pandas, SQLite, httpx, existing
@@ -18,11 +19,13 @@ BKTSTR caches and worker. Use existing dependencies where possible.
 **Spec:** [BKTSTR system design](BKTSTR_SYSTEM_MANUAL.md)
 
 **Status:** Tasks 0-2 implemented. Tasks 3-7 remain unstarted.
-**Next priority:** Close reusable-idea organization and controlled-research gaps
+**Next priority:** Close reusable-idea organization, event-study, and controlled-research gaps
 before Task 3, as requested by the user. The proposed
 [trade idea design](TRADE_IDEA_CONTAINERS.md) and
 [research foundation plan](plans/2026-09-20-trade-idea-research.md) define RF-A through
-RF-H. These are planning artifacts, not delivered capabilities.
+RF-K. The adopted sequence studies events, causal context, and separate outcome
+labels before developing a frozen trading policy. These are planning artifacts,
+not delivered capabilities.
 No strategy, Jev, macro-feed, paper-runner, or broker integration was added by
 Task 0. Do not infer that planned API fields already exist.
 
@@ -48,7 +51,7 @@ Task 0. Do not infer that planned API fields already exist.
 | A release is revised or arrives after a signal | Use only the permitted vintage available by the cutoff | 2 |
 | Jev times out, changes output, or returns malformed data | Bound retries, persist status, block dependent entry; replay the pinned result | 3 |
 | A restart reprocesses a candle or an order event | Reconcile state without duplicate intents or fills | 6 |
-| A final test period is reused during tuning | Record contamination and do not call it untouched | 5 |
+| A final test period is reused during tuning | Record contamination and do not call it untouched | RF-F, 5 |
 | Prices are missing at an exit or session boundary | Preserve unresolved position state; do not invent a fill | 4, 6 |
 
 ## Sequence and delivery gates
@@ -57,7 +60,7 @@ Task 0. Do not infer that planned API fields already exist.
 | --- | --- | --- |
 | Foundation | 0-1 | Current docs checks and validated strategy manifests |
 | Macro evidence | 2 | Causal macro snapshots |
-| Research foundation | RF-A through RF-H | Reusable idea containers, durable configured runs, controlled comparisons, and searchable history |
+| Research foundation | RF-A through RF-K | Reusable idea containers, event studies, linked policies, durable comparisons, and searchable history |
 | Model evidence | 3 | Immutable Jev response records, after the research foundation gate |
 | Research | 4-5 | Shared decisions and an auditable three-way comparison |
 | Forward test | 6 | Bounded internal paper session and deterministic replay |
@@ -66,6 +69,26 @@ Task 0. Do not infer that planned API fields already exist.
 Complete each gate before its dependents. Paper testing does not depend on a
 Clear Street account. Macro-provider account selection is an integration input,
 not a reason to block fixture-backed domain work.
+
+### Research foundation tasks before Task 3
+
+| Task | Deliverable |
+| --- | --- |
+| RF-A | Idea cards with separate study and policy revisions |
+| RF-B | Versioned events, context measurements, references, and outcome labels |
+| RF-C | Frozen datasets, pinned session schedules, coverage audit, offline replay |
+| RF-D | All eligible events with causal inputs and separately stored future outcomes |
+| RF-E | Durable event-study jobs and revision catalog in the existing experiment store |
+| RF-F | Study/policy protocols, full search budgets, split rules, and exposure history |
+| RF-G | Event-study distributions, context comparisons, uncertainty, and stability reports |
+| RF-H | Evidence-linked frozen policies compiled into the existing engine |
+| RF-I | Controlled campaigns that resume without duplicating attempts |
+| RF-J | Searchable idea history and readable local/API reports |
+| RF-K | Offline end-to-end demonstration, backup/restore, and verification |
+
+The detailed [research plan](plans/2026-09-20-trade-idea-research.md) owns interfaces
+and acceptance tests. No trading policy is required to investigate or reject an idea.
+Future labels cannot be predictors, and exploratory associations are not strategy PnL.
 
 ## Proposed contracts
 
@@ -264,7 +287,7 @@ The original baseline retains its identity and behavior.
 
 **Reordered scope:** Generic protocols, configured experiment persistence,
 attempt budgets, data-exposure tracking, history, cancellation, and restart
-reconciliation move into RF-A through RF-H before Task 3. The checklist below is
+reconciliation move into RF-A through RF-K before Task 3. The checklist below is
 the original overall contract; mark its shared items complete when those earlier
 tasks deliver them, rather than implementing duplicate services. After Tasks 3-4,
 finish the three-way numerical/Jev comparison, decision artifacts, and metrics

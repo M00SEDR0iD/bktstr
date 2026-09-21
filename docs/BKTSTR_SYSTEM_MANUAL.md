@@ -72,8 +72,11 @@ new database, or web application until there is a demonstrated need.
 
 ## Strategy configuration
 
-The next proposed layer is [reusable trade idea containers](TRADE_IDEA_CONTAINERS.md):
-stable theses and recipes, categorized immutable variants, explicit applications,
+The next planned layer is [reusable trade idea containers](TRADE_IDEA_CONTAINERS.md).
+Each thesis defines events, causal context, references, and separate future labels.
+An event-study path retains eligible observations independently of trading positions.
+Its evidence can inform a frozen policy that runs through the existing engine.
+Study variants and policy variants share immutable history, explicit applications,
 and controlled campaigns. These research foundations precede Jev integration.
 
 The [local configuration interface](STRATEGY_CONFIGURATION.md) implements the

@@ -13,9 +13,12 @@ The existing bearish-regime strategy is one baseline, not a required worldview.
 
 Current priority: reusable [trade idea containers](docs/TRADE_IDEA_CONTAINERS.md)
 and [controlled research foundations](docs/plans/2026-09-20-trade-idea-research.md)
-come before Jev Task 3. These documents are proposed designs until implemented.
-Keep the thesis and typed modifiers separate from stock/date/data bindings;
-preserve every variant revision and research attempt. Never execute a narrative
+come before Jev Task 3. The adopted sequence is thesis, events, causal context,
+separate outcome labels, exploratory study, frozen policy, controlled backtest,
+and later paper validation. RF-A through RF-K are planned, not implemented.
+Keep research variants separate from policy variants and stock/date/data bindings.
+Preserve every eligible event, variant revision, and research attempt. Future labels
+must never enter predictor or entry-rule interfaces. Never execute a narrative
 macro assumption as though it were observed evidence.
 
 ## Read in this order
@@ -57,6 +60,10 @@ contract. Model/question metadata in a disabled policy is not executed.
   Missing/stale evidence blocks new entries; protective management continues.
 - Compare each added filter against a baseline on aligned inputs and held-out
   periods. Record all attempted variants, not only winners.
+- Count explored horizons, subgroups, thresholds, and feature combinations as
+  research choices. Account for overlapping outcomes and split boundaries.
+- Keep event-study associations separate from simulated policy profit. A favorable
+  exploratory result does not establish an independently validated trading edge.
 - Keep feature caches separate from model-response records and decision logs.
 
 ## Working rules

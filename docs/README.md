@@ -14,8 +14,8 @@ research contracts, and implementation sequence, not a fund portfolio.
 | [Strategy configuration](STRATEGY_CONFIGURATION.md) | Local JSON/Python compilation and supported numerical filters |
 | [Macro evidence](MACRO_EVIDENCE.md) | Point-in-time selection, replay, and verified BLS adapter coverage |
 | [Project status report](PROJECT_STATUS.md) | Standalone usefulness, personal research fit, and remaining structural gaps |
-| [Trade idea containers](TRADE_IDEA_CONTAINERS.md) | Proposed reusable thesis, categorized variants, and controlled research design |
-| [Research foundation plan](plans/2026-09-20-trade-idea-research.md) | Proposed implementation sequence before Jev Task 3 |
+| [Trade idea containers](TRADE_IDEA_CONTAINERS.md) | Adopted event research structure, reusable theses, study variants, and linked policies |
+| [Research foundation plan](plans/2026-09-20-trade-idea-research.md) | Planned RF-A through RF-K implementation before Jev Task 3 |
 | [Cache architecture](CACHE_ARCHITECTURE.md) | Data reuse and reproducibility boundaries |
 | [Cache integration](../integration/INTEGRATION_GUIDE.md) | Existing code integration points |
 | [Local credentials](development/local-credentials.md) | Existing Windows key helper |

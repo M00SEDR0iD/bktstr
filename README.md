@@ -37,15 +37,19 @@ brokerage orders. Live-money trading is outside the next implementation scope.
 ## Intended workflow
 
 The next priority is [reusable trade ideas and controlled research](docs/TRADE_IDEA_CONTAINERS.md):
-document a thesis once, organize variations beneath it, apply the recipe to explicit
-stocks, and preserve controlled comparisons. This foundation comes before Jev.
+document a thesis once, study its events and context across explicit stocks, then
+develop and test a trading policy. This planned foundation comes before Jev.
 
 1. State a hypothesis and specify what would count as evidence against it.
-2. Freeze the strategy, data requirements, costs, test periods, and search budget.
-3. Compare a technical baseline, numerical context filters, and optional Jev judgments.
-4. Replay saved evidence and evaluate periods excluded from strategy development.
-5. Run a bounded paper session using the same decision rules.
-6. Review results and create a new strategy version for any revision.
+2. Define candidate events, context available at the time, and separate future outcomes.
+3. Study distributions and context relationships with frozen data and a recorded search budget.
+4. Link the evidence to a fixed trading policy, with explicit entry, risk, exit, and cost rules.
+5. Run controlled backtests and evaluate periods excluded from policy development.
+6. Later, validate a candidate in a bounded paper session using the same decision rules.
+
+Keep research variations and trading-policy variations beneath the same idea card.
+Every change creates a traceable revision. A study can end as inconclusive or rejected
+without producing a trading policy. See the [updated plan](docs/plans/2026-09-20-trade-idea-research.md).
 
 ## Start here
 

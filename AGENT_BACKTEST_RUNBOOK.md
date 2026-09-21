@@ -7,6 +7,18 @@ Read [AGENTS.md](AGENTS.md) and the [system design](docs/BKTSTR_SYSTEM_MANUAL.md
 For planned Jev and paper workflows, follow the
 [implementation plan](docs/IMPLEMENTATION_PLAN.md).
 
+## Planned research organization
+
+The adopted [idea structure](docs/TRADE_IDEA_CONTAINERS.md) starts with a thesis,
+event definition, causal context, and separate future outcome labels. Study these
+observations before selecting a trading policy. Keep study variations and policy
+variations under the same idea, with explicit evidence and revision links.
+
+The [research foundation plan](docs/plans/2026-09-20-trade-idea-research.md) adds
+durable event studies, search budgets, controlled comparisons, and history before
+Jev. These operations are not implemented yet. The instructions below describe
+the currently available backtest workflow.
+
 ## Define an experiment
 
 Record the hypothesis, instruments, session, signal timing, entry and exit rules,
