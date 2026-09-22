@@ -1,36 +1,33 @@
-# Release workflow
+# Release procedure
 
-## 1. Release readiness
+A local change is not a verified production release.
 
-Confirm that Milestone Issues are closed or explicitly deferred, the changelog is complete, and every release exit criterion is met.
+1. Run the relevant tests, release-consistency check, compilation, and cache
+   benchmark. Resolve required CI failures before merging.
+2. Update the changelog and all versioned contracts together when releasing:
+   `bktstr/__init__.py`, README, the GUI JSON contract, and production acceptance.
+3. Open a focused pull request. Record compatibility and rollback behavior.
+4. Merge after required GitHub Actions checks pass and review is complete.
+5. Wait for Railway to report the expected version and `git_commit`.
+6. Run authenticated acceptance against that exact deployment. Retain its output
+   as a release artifact. Health alone does not prove authenticated access.
+7. Tag and publish only after acceptance succeeds.
 
-## 2. Release-preparation PR
+Use the existing production acceptance workflow or the local helper:
 
-Open a focused pull request titled `release: prepare vX.Y.Z`. Change only the version, changelog, release-plan state, and version-sensitive checks.
-
-## 3. Merge and deploy
-
-Squash-merge the release-preparation pull request after all required checks pass. Record the merge SHA, then wait for Railway health to report the expected Git SHA and version before running production acceptance.
-
-## 4. Manual production gate
-
-Manually dispatch `.github/workflows/production-acceptance.yml` with the version, SHA, and production URL. Retain the resulting JSON artifact as release evidence. A candidate cannot be tagged until this gate passes against the expected deployment.
-
-## 5. Publish
-
-Create the annotated tag with:
-
-```bash
-git tag -a vX.Y.Z -m "BKTSTR vX.Y.Z"
-git push origin vX.Y.Z
+```powershell
+python -m bktstr.local_credentials run -- python scripts/production_acceptance.py --base-url https://bktstr-production.up.railway.app --expected-version 0.7.0 --expected-commit <full-commit-sha>
 ```
 
-Generate and review the GitHub release notes, record production verification and known limitations, and close the Milestone and release tracker.
+Supply the intended release version and actual deployed commit. This command
+creates research experiments. Use `local_credentials check` for authentication
+verification without acceptance runs.
 
-## 6. Patch releases
+Keep persistent experiments and caches on the Railway volume. Supply secrets
+through deployment configuration. Planned OpenRouter, macro, and paper adapters
+need their own acceptance checks before they can be called released.
 
-Repeat the same readiness, preparation, deployment, manual production gate, and publication process with an incremented patch number.
-
-## 7. Rollback
-
-Do not tag a failed candidate. Fix or revert the candidate through a pull request. When necessary, redeploy the last known-good tag, and record the incident and recovery.
+A failed candidate must not be tagged. Revert through a reviewed change or
+redeploy the previous known-good release. Preserve experiment records and verify
+storage compatibility before rollback. Do not silently reuse old execution or
+model identities for changed behavior.

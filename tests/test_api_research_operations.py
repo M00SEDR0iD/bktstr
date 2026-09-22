@@ -507,6 +507,8 @@ def test_research_routes_are_typed_in_openapi_and_polling_discriminator(
         "compare",
         "regime_comparison",
         "pending",
+        "event_study",
+        "configured_backtest",
     }
     polling = document["paths"]["/api/v1/experiments/{experiment_id}"]["get"]["responses"]["200"]
     assert set(polling["headers"]) == {"Retry-After"}

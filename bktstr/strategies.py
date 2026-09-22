@@ -486,6 +486,26 @@ def baseline_strategy_registry() -> StrategyRegistry:
     return registry
 
 
+def minute_strategy_definition() -> StrategyDefinition:
+    """Neutral local configuration template; public baseline registry is unchanged."""
+    from dataclasses import replace
+
+    defaults = {
+        'side': 'long', 'entry_rules': 'close.cross_above:vwap',
+        'regime_rules': None, 'sentiment': False,
+        'entry_start_time': None, 'entry_end_time': None,
+    }
+    return StrategyDefinition(
+        id='bktstr.minute-strategy', schema_version='1.0.0', version='1.0.0',
+        name='Configurable minute strategy', description='Explicit numerical research rules.',
+        instrument_roles=('subject',), timeframe='1m', calendar='XNYS',
+        timezone='America/New_York',
+        parameters=tuple(replace(p, default=defaults.get(p.name, p.default)) for p in _baseline_parameters()),
+        variable_uses=(), filters=(), execution_model_id='bktstr.next-bar-open',
+        execution_model_version='1.0.0',
+    )
+
+
 __all__ = [
     "ResolvedStrategy",
     "StrategyDefinition",
@@ -496,4 +516,5 @@ __all__ = [
     "StrategyVariableUse",
     "baseline_strategy_definition",
     "baseline_strategy_registry",
+    "minute_strategy_definition",
 ]

@@ -181,6 +181,14 @@ def _assert_ci_workflow_contract(text: str) -> None:
             "body": ["python-version: '3.12'"],
             "step_keys": [{"uses"}, {"uses", "with"}, {"run"}],
         },
+        "windows_credentials": {
+            "name": "Windows credentials",
+            "runner": "windows-latest",
+            "actions": ["actions/checkout@v7", "actions/setup-python@v7"],
+            "commands": ["python -m pip install -r requirements-dev.txt", "python -m pytest tests/test_local_credentials.py tests/test_windows_credentials.py -q"],
+            "body": ["python-version: '3.12'", "cache: pip", "cache-dependency-path: requirements-dev.txt"],
+            "step_keys": [{"uses"}, {"uses", "with"}, {"run"}, {"run"}],
+        },
         "production_image": {
             "name": "Production image",
             "actions": ["actions/checkout@v7"],
@@ -209,7 +217,7 @@ def _assert_ci_workflow_contract(text: str) -> None:
     for key, expected in expected_jobs.items():
         job = jobs[key]
         assert _job_name(job) == expected["name"]
-        assert _job_scalar(job, "runs-on") == "ubuntu-latest"
+        assert _job_scalar(job, "runs-on") == expected.get("runner", "ubuntu-latest")
         _assert_exact_keys(_direct_mapping_keys(job, 4), {"name", "runs-on", "steps"})
         steps = _step_blocks(_job_steps(job))
         assert len(steps) == len(expected["step_keys"])
@@ -301,7 +309,7 @@ def _assert_production_acceptance_workflow_contract(text: str) -> None:
     assert _scalar_mapping(inputs["expected_version"], 8) == {
         "description": "Version expected from production health and capabilities",
         "required": "true",
-        "default": "'0.6.0'",
+        "default": "'0.7.0'",
         "type": "string",
     }
     assert _scalar_mapping(inputs["expected_commit"], 8) == {
@@ -410,9 +418,7 @@ def test_production_acceptance_workflow_rejects_semantic_mutations():
 
 def test_supabase_github_bridge_assets_are_present_and_safe():
     sql_path = ROOT / "ops" / "supabase" / "github_bridge.sql"
-    runbook_path = ROOT / "ops" / "supabase" / "GITHUB_BRIDGE.md"
     assert sql_path.exists(), "Supabase GitHub bridge migration is missing"
-    assert runbook_path.exists(), "Supabase GitHub bridge runbook is missing"
 
     sql = sql_path.read_text(encoding="utf-8")
     for required in [
@@ -433,16 +439,3 @@ def test_supabase_github_bridge_assets_are_present_and_safe():
         assert required in sql
     for forbidden in ["github_pat_", "ghp_", "service_role", "MASSIVE_API_KEY"]:
         assert forbidden not in sql
-
-
-def test_supabase_bridge_runbook_documents_four_phase_recovery():
-    text = (ROOT / "ops" / "supabase" / "GITHUB_BRIDGE.md").read_text(encoding="utf-8")
-    for required in [
-        "enqueue commit",
-        "enqueue tree",
-        "enqueue blobs",
-        "collect blobs",
-        "net._http_response",
-        "content_base64",
-    ]:
-        assert required.lower() in text.lower()

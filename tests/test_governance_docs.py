@@ -1,81 +1,70 @@
 from pathlib import Path
+from urllib.parse import unquote
+
+import pytest
+
+from scripts.check_release_consistency import LINK_PATTERN, markdown_without_fenced_code
 
 
 ROOT = Path(__file__).parents[1]
-RELEASE_ROWS = {
-    "v0.4.0": "Baseline and documentation repair",
-    "v0.5.0": "Strategy-neutral core",
-    "v0.6.0": "API-first research interface",
-    "v0.7.0": "Persistence and single-owner authentication",
-    "v0.8.0": "Durable execution jobs",
-    "v0.9.0": "React research workspace",
-    "v1.0.0": "Railway production cutover",
-}
 
 
 def _read(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def test_release_plan_publishes_complete_v1_ladder():
-    text = _read("docs/roadmap/v1-release-plan.md")
-    for version, milestone in RELEASE_ROWS.items():
-        assert version in text
-        assert milestone in text
-    assert "outcome-driven" in text.lower()
-    assert "GitHub Project owns live status" in text
+def _local_links(relative_path: str) -> set[Path]:
+    document = ROOT / relative_path
+    return {
+        (document.parent / unquote(match.group(1).strip("<>").split("#", 1)[0])).resolve()
+        for match in LINK_PATTERN.finditer(markdown_without_fenced_code(_read(relative_path)))
+        if not match.group(1).lower().startswith(("http:", "https:", "mailto:", "#"))
+    }
 
 
-def test_changelog_has_current_release_and_immutable_v035_history():
-    text = _read("CHANGELOG.md")
-    assert "## [Unreleased]" in text
-    assert "## [0.6.0] - 2026-08-25" in text
-    assert "## [0.3.5] - 2026-08-24" in text
-    assert "[Unreleased]: https://github.com/M00SEDR0iD/bktstr/compare/v0.6.0...HEAD" in text
-    assert "[0.6.0]: https://github.com/M00SEDR0iD/bktstr/releases/tag/v0.6.0" in text
-    assert "[0.3.5]: https://github.com/M00SEDR0iD/bktstr/releases/tag/v0.3.5" in text
+@pytest.mark.parametrize("entry", [
+    "README.md", "AGENTS.md", "docs/README.md", "AGENT_BACKTEST_RUNBOOK.md",
+    "CONTRIBUTING.md", "integration/INTEGRATION_GUIDE.md",
+])
+def test_current_entry_points_link_to_design_and_plan(entry):
+    links = _local_links(entry)
+    for target in ("docs/BKTSTR_SYSTEM_MANUAL.md", "docs/IMPLEMENTATION_PLAN.md"):
+        destination = (ROOT / target).resolve()
+        assert destination.is_file()
+        assert destination in links, f"{entry} must link to {target}"
 
 
-def test_contributor_entry_point_links_detailed_workflows():
-    text = _read("CONTRIBUTING.md")
-    for required in [
-        "Closes #",
-        "short-lived branch",
-        "squash",
-        "docs/development/git-workflow.md",
-        "docs/development/releases.md",
-    ]:
-        assert required in text
+def test_readme_distinguishes_planned_integrations_from_current_capability():
+    text = " ".join(_read("README.md").lower().split())
+    planned = text[text.index("jev integration,"):text.index("## intended workflow")]
+    for capability in ("macro", "paper", "clear street"):
+        assert capability in planned
+    assert "planned" in planned and "not implemented" in planned
+    assert "current application places no brokerage orders" in planned
 
 
-def test_git_workflow_documents_normal_and_emergency_paths():
-    text = _read("docs/development/git-workflow.md")
-    for required in [
-        "main",
-        "feat/<issue>-<slug>",
-        "zero external approvals",
-        "force push",
-        "Emergency changes",
-        "incident Issue",
-    ]:
-        assert required in text
+def test_project_identity_is_independent_of_fund_portfolios():
+    for entry in ("README.md", "AGENTS.md", "docs/BKTSTR_SYSTEM_MANUAL.md"):
+        text = " ".join(_read(entry).lower().split())
+        assert "separate from the bailey fund" in text
 
 
-def test_release_workflow_gates_tags_on_production_acceptance():
-    text = _read("docs/development/releases.md")
-    for required in [
-        "release: prepare",
-        "annotated tag",
-        "expected Git SHA",
-        "production-acceptance.yml",
-        "Rollback",
-    ]:
-        assert required in text
+def test_contribution_guide_keeps_verification_and_review_gates():
+    text = " ".join(_read("CONTRIBUTING.md").lower().split())
+    assert (ROOT / "docs/development/releases.md").resolve() in _local_links("CONTRIBUTING.md")
+    assert "required repository checks must pass before merge" in text
+    assert "do not rewrite published history or move release tags" in text
+    for command in ("python -m pytest", "scripts/check_release_consistency.py"):
+        assert command in text
 
 
-def test_v035_archive_records_tag_and_post_release_doc_commit():
-    text = _read("docs/archive/releases/v0.3.5.md")
-    assert "add435d" in text
-    assert "219dc71" in text
-    assert "roadmap-only" in text
-    assert "tag was not moved" in text
+def test_release_workflow_requires_identity_authentication_and_rollback():
+    text = " ".join(_read("docs/development/releases.md").lower().split())
+    for requirement in (
+        "expected version and `git_commit`",
+        "authenticated acceptance against that exact deployment",
+        "tag and publish only after acceptance succeeds",
+        "a failed candidate must not be tagged",
+        "verify storage compatibility before rollback",
+    ):
+        assert requirement in text

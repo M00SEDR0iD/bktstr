@@ -219,7 +219,7 @@ def _wait_for_deployment(
 
 def run_acceptance(
     base_url: str,
-    expected_version: str = "0.6.0",
+    expected_version: str = "0.7.0",
     *,
     api_key: str | None = None,
     expected_commit: str | None = None,
@@ -361,7 +361,7 @@ def run_acceptance(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a deployed BKTSTR release against the locked NVDA anchor.")
     parser.add_argument("--base-url", required=True)
-    parser.add_argument("--expected-version", default="0.6.0")
+    parser.add_argument("--expected-version", default="0.7.0")
     parser.add_argument("--api-key", default=os.getenv("BKTSTR_API_KEY"))
     parser.add_argument("--expected-commit")
     parser.add_argument("--deployment-wait-seconds", type=float, default=0)

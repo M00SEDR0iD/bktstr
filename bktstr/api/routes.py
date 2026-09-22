@@ -301,6 +301,8 @@ def experiment_operations(store: ExperimentStore | None = None) -> dict:
     """Return operation handlers shared by inline submission and the durable worker."""
     operations = {"backtest": _execute_backtest_experiment}
     if store is not None:
+        from bktstr.services.configured_research import research_operations
+        operations.update(research_operations(store))
         operations.update(
             {
                 "parameter_sweep": lambda record: _execute_parameter_sweep_experiment(
@@ -528,12 +530,19 @@ def get_experiment(
     _: Annotated[None, Depends(require_api_key)],
 ) -> ExperimentResponse:
     record = _load_experiment(request, experiment_id)
+    from .schemas import EventStudyExperimentResponse, ConfiguredBacktestExperimentResponse
+    if record.operation in {'event_study', 'configured_backtest'}:
+        from bktstr.services.research_store import ResearchCatalog
+        from bktstr.services.research_protocol import inspect_experiment
+        inspect_experiment(ResearchCatalog(_experiment_store(request)), record, reason='canonical polling result')
     apply_experiment_headers(response, record, include_location=False)
     response_types = {
         "backtest": BacktestExperimentResponse,
         "parameter_sweep": ParameterSweepExperimentResponse,
         "compare": CompareExperimentResponse,
         "regime_comparison": RegimeComparisonExperimentResponse,
+        'event_study': EventStudyExperimentResponse,
+        'configured_backtest': ConfiguredBacktestExperimentResponse,
     }
     response_type = response_types.get(record.operation)
     if response_type is not None:

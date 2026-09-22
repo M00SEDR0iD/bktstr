@@ -21,6 +21,32 @@ from .variables import DataTier, ResearchVariableDefinition, VariableKind, Varia
 
 _DEFINITION_VERSION = "1.0.0"
 _PLUGIN_VERSION = "1.0.0"
+
+
+def macro_numerical_context(actual, previous=None, expectation=None):
+    """Normalize an already selected as-of evidence set and compute simple differences.
+
+    Packet construction owns timing/freshness. Missing inputs remain null;
+    this function never supplies zero consensus or crosses incompatible units.
+    """
+    from .macro import normalize_value
+
+    value, units = normalize_value(actual.value, actual.units)
+    operands = []
+    for item in (previous, expectation):
+        if item is None:
+            operands.append(None)
+            continue
+        normalized, other_units = normalize_value(item.value, item.units)
+        if units != other_units:
+            raise ValueError('macro context requires compatible units')
+        operands.append(normalized)
+    prior, expected = operands
+    return {
+        'value': value, 'units': units,
+        'change': value - prior if value is not None and prior is not None else None,
+        'surprise': value - expected if value is not None and expected is not None else None,
+    }
 _SOURCE_ROLES = ("subject", "benchmark", "sector", "market")
 _OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
 _INTRADAY_COLUMNS = ("vwap", "rsi14", "volume_ratio20")

@@ -1,147 +1,104 @@
 # BKTSTR
 
-**Current release: v0.6.0**
+**Current release: v0.7.0**
 
-BKTSTR is a read-only equity/ETF research backtester built to identify short-duration scalp opportunities inside a broader bearish or deteriorating market regime. It never places brokerage orders.
+BKTSTR is an independent trading research system for turning ideas into explicit,
+versioned strategies and testing them against market evidence. It is separate
+from the Bailey Fund: it does not inherit fund holdings, allocations, objectives,
+account balances, or investment mandates.
 
-## Research hierarchy
+The direction is a configurable deterministic engine with optional Jev macro
+judgments through OpenRouter. Strategies stay fixed during each experiment.
+Most new theories should change configuration; new data sources, measurements,
+and execution behaviors require code.
 
-```text
-QQQ broad technology/risk regime
-        ↓
-SOXX semiconductor sector regime
-        ↓
-subject state (NVDA, MU, AVGO, AMD, ...)
-        ↓
-price-implied sentiment / structural disagreement / volatility
-        ↓
-intraday VWAP + RSI + volume trigger
-        ↓
-next-bar-open execution with explicit stop/target/hold/slippage
-```
+## Current capability and planned work
 
-QQQ and SOXX are permanent controls for semiconductor research. High sentiment fragility is diagnostic, not automatically bearish.
+Trading-idea policy comparisons use **net EV in R/trade** as their primary
+objective. Generated visual idea cards and reports show dollar EV, planned and realized RR,
+daily Sharpe, and maximum drawdown alongside it. See the
+[metric definitions](docs/IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes).
 
-## v0.3.4+ performance architecture
+The existing application runs historical equity/ETF research. It provides typed
+backtests, parameter sweeps, comparisons, durable experiments, market-data
+inspection, deterministic caches, and evidence provenance. Its registered
+strategy is `bktstr.bearish-regime-scalp` version `1.0.0`, using one-minute bars.
+That strategy is a supported baseline, not the identity of the project.
 
-BKTSTR now has two persistent cache layers:
+Local [strategy documents](docs/STRATEGY_CONFIGURATION.md) now compile to frozen,
+fingerprinted configurations and run through the existing engine. Numerical entry
+and daily regime gates are supported without changing trading code.
 
-1. **Raw OHLCV cache** — daily gzip files by provider/symbol/timeframe/date.
-2. **Derived cache** — content-addressed deterministic DataFrames for:
-   - `intraday_features` (regular-hours filtering + VWAP/RSI14/volume ratio)
-   - `daily_regime`
-   - `daily_sentiment`
+Local [macro evidence](docs/MACRO_EVIDENCE.md) now supports publication/receipt
+cutoffs, revision selection, immutable packets, and offline source replay.
+The first BLS CPI adapter supports prospective collection; it cannot reconstruct
+historical release vintages or drive strategy gates yet.
 
-Strategy decisions are **not** cached. Entry thresholds, regime filters, stops, targets, sizing, slippage, and trade simulation are evaluated fresh on every request. Cache keys include source-data digests and explicit formula versions so changed data/formulas create new entries.
+[Idea research](docs/IDEA_RESEARCH_GUIDE.md) now adds reusable idea cards, causal
+event studies, frozen datasets, controlled campaigns, durable configured backtests,
+and searchable history. HTML idea cards and Markdown test reports render on demand
+from permanent server results. Fresh-data reruns create linked experiments;
+reacquirable input snapshots can expire. See [server storage](docs/SERVER_RESEARCH_STORAGE.md).
+The direct numerical runtime remains available.
 
-Derived cache is enabled by default. For correctness comparisons:
+Jev integration, historical macro release ingestion,
+continuous paper testing, and Clear Street connectivity are planned and are not implemented.
+The current application places no
+brokerage orders. Live-money trading is outside the next implementation scope.
 
-```text
-BKTSTR_DERIVED_CACHE_ENABLED=false
-```
+## Intended workflow
 
-Optional path override:
+Use [reusable trade ideas and controlled research](docs/TRADE_IDEA_CONTAINERS.md) to
+document a thesis once, study its events and context across explicit stocks, then
+develop and test a trading policy. This research foundation comes before Jev.
 
-```text
-BKTSTR_DERIVED_CACHE_DIR=/data/bktstr-cache/derived
-```
+1. State a hypothesis and specify what would count as evidence against it.
+2. Define candidate events, context available at the time, and separate future outcomes.
+3. Study distributions and context relationships with frozen data and a recorded search budget.
+4. Link the evidence to a fixed trading policy, with explicit entry, risk, exit, and cost rules.
+5. Run controlled backtests and evaluate periods excluded from policy development.
+6. Later, validate a candidate in a bounded paper session using the same decision rules.
 
-Every typed backtest reports provider day-cache counters at
-`result.provenance.market_data.cache`. Governed source and derived
-materializations, including their stable definitions, scopes, coverage, and
-content digests, are exposed at `result.provenance.governed_dependencies`.
+Keep research variations and trading-policy variations beneath the same idea card.
+Every change creates a traceable revision. A study can end as inconclusive or rejected
+without producing a trading policy. See the [updated plan](docs/plans/2026-09-20-trade-idea-research.md).
 
-## API
+Set `BKTSTR_EXPERIMENT_DIR` to an explicit persistent folder. Human review files
+are saved under its `research/reports/` directory. See the
+[research guide](docs/IDEA_RESEARCH_GUIDE.md) for the offline demonstration and replay.
+The [synthetic example](docs/examples/research-demo/README.md) includes a complete
+Markdown idea card and linked test reports. Its prices are artificial.
 
-Production endpoint: `https://bktstr-production.up.railway.app`
+## Start here
 
-- `GET /health`
-- `GET /api/v1/capabilities`
-- `POST /api/v1/backtests`
-- `POST /api/v1/parameter-sweeps`
-- `POST /api/v1/compare`
-- `POST /api/v1/regime-comparison`
-- `GET /api/v1/experiments/{experiment_id}`
-- `GET /api/v1/market-data`
-- `GET /openapi.json`
-
-Read the [API reference](docs/API_REFERENCE.md) for authentication, request bodies, polling, idempotency, errors, provider behavior, and comparison semantics.
-
-Core short setup used as the frozen NVDA research baseline:
-
-```text
-symbol=NVDA
-timeframe=1m
-side=short
-entry=close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10
-entry_start_time=12:30
-entry_end_time=16:00
-stop_pct=1
-target_pct=3
-max_hold_minutes=240
-position_size=1000
-slippage_bps=2
-same_day=true
-eod_exit=true
-regime=day_sma20_slope5.lt:0,relative_return20.lt:0
-benchmark=SOXX
-sentiment=true
-sentiment_sector_benchmark=SOXX
-sentiment_market_benchmark=QQQ
-sentiment_data_profile=clean
-sentiment_sources=price
-```
-
-`stop_pct=1` means **1%**, not `0.01`. `target_pct=3` means **3%**.
-
-## Agent access
-
-When direct Railway networking is unavailable, use the proven Supabase `pg_net` bridge described in [`AGENT_BACKTEST_RUNBOOK.md`](AGENT_BACKTEST_RUNBOOK.md).
+- [Documentation index](docs/README.md)
+- [Agent instructions](AGENTS.md) and [research runbook](AGENT_BACKTEST_RUNBOOK.md)
+- [Architecture and research design](docs/BKTSTR_SYSTEM_MANUAL.md)
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
+- [Current API reference](docs/API_REFERENCE.md)
+- [Local credentials](docs/development/local-credentials.md)
+- [Contribution and verification](CONTRIBUTING.md)
 
 ## Local development
 
-```bash
+Use Python 3.12.
+
+```powershell
 python -m pip install -r requirements-dev.txt
+python -m bktstr.server
 python -m pytest -q
-python benchmarks/benchmark_cache.py
-PORT=8000 python -m bktstr.server
+python scripts/check_release_consistency.py
 ```
 
-## Project and contribution
+Historical market access uses `MASSIVE_API_KEY`; the research service uses
+`BKTSTR_API_KEY`. Do not put either value in documentation or experiment records.
+The limited Yahoo fallback is described in the API reference.
 
-- [Contributor guide](CONTRIBUTING.md)
-- [Changelog](CHANGELOG.md)
-- [Agent research priorities](docs/roadmap/agent-research.md)
-- [Standalone web application roadmap](docs/roadmap/standalone-web-app.md)
-- [v1 release plan](docs/roadmap/v1-release-plan.md)
-- [Release procedure](docs/development/releases.md)
+The configured production address is
+[the BKTSTR service](https://bktstr-production.up.railway.app).
+Verify authenticated capabilities and deployment identity before using it.
+A documented address is not a claim of current deployment health.
 
-## v0.6.0 development and release workflow
-
-GitHub Actions now runs the complete test suite, compile checks, repository-hygiene guard, and derived-cache benchmark on pushes to `main` and on pull requests. The standard release path is:
-
-```text
-feature branch → GitHub CI → merge main → Railway auto-deploy → production acceptance → tag release
-```
-
-Railway GitHub deployments provide `RAILWAY_GIT_COMMIT_SHA` and related repository/deployment variables. `/health` exposes the running `git_commit`, branch/repository, and deployment ID when available. `/api/v1/capabilities` publishes the same build identity plus feature-formula and cache-format versions.
-
-After Railway deploys, run the locked production regression:
-
-```bash
-python scripts/production_acceptance.py --base-url https://bktstr-production.up.railway.app
-```
-
-The acceptance command checks v0.6.0 deployment identity, the published OpenAPI research contract, bearer-authenticated capabilities, and a completed bounded backtest envelope.
-
-If an agent cannot reach GitHub directly, use the GitHub-through-Supabase recovery bridge in `ops/supabase/GITHUB_BRIDGE.md`. It is an emergency source-recovery path, not the normal development workflow.
-
-## Deployment
-
-Railway uses `Dockerfile` and `railway.json`. Set `MASSIVE_API_KEY` and `BKTSTR_API_KEY` as Railway secrets and attach a persistent volume (commonly `/data`). Never commit API credentials. The FastAPI service also reads these deployment settings:
-
-- `BKTSTR_EXPERIMENT_DIR` — durable SQLite records and immutable experiment artifacts; place it on the Railway volume.
-- `BKTSTR_SYNC_MAX_CALENDAR_DAYS` — maximum inclusive calendar span for an inline `sync` backtest (default `31`).
-- `BKTSTR_MAX_SWEEP_VARIANTS` — maximum generated parameter-sweep variants (default `500`).
-
-See [`docs/BKTSTR_SYSTEM_MANUAL.md`](docs/BKTSTR_SYSTEM_MANUAL.md) for the complete architecture, research discipline, look-ahead rules, provenance system, and GUI contract.
+GitHub Actions performs delivery checks. Railway's `RAILWAY_GIT_COMMIT_SHA`
+is exposed as `git_commit` for deployment verification. See the
+[release procedure](docs/development/releases.md).

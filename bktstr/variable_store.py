@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from contextlib import closing
 from typing import Any, Callable, Mapping
 
 import pandas as pd
@@ -21,6 +22,48 @@ class VariableStoreResult:
     variables: VariableSet
     status: CacheStatus
     legacy_frame: pd.DataFrame
+
+
+class EvidenceStore:
+    """Append-only source records in a separate SQLite file, never a feature cache."""
+
+    def __init__(self, path):
+        from pathlib import Path
+        import sqlite3
+
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute('CREATE TABLE IF NOT EXISTS macro_evidence (id TEXT PRIMARY KEY, record TEXT NOT NULL)')
+
+    def put_many(self, snapshots):
+        import sqlite3
+        from .macro import EvidenceSnapshot, canonical_json
+
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            for snapshot in snapshots:
+                if not isinstance(snapshot, EvidenceSnapshot):
+                    raise TypeError('only EvidenceSnapshot records can be stored')
+                encoded = canonical_json(snapshot.to_record())
+                existing = connection.execute('SELECT record FROM macro_evidence WHERE id=?', (snapshot.id,)).fetchone()
+                if existing is not None and existing[0] != encoded:
+                    raise ValueError('stored evidence conflicts with immutable identity')
+                connection.execute('INSERT OR IGNORE INTO macro_evidence VALUES (?, ?)', (snapshot.id, encoded))
+
+    def load(self):
+        import json
+        import sqlite3
+        from .macro import EvidenceSnapshot
+
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            rows = connection.execute('SELECT id, record FROM macro_evidence ORDER BY id').fetchall()
+        result = []
+        for identity, encoded in rows:
+            snapshot = EvidenceSnapshot.from_record(json.loads(encoded))
+            if snapshot.id != identity:
+                raise ValueError('stored evidence digest mismatch')
+            result.append(snapshot)
+        return tuple(result)
 
 
 class VariableSnapshotStore:

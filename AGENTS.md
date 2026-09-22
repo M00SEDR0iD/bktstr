@@ -1,0 +1,96 @@
+# BKTSTR agent instructions
+
+## Purpose and scope
+
+BKTSTR is an independent research engine, separate from the Bailey Fund.
+Do not import fund-specific holdings, portfolio metrics, allocations, mandates,
+or account assumptions into defaults, documentation, examples, or evaluations.
+
+Build toward configurable deterministic strategies, optional Jev macro
+classification through OpenRouter, reproducible comparisons, and bounded paper
+testing. Prioritize minute bars and holding periods of minutes to hours.
+The existing bearish-regime strategy is one baseline, not a required worldview.
+
+The [trade idea containers](docs/TRADE_IDEA_CONTAINERS.md) and
+[research foundation implementation](docs/plans/2026-09-20-trade-idea-research.md)
+precede Jev Task 3. The adopted sequence is thesis, events, causal context,
+separate outcome labels, exploratory study, frozen policy, controlled backtest,
+and later paper validation. Use the [research guide](docs/IDEA_RESEARCH_GUIDE.md)
+for implemented local/API operations and generated Markdown review files.
+Keep research variants separate from policy variants and stock/date/data bindings.
+Preserve every eligible event, variant revision, and research attempt. Future labels
+must never enter predictor or entry-rule interfaces. Never execute a narrative
+macro assumption as though it were observed evidence.
+
+## Read in this order
+
+1. [Documentation index](docs/README.md)
+2. [System design](docs/BKTSTR_SYSTEM_MANUAL.md)
+3. [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
+4. [Research runbook](AGENT_BACKTEST_RUNBOOK.md)
+5. [Current API](docs/API_REFERENCE.md) when making requests
+
+The design describes intended behavior; the API reference describes implemented
+behavior. Inspect source and authenticated capabilities before assuming a feature
+exists. No Jev, paper-runner, or Clear Street feature is currently implemented.
+Live-money trading remains outside the authorized implementation scope.
+
+Local [macro evidence](docs/MACRO_EVIDENCE.md) supports causal selection and
+record/replay. The BLS adapter is prospective-only; do not invent historical
+publication timestamps or vintages. Evidence is not yet wired to strategy gates.
+
+Local numerical strategy documents are implemented through
+[strategy configuration](docs/STRATEGY_CONFIGURATION.md). Keep their runtime on
+the shared orchestrator; the HTTP baseline registry remains a separate public
+contract. Model/question metadata in a disabled policy is not executed.
+Use server-side durable configured research for saved results. Follow
+[server storage](docs/SERVER_RESEARCH_STORAGE.md): permanent results, disposable
+reacquirable inputs, fresh reruns with lineage, optional pinned exact replay, and
+on-demand HTML/Markdown. After tests, review the generated
+visual HTML idea card and secondary Markdown test reports. Publishing reports records
+data exposure. Short-sample Sharpe warnings are presentation cues; never cap or
+silently rescale saved metrics to make them look plausible.
+
+## Research invariants
+
+- Use net EV in R/trade as the primary objective for new policy comparisons.
+  Keep dollar EV, planned and realized reward/risk, daily Sharpe, and maximum
+  drawdown visible alongside it. R is initial planned stop risk, not realized loss.
+  Review sample size and held-out evidence; higher EV alone never promotes a policy.
+  Use the versioned metric definitions in the research guide. Event observations
+  are not trade EV. Preserve historical metric conventions on saved results.
+- Freeze strategy configuration, question definitions, data versions, and execution
+  assumptions for a run. Revisions create new versions and experiments.
+- Compute numerical indicators in code. Use Jev only for explicitly defined
+  judgments with supplied evidence and bounded answer choices.
+- Preserve publication, availability, revision, and observation timestamps.
+  Later data and later model responses must not influence earlier decisions.
+- Model outputs are lower-trust evidence. Confidence is not a win probability.
+  Do not promote model-derived values into trusted deterministic measurements.
+- Replay persisted Jev responses without network calls. Fresh inference is a
+  separate acquisition run, even when a model identifier is unchanged.
+- Log accepted and rejected signals with evidence and reasons.
+- Keep risk, sizing, exits, costs, and execution in deterministic code.
+  Missing/stale evidence blocks new entries; protective management continues.
+- Compare each added filter against a baseline on aligned inputs and held-out
+  periods. Record all attempted variants, not only winners.
+- Count explored horizons, subgroups, thresholds, and feature combinations as
+  research choices. Account for overlapping outcomes and split boundaries.
+- Keep event-study associations separate from simulated policy profit. A favorable
+  exploratory result does not establish an independently validated trading edge.
+- Keep feature caches separate from model-response records and decision logs.
+
+## Working rules
+
+Use the existing FastAPI, Python, SQLite, worker, and cache architecture unless
+a measured requirement warrants a change. Preserve public contracts and baseline
+behavior unless a versioned change is explicitly part of the task.
+
+Use the credential helper documented in
+[local credentials](docs/development/local-credentials.md). Never print secrets
+or put them in prompts, logs, URLs, artifacts, or committed files. The helper
+currently handles BKTSTR credentials only, not OpenRouter or broker secrets.
+
+Follow [CONTRIBUTING.md](CONTRIBUTING.md). Inspect scoped changes before editing;
+do not clean unrelated generated files or user work. Do not treat old Git history
+as an active roadmap. Update the relevant current reference when behavior changes.

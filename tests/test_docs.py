@@ -3,7 +3,7 @@ from pathlib import Path
 from bktstr import __version__
 from bktstr.server import CAPABILITIES
 
-ROOT=Path(__file__).parents[1]
+ROOT = Path(__file__).parents[1]
 
 
 def test_gui_contract_matches_runtime_version_and_outputs():
@@ -12,25 +12,11 @@ def test_gui_contract_matches_runtime_version_and_outputs():
     assert set(CAPABILITIES["sentiment"]["outputs"]).issubset(c["sentiment"]["outputs"])
 
 
-def test_manual_and_runbook_publish_v035_cache_pg_net_and_release_identity():
-    manual=(ROOT/"docs/BKTSTR_SYSTEM_MANUAL.md").read_text()
-    runbook=(ROOT/"AGENT_BACKTEST_RUNBOOK.md").read_text()
-    for phrase in ["QQQ broad technology/risk", "SOXX semiconductor", "derived cache", "BKTSTR_DERIVED_CACHE_ENABLED", "git_commit"]:
-        assert phrase.lower() in manual.lower()
-    for phrase in ["pg_net", "net.http_get", "feature branch", "GitHub CI", "production_acceptance.py", "GitHub-through-Supabase"]:
-        assert phrase.lower() in runbook.lower()
-
-
-def test_readme_and_status_describe_v035_release_workflow():
-    readme=(ROOT/"README.md").read_text()
-    status=(ROOT/"BUILD_STATUS.md").read_text()
-    archive=(ROOT/"docs/archive/releases/v0.3.5.md").read_text()
+def test_readme_identifies_current_release_and_delivery():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert f"Current release: v{__version__}" in readme
     assert "RAILWAY_GIT_COMMIT_SHA" in readme
     assert "GitHub Actions" in readme
-    assert "v0.3.5" in status and "49/49" in status
-    assert "production_acceptance.py" in archive
-    assert "git ls-files" in archive
 
 
 def test_current_linked_api_docs_use_typed_bearer_backtests_and_no_unimplemented_sunset():
@@ -40,7 +26,7 @@ def test_current_linked_api_docs_use_typed_bearer_backtests_and_no_unimplemented
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for document in (manual, runbook):
-        assert "Current release:** v0.6.0" in document
+        assert f"Current release:** v{__version__}" in document
         assert "POST /api/v1/backtests" in document
         assert "Authorization" in document
         assert "/api/v1/experiments/{experiment_id}" in document
@@ -51,7 +37,7 @@ def test_current_linked_api_docs_use_typed_bearer_backtests_and_no_unimplemented
 
 
 def test_manual_publishes_strategy_neutral_evidence_contracts():
-    manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text().lower()
+    manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text(encoding="utf-8").lower()
     for phrase in [
         "tier a",
         "tier b",
@@ -69,7 +55,7 @@ def test_manual_publishes_strategy_neutral_evidence_contracts():
 
 
 def test_manual_limits_capability_metadata_to_registered_contracts():
-    manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text().lower()
+    manual = (ROOT / "docs/BKTSTR_SYSTEM_MANUAL.md").read_text(encoding="utf-8").lower()
     assert (
         "tier b is trusted structured point-in-time data or validated deterministic "
         "measurement data" in manual

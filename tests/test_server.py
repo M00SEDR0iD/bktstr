@@ -20,7 +20,7 @@ def test_server_entrypoint_runs_only_the_fastapi_factory(monkeypatch):
 
 
 def test_capabilities_release_contract():
-    assert CAPABILITIES["version"]=="0.6.0"
+    assert CAPABILITIES["version"]=="0.7.0"
     assert "sentiment_fragility" in CAPABILITIES["regime"]["fields"]
     assert CAPABILITIES["sentiment"]["data_profiles"]["default"]=="clean"
     assert CAPABILITIES["cache"]["derived"]["strategy_decisions_cached"] is False
@@ -65,6 +65,6 @@ def test_health_payload_includes_runtime_build_identity(monkeypatch):
     payload = server.health_payload()
 
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.6.0"
+    assert payload["version"] == "0.7.0"
     assert payload["git_commit"] == "acceptance-sha"
     assert payload["git_branch"] == "main"

@@ -1,743 +1,270 @@
-# BKTSTR System Manual
+# BKTSTR system design
 
-**Current release:** v0.6.0
-**Behavioral baseline:** v0.3.3 trading semantics are preserved; v0.3.4 added deterministic derived caching, v0.3.5 added release reproducibility, and v0.6 adds the typed research API
-**Purpose:** architecture reference, research-methodology white paper, API/user manual, and future GUI implementation guide.
+**Current release:** v0.7.0
 
-BKTSTR is a read-only historical market-research service. It separates slow background context from intermediate market regime and fast technical entries so that each layer can be tested independently and combined without hiding assumptions. It never places brokerage orders.
+The [server storage contract](SERVER_RESEARCH_STORAGE.md) defines permanent online
+results, on-demand report rendering, fresh-data reruns and optional exact replay.
+Persisted recipes and results survive input snapshot expiry. SQLite and artifacts
+remain on the production volume; historical archives preserve conflicting older IDs.
+**Design direction:** approved 2026-09-20; implementation remains planned.
 
-## Operational research doctrine — bearish-regime scalp discovery
+## Purpose
 
-BKTSTR's primary research use is to identify **short-duration scalp opportunities inside a broader bearish or deteriorating market regime**. The system should not promote an isolated intraday pattern merely because it backtests well on one subject or one period. Context is evaluated hierarchically:
+BKTSTR turns trading theories into versioned experiments with inspectable evidence.
+It is an independent entity, separate from the Bailey Fund. No fund portfolio,
+holdings, performance metrics, allocations, or mandates define its behavior.
 
-```text
-QQQ broad technology/risk environment
-        ↓
-SOXX semiconductor sector environment
-        ↓
-subject-specific state (NVDA/MU/AVGO/AMD/...)
-        ↓
-background sentiment + structural disagreement + volatility state
-        ↓
-intraday VWAP/RSI/volume trigger
-        ↓
-explicit execution simulation
-```
+The initial scope is equity/ETF research using minute bars and holding periods of
+minutes to hours. Add broader strategies through configuration and registered
+components. Options, sub-second execution, live-money trading, and a general
+portfolio-management application are outside the next implementation scope.
 
-For semiconductor research, QQQ and SOXX should be treated as permanent controls. The broad/sector layers answer whether the market is in a state where the short scalp tends to work; subject-level context answers which security may be the best expression of that state.
+Success means completing one auditable chain: hypothesis, frozen strategy,
+historical comparison, held-out evaluation, bounded forward paper session, and
+replay of the same decisions from saved inputs.
 
-**Current research warning:** high `sentiment_fragility` is not a validated standalone bearish signal. Validation showed it can mix useful structural disagreement with execution-hostile volatility stress. Inspect `sentiment_component_spread` and `sentiment_volatility_stress` separately and validate across symbols/time periods.
+## Existing implementation
 
-## System schematic
+| Responsibility | Existing source |
+| --- | --- |
+| HTTP contracts and routes | `bktstr/api/schemas.py`, `bktstr/api/routes.py` |
+| Typed service and comparisons | `bktstr/services/backtest.py` |
+| Provider selection and run wiring | `bktstr/runtime.py` |
+| Governed evidence and execution | `bktstr/orchestrator.py` |
+| Strategy definitions | `bktstr/strategies.py` |
+| Variable definitions, snapshots, trust | `bktstr/variables.py`, `bktstr/variable_registry.py`, `bktstr/variable_store.py` |
+| Numerical measurements | `bktstr/measurements.py`, `bktstr/regime.py`, `bktstr/sentiment.py` |
+| Rules and bar simulation | `bktstr/rules.py`, `bktstr/engine.py` |
+| Market data and caching | `bktstr/providers.py`, `bktstr/cache.py`, `bktstr_cache/derived.py` |
+| Durable experiments and worker | `bktstr/services/experiments.py` |
 
-```mermaid
-flowchart TD
-    P[Market data providers] --> C[Persistent raw OHLCV cache]
-    C --> I[Intraday feature layer]
-    C --> R[Daily regime layer]
-    C --> S[Background sentiment layer]
+The current registry contains `bktstr.bearish-regime-scalp@1.0.0` with no registered
+strategy filters. Filter contracts already exist; a configurable macro/Jev layer
+does not. Current sentiment is price-derived context, not news interpretation.
+No current module connects to Jev, a macro release feed, a paper broker, or
+Clear Street.
 
-    I --> T[Technical trigger]
-    R --> G[Regime compatibility]
-    S --> L[Sentiment level]
-    S --> M[Sentiment momentum]
-    S --> F[Sentiment fragility]
-    S --> Q[Data provenance / quality]
+The current API supports `POST /api/v1/backtests`, sweeps, comparisons, and
+`GET /api/v1/experiments/{experiment_id}`. Use bearer `Authorization`.
+The removed singular endpoint returns `legacy_endpoint_removed`.
+See the [API reference](API_REFERENCE.md) for the implemented contract.
 
-    T --> E[Backtest execution engine]
-    G --> E
-    L --> E
-    M --> E
-    F --> E
-    Q --> E
-
-    E --> O[Trade records + summary metrics]
-    O --> API[JSON API]
-    API --> GUI[Future GUI / AI research client]
-```
-
-The intended hierarchy is:
-
-1. **Background sentiment** — What does the market appear to believe about the asset over weeks to months?
-2. **Sentiment transition/fragility** — Is that belief coherent and stable, or is it beginning to break?
-3. **Regime** — Is the current daily market environment favorable to this kind of trade?
-4. **Technical signal** — Is there a specific intraday entry now?
-5. **Execution model** — What would have happened under explicit fills, slippage, stops, targets, and time limits?
-
-No layer should silently substitute for another. A strong technical setup can exist inside a hostile sentiment background; the system should expose that disagreement rather than erase it.
-
-## Persistent cache architecture
-
-The existing raw OHLCV cache is Layer 0. v0.3.4 adds integrated reusable deterministic layers **without caching trading decisions**:
+## Target architecture
 
 ```text
-L0 raw OHLCV cache
-      ↓
-L1 deterministic feature cache
-      ↓
-L2 daily context/regime/sentiment cache
-      ↓
-live strategy thresholds + live execution simulation
-      ↓
-L3 optional exact-result memoization
+discussion -> hypothesis -> frozen strategy configuration
+                                  |
+point-in-time sources -> numerical measurements
+                      -> optional Jev judgments via OpenRouter
+                                  |
+                    deterministic filter evaluation
+                                  |
+                     entry and risk policy
+                         /                 \
+               historical replay       paper session
+                         \                 /
+                     immutable evidence and reports
 ```
 
-### L1 — deterministic features
-
-Cache values that do not change when a researcher adjusts thresholds or execution settings: session VWAP, RSI14, volume ratio, moving averages/slopes, returns, EMA, ATR, realized volatility, 52-week-high distance, and persistence primitives.
-
-### L2 — context
-
-Cache deterministic subject/sector/market context keyed by the subject, sector benchmark, market benchmark, clean-data profile/source set, formula version, look-ahead rule, and digests of all input DataFrames. This includes relative returns and sentiment component/output columns.
-
-### Never cache strategy decisions
-
-Do not persist Boolean "bearish regime passed", entry-rule pass/fail, tuned threshold pass/fail, side, stop/target choices, or "take short" decisions. Thresholds and execution stay live so research hypotheses remain easy to change.
-
-### Invalidation
-
-Derived cache entries are content-addressed by deterministic DataFrame digests plus explicit semantic dimensions (`formula_version`, timeframe/session model, benchmark mapping, profile/sources). Changing input data or a formula version creates a new key rather than mutating old cached research state. Atomic writes prevent partial entries; unreadable entries degrade to cache misses.
-
-### Railway storage
-
-The merge package's default path resolution is:
-
-1. `BKTSTR_DERIVED_CACHE_DIR`
-2. `BKTSTR_CACHE_DIR/derived`
-3. `RAILWAY_VOLUME_MOUNT_PATH/bktstr-cache/derived`
-4. `/tmp/bktstr-cache/derived`
-
-The persistent Railway volume should therefore carry both the raw cache and the derived cache in production. Set `BKTSTR_DERIVED_CACHE_ENABLED=false` to perform a cache-off equality control; the default is enabled. `BKTSTR_DERIVED_CACHE_DIR` can override the derived-cache path.
-
-## Core execution model
-
-BKTSTR evaluates entry rules on a completed bar and enters on the **next bar open**. This prevents same-bar-close look-ahead. Long and short underlying-equity trades are supported. Slippage is applied adversely. If both stop and target are touched within the same OHLC bar, BKTSTR assumes the stop was hit first, which is deliberately conservative.
-
-By default, indicators and trades use regular US equity hours. Session VWAP resets each trading session. Cross rules are session-bounded so the first bar of a new session cannot create a synthetic cross against the previous day's last bar.
-
-The current aggregate max-drawdown statistic is based on closed-trade equity rather than minute-by-minute mark-to-market equity. MFE and MAE are recorded per trade.
-
-## Layer definitions
-
-### Technical layer
-
-The intraday layer currently provides session VWAP, RSI(14), and a rolling 20-bar volume ratio. Rules use a compact `field.operator:value` syntax and comma-separated rules are ANDed.
-
-Examples:
-
-```text
-close.cross_below:vwap
-rsi14.lt:50
-volume_ratio20.gt:1.1
-```
-
-A typical short discovery trigger is:
-
-```text
-close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.1
-```
-
-### Daily regime layer
-
-The regime layer is an intermediate-timescale filter. It uses completed daily data and can compare the subject with a benchmark.
-
-Current fields include:
-
-- `day_close`
-- `day_sma20`
-- `day_sma50`
-- `day_sma20_slope5`
-- `day_return20`
-- `benchmark_return20`
-- `relative_return20`
-
-Example:
-
-```text
-regime=day_sma20_slope5.lt:0,relative_return20.lt:0
-benchmark=SOXX
-```
-
-Regime rules are hard filters: if the regime condition is false, the technical setup cannot open a trade.
-
-## Sentiment layer definitions
-
-The sentiment layer is **price-implied background investor sentiment**, not a direct survey of investor opinions. In v0.3.3 the only active source is clean historical market price data. The layer uses daily OHLCV from the subject, a sector benchmark, and a broad-market benchmark.
-
-For an NVDA study the normal mapping is:
-
-```text
-subject = NVDA
-sector benchmark = SOXX
-market benchmark = QQQ
-```
-
-The sentiment layer intentionally exposes three separate state variables:
-
-- `sentiment_direction`: established background sentiment level, -1 bearish to +1 bullish.
-- `sentiment_momentum`: direction in which that sentiment level is changing, -1 deteriorating to +1 improving.
-- `sentiment_fragility`: instability/contradiction in the sentiment state, 0 coherent to 1 highly fragile.
-
-This separation is important. A stock can remain structurally bullish while its leadership collapses and volatility expands. Averaging those observations into a single neutral number would hide a potentially important narrative transition.
-
-### 1. Leadership component
-
-**Weight in sentiment level: 35%.**
-
-Leadership compares subject returns with both the sector and market over approximately three and six trading months:
-
-```text
-relative_return63_sector  = subject_return63  - sector_return63
-relative_return126_sector = subject_return126 - sector_return126
-relative_return63_market  = subject_return63  - market_return63
-relative_return126_market = subject_return126 - market_return126
-```
-
-Each relative-return series is smoothly compressed to -1..+1 with a hyperbolic tangent transform. The 63-session series uses a 10 percentage-point scale and the 126-session series uses a 20 percentage-point scale. The four transformed values are averaged into `sentiment_leadership_score`.
-
-Interpretation:
-
-- Near +1: persistent leadership/outperformance.
-- Near 0: broadly keeping pace.
-- Near -1: persistent loss of leadership.
-
-### 2. Trend component
-
-**Weight in sentiment level: 30%.**
-
-To preserve comparability with v0.3.1, v0.3.2 keeps the established slow-trend definition. It calculates 50-, 100-, and 200-session simple moving averages and measures each one's percentage change over 20 completed sessions:
-
-```text
-sma50_slope20
-sma100_slope20
-sma200_slope20
-```
-
-Those slopes are compressed to -1..+1 and averaged into `sentiment_trend_score`.
-
-EMA values are now also exposed (`ema50`, `ema100`, `ema200`) for persistence/transition analysis, but v0.3.2 does not simultaneously replace the legacy trend formula. This isolates the persistence change for cleaner research comparison.
-
-### 3. Peak-psychology component
-
-**Weight in sentiment level: 20%.**
-
-`distance_from_52w_high` measures the subject close against the highest close in the previous 252 sessions. The component maps approximately as follows:
-
-| Distance from 252-session high | `sentiment_peak_score` |
-| ---: | ---: |
-| 0% | +1.00 |
-| -5% | +0.75 |
-| -10% | +0.50 |
-| -20% | 0.00 |
-| -30% | -0.50 |
-| -40% or lower | -1.00 |
-
-The intent is behavioral: persistent proximity to records often reinforces a winner narrative, while a large sustained drawdown can weaken that narrative.
-
-### 4. Persistence component — v0.3.2
-
-**Weight in sentiment level: 15%.**
-
-v0.3.1 counted how many of the previous 20 sessions closed below SMA50. That field (`days_below_sma50`) remains available as a diagnostic, but it no longer drives the persistence component.
-
-v0.3.2 uses two exponentially weighted measurements over a 40-session span.
-
-#### Persistence occupancy
-
-First define whether the subject is below EMA50:
-
-```text
-below_ema50 = 1 when close < EMA50, otherwise 0
-```
-
-Then calculate:
-
-```text
-persistence_occupancy = EWMA(below_ema50, span=40)
-```
-
-Range is 0..1. A high value means recent history has repeatedly spent time below the responsive trend anchor.
-
-The directional occupancy score is:
-
-```text
-occupancy_score = 1 - 2 * persistence_occupancy
-```
-
-So 0% occupancy maps to +1 and 100% occupancy maps to -1.
-
-#### Persistence pressure
-
-BKTSTR computes 20-session Average True Range from daily high/low/close data and normalizes distance from EMA50 by volatility:
-
-```text
-normalized_ema50_distance = (close - EMA50) / ATR20
-```
-
-This matters because being $3 below an EMA is significant in a calm stock and less significant in a highly volatile stock.
-
-That normalized distance is exponentially smoothed:
-
-```text
-persistence_pressure_raw = EWMA(normalized_ema50_distance, span=40)
-pressure_score = tanh(persistence_pressure_raw)
-```
-
-Finally:
-
-```text
-sentiment_persistence_score = mean(occupancy_score, pressure_score)
-```
-
-This captures both **how persistently** price is below trend and **how far** below trend it tends to be, while adjusting for volatility.
-
-### Sentiment level
-
-The four component scores are combined using:
-
-```text
-leadership  35%
-trend       30%
-peak        20%
-persistence 15%
-```
-
-The weighted mean over available components is `sentiment_direction` in the range -1..+1.
-
-`sentiment_completeness` equals the sum of available component weights. Missing long-history features reduce completeness instead of being silently imputed.
-
-`sentiment_confidence` incorporates completeness, absolute component magnitude, and absolute sentiment direction. Low agreement among strong components can therefore produce low confidence even when each input is individually large.
-
-### Informational multipliers
-
-For research, BKTSTR exposes symmetric bounded multipliers:
-
-```text
-adjustment = 0.5 * sentiment_direction * sentiment_confidence
-sentiment_multiplier_long  = clip(1 + adjustment, 0.5, 1.5)
-sentiment_multiplier_short = clip(1 - adjustment, 0.5, 1.5)
-```
-
-**These do not change position size in v0.3.3.** They are metadata only. Position sizing should not be altered until the layer proves predictive out of sample.
-
-## Sentiment momentum
-
-Momentum measures the change in the sentiment level itself:
-
-```text
-sentiment_momentum20 = clip(direction_today - direction_20_sessions_ago, -1, +1)
-sentiment_momentum60 = clip(direction_today - direction_60_sessions_ago, -1, +1)
-```
-
-The combined score is:
-
-```text
-sentiment_momentum = 65% * momentum20 + 35% * momentum60
-```
-
-Weights are renormalized if one lookback is unavailable.
-
-Interpretation:
-
-- Positive: sentiment is improving.
-- Near zero: sentiment level is stable.
-- Negative: sentiment is deteriorating.
-
-Momentum is intentionally separate from level. A strongly bullish asset can have sharply negative sentiment momentum during an early narrative break.
-
-## Sentiment fragility
-
-Fragility is **non-directional** and ranges from 0 to 1. High fragility means the sentiment state is internally contradictory, changing rapidly, experiencing volatility expansion, or some combination of those conditions.
-
-### Component spread — 50% of fragility
-
-`sentiment_component_spread` is the weighted standard deviation of the four sentiment components around the weighted `sentiment_direction`, clipped to 0..1.
-
-Low spread means leadership, trend, peak psychology, and persistence broadly agree. High spread means the story is internally fractured.
-
-### Volatility stress — 30% of fragility
-
-BKTSTR exposes:
-
-- `atr20_pct`: ATR20 divided by close, percent.
-- `realized_vol20`: annualized standard deviation of daily returns over 20 sessions.
-- `realized_vol60`: annualized standard deviation over 60 sessions.
-- `volatility_ratio`: realized_vol20 / realized_vol60.
-
-Two expansion measures are used:
-
-```text
-vol_ratio_stress = clip((volatility_ratio - 1) / 0.75, 0, 1)
-atr_stress = clip((atr20_pct / median60(atr20_pct) - 1) / 0.75, 0, 1)
-```
-
-Their available-value mean is `sentiment_volatility_stress`.
-
-A value near zero means short-horizon volatility is not elevated relative to its recent baseline. A value near one means volatility has expanded substantially.
-
-### Transition speed — 20% of fragility
-
-The third fragility ingredient is `abs(sentiment_momentum20)`. A rapid change in either direction can make the prevailing sentiment state less stable.
-
-Final formula:
-
-```text
-sentiment_fragility =
-    50% * component_spread
-  + 30% * volatility_stress
-  + 20% * abs(momentum20)
-```
-
-Available inputs are renormalized and the result is clipped to 0..1.
-
-Fragility must never be interpreted as automatically bearish. High fragility plus bearish momentum and a bearish regime can strengthen a short thesis; high fragility plus improving momentum and bullish confirmation can describe an upside transition.
-
-## Data provenance and quality tiers
-
-The provenance system is designed to prevent lower-confidence data from entering a backtest invisibly.
-
-| Tier | Label | Definition | v0.3.3 status |
-| --- | --- | --- | --- |
-| A | Clean | Objective point-in-time market data with deterministic transforms | **Enabled** |
-| B | Structured | Reliable structured data requiring interpretation/revision discipline | Not yet enabled |
-| C | Derived | Model-transformed narrative/text data | Not yet enabled |
-| D | Experimental | Esoteric, low-confidence, or difficult-to-reconstruct data | Not yet enabled |
-
-The source registry already reserves future source IDs:
-
-- `price` — Tier A, available now.
-- `options` — Tier B, unavailable in v0.3.2.
-- `analyst` — Tier B, unavailable.
-- `macro` — Tier B, unavailable.
-- `news` — Tier C, unavailable/model-derived.
-- `social` — Tier D, unavailable/model-derived and not currently marked point-in-time safe.
-
-### Profiles and toggles
-
-The v0.3.3 sentiment request accepts:
-
-```text
-sentiment_data_profile=clean
-sentiment_sources=price
-```
-
-`clean` is the default and currently the only available profile. If a request asks for an unavailable source, the request fails explicitly. BKTSTR will not replace the missing source with another source and will not silently promote a lower-quality tier.
-
-Every sentiment-enabled response includes provenance metadata such as:
-
-```json
-{
-  "profile": "clean",
-  "non_clean_data_used": false,
-  "all_point_in_time_safe": true,
-  "sources": [
-    {
-      "id": "price",
-      "tier": "A",
-      "point_in_time_safe": true,
-      "model_derived": false,
-      "available": true
-    }
-  ]
-}
-```
-
-A future GUI should surface `non_clean_data_used` prominently whenever it becomes true.
-
-## Look-ahead safety
-
-Look-ahead safety is a hard requirement, not an optional display property.
-
-For an intraday trading session on date D, BKTSTR attaches the latest completed sentiment row whose daily date is **strictly earlier than D**. Therefore a Tuesday intraday trade can use Monday's completed daily data but never Tuesday's eventual close/high/low.
-
-Momentum, persistence, volatility, and fragility are all computed within the historical daily series before this strict prior-day attachment occurs.
-
-Non-price sources added in the future must also be point-in-time reconstructable. For revision-prone macro or analyst data, the system should use the value actually published and known on the historical date, not a later revised value.
-
-## v0.3.3 coverage behavior
-
-v0.3.3 distinguishes optional historical warm-up from required backtest-period data. Missing optional warm-up must not convert an otherwise valid request into a 502. Instead BKTSTR uses available history, reduces completeness where appropriate, and reports:
-
-```text
-requested_warmup_start
-coverage_start
-coverage_end
-warmup_degraded
-subject / sector / market coverage
-fallback_used
-```
-
-Missing required-period data remains a hard failure. Cache hits must preserve exactly the same coverage/provenance semantics as uncached computation.
-
-## Agent/API control path
-
-Some execution environments cannot reliably reach the Railway hostname directly. The proven agent path is:
-
-```text
-ChatGPT → Supabase.execute_sql → pg_net HTTP request → Railway BKTSTR → net._http_response → ChatGPT
-```
-
-See `AGENT_BACKTEST_RUNBOOK.md` for bearer-authenticated SQL, timeout/polling discipline, typed request bodies, percentage semantics, and standard QQQ/SOXX controls.
-
-## API examples
-
-### Typed regime + sentiment backtest
-
-Authenticate every research request with `Authorization: Bearer <BKTSTR_API_KEY>`
-and submit a JSON body to `POST /api/v1/backtests`:
-
-```json
-{
-  "strategy": {
-    "id": "bktstr.bearish-regime-scalp",
-    "version": "1.0.0",
-    "parameters": {"stop_pct": 1.0, "target_pct": 3.0}
-  },
-  "market": {
-    "symbol": "NVDA",
-    "start": "2026-06-01",
-    "end": "2026-08-21",
-    "timeframe": "1m",
-    "source": "auto"
-  },
-  "side": "short",
-  "entry": "close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10",
-  "regime": {
-    "enabled": true,
-    "rules": "day_sma20_slope5.lt:0,relative_return20.lt:0",
-    "benchmark": "SOXX",
-    "sentiment_enabled": true,
-    "sentiment_sector_benchmark": "SOXX",
-    "sentiment_market_benchmark": "QQQ",
-    "sentiment_data_profile": "clean",
-    "sentiment_sources": ["price"]
-  },
-  "execution": "async",
-  "include_trades": true
-}
-```
-
-This long request returns `202 Accepted` with an immutable experiment envelope
-whose `status` is `queued`. Poll `GET /api/v1/experiments/{experiment_id}` with
-the same bearer key until `status` is `completed` or `failed`. A completed
-envelope carries `result.metrics`, `result.trades`, `result.configuration`, and
-`result.provenance`; it does not expose the retired query-string payload.
-
-The regime remains a hard trade filter. Sentiment outputs remain research metadata unless a later release explicitly introduces validated sizing behavior.
-
-## GUI implementation contract
-
-The machine-readable companion file is:
-
-```text
-docs/gui/sentiment-data-contract.json
-```
-
-Future GUI code should treat that contract and `/api/v1/capabilities` as the authoritative field vocabulary.
-
-Recommended GUI panels:
-
-### 1. Sentiment state card
-
-Display three independent gauges:
-
-- **Level**: `sentiment_direction` (-1..+1)
-- **Momentum**: `sentiment_momentum` (-1..+1)
-- **Fragility**: `sentiment_fragility` (0..1)
-
-Do not collapse the three into one unlabeled color.
-
-### 2. Component decomposition
-
-Show four component bars:
-
-- Leadership
-- Trend
-- Peak psychology
-- Persistence
-
-A disagreement visualization is especially important because `sentiment_component_spread` is itself meaningful.
-
-### 3. Transition/volatility panel
-
-Show:
-
-- `persistence_occupancy`
-- `persistence_pressure_raw`
-- `volatility_ratio`
-- `sentiment_volatility_stress`
-- 20/60 sentiment momentum
-
-### 4. Provenance badge
-
-Always display the active data profile. If `non_clean_data_used=true`, display a visible warning/badge and list every active source with its quality tier. A user should be able to turn optional non-clean families on/off independently when those sources are implemented.
-
-### 5. Research-vs-execution distinction
-
-GUI labels must distinguish:
-
-- informational multiplier
-- actual configured `position_size`
-
-In v0.3.3 the multiplier must never be displayed as though it changed P/L sizing.
-
-### Suggested semantic labels
-
-These labels are presentation guidance only; the raw numeric value remains authoritative.
-
-**Sentiment direction**
-
-- -1.00 to -0.60: strongly bearish
-- -0.60 to -0.20: bearish
-- -0.20 to +0.20: neutral/mixed
-- +0.20 to +0.60: bullish
-- +0.60 to +1.00: strongly bullish
-
-**Fragility**
-
-- 0.00 to 0.25: coherent/stable
-- 0.25 to 0.50: mild tension
-- 0.50 to 0.75: fragile
-- 0.75 to 1.00: highly unstable
-
-These thresholds should remain GUI labels, not trade rules, unless independently validated.
-
-## Response field glossary
-
-### Sentiment outputs
-
-- `sentiment_direction`: weighted background sentiment level, -1..+1.
-- `sentiment_confidence`: confidence in level interpretation, 0..1.
-- `sentiment_completeness`: fraction of component weight with valid data, 0..1.
-- `sentiment_multiplier_long`: informational long-side prior, 0.5..1.5.
-- `sentiment_multiplier_short`: informational short-side prior, 0.5..1.5.
-- `sentiment_momentum20`: 20-session change in sentiment direction, -1..+1.
-- `sentiment_momentum60`: 60-session change, -1..+1.
-- `sentiment_momentum`: weighted 20/60-session change, -1..+1.
-- `sentiment_component_spread`: disagreement among level components, 0..1.
-- `sentiment_volatility_stress`: short-vs-medium volatility expansion, 0..1.
-- `sentiment_fragility`: combined non-directional instability, 0..1.
-
-### Persistence/volatility diagnostics
-
-- `ema50`, `ema100`, `ema200`: subject exponential moving averages.
-- `atr20_pct`: ATR20 as percent of subject close.
-- `realized_vol20`, `realized_vol60`: annualized realized volatility in percent.
-- `volatility_ratio`: realized_vol20 / realized_vol60.
-- `persistence_occupancy`: EWMA probability-like occupancy below EMA50, 0..1.
-- `normalized_ema50_distance`: close-minus-EMA50 measured in ATR20 units.
-- `persistence_pressure_raw`: EWMA of normalized EMA50 distance.
-
-## Research discipline
-
-The sentiment system is designed to create hypotheses, not certify them. Recommended workflow:
-
-1. Define sentiment formulas before viewing validation results.
-2. Treat heavily explored periods as training/discovery data.
-3. Validate on untouched periods/symbols when provider history permits.
-4. Keep non-clean data disabled during clean baseline testing.
-5. When adding a new source family, test the clean model and augmented model side by side.
-6. Never infer that a better in-sample P/L automatically justifies larger live position sizing.
-7. Preserve all provenance metadata with research outputs.
-
-
-### Current validation status (August 2026 research pass)
-
-The following findings guide future experiments but are not production trade rules:
-
-- NVDA Mar-Dec 2025 bearish-regime control: 30 trades, 40% wins, approximately -$2.27 EV/trade.
-- NVDA Jun-Aug 2026 bearish-regime control: 7 trades, 85.7% wins, approximately +$6.09 EV/trade.
-- Fragility threshold sweeps did not show reliable monotonicity.
-- High-fragility NVDA and MU samples were strong but tiny; AVGO remained negative and AMD produced no qualifying high-fragility trades.
-- AVGO's high-fragility state carried much greater volatility stress and multiple stop-outs, supporting separation of structural disagreement from volatility chaos.
-- SOXX and QQQ both improved materially from 2025 to Jun-Aug 2026 under the same frozen scalp trigger, supporting the QQQ → SOXX → subject hierarchy.
-
-Treat the heavily explored NVDA 2025 and Jun-Aug 2026 samples as discovery data. New claims require untouched periods and cross-symbol validation.
-
-## Historical v0.3.5 release identity and development workflow
-
-v0.3.5 does not change trading formulas. It adds an explicit release identity so a production result can be tied back to the source and deterministic formula/cache contract that produced it. `/health` reports `version` plus `git_commit`, `git_branch`, `git_repo`, `deployment_id`, and optional `build_time`. Railway-sourced identity comes from `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_GIT_BRANCH`, `RAILWAY_GIT_REPO_OWNER`, `RAILWAY_GIT_REPO_NAME`, and `RAILWAY_DEPLOYMENT_ID`; local verification may override commit/build time with `BKTSTR_GIT_COMMIT` and `BKTSTR_BUILD_TIME`.
-
-`/api/v1/capabilities` also publishes:
-
-- intraday feature formula version;
-- daily regime formula version;
-- daily sentiment formula version;
-- derived cache format version.
-
-The development path is intentionally separated from the research/control plane:
-
-```text
-feature branch → GitHub CI → merge main → Railway auto-deploy
-                                      ↓
-                           Supabase pg_net acceptance
-```
-
-GitHub CI runs the full test suite, Python compile checks, a generated-file hygiene check, and the cache benchmark. Generated `__pycache__`, `.pyc/.pyo`, and `.pytest_cache` artifacts must never be tracked. After deployment, `scripts/production_acceptance.py` runs two one-day NVDA backtests with different `stop_pct` values, submits their comparison, and polls it to completion with a finite deadline. The script also checks the deployed OpenAPI enums and the asynchronous status, URL, retry-body, and polling-header contracts.
-
-When direct GitHub access from an agent is unavailable, the **GitHub-through-Supabase** recovery bridge in `ops/supabase/GITHUB_BRIDGE.md` uses `pg_net` to resolve an exact commit/tree and retrieve source bodies from GitHub's raw-content host. Every recovered source body is retained with its Git blob SHA so integrity can be verified. This bridge is operational tooling only and never enters the backtest execution path.
-
-## v0.5 strategy-neutral core contracts
-
-v0.5 publishes domain contracts for research-variable metadata and the existing baseline strategy. It does not change the v0.3.5 runtime version, trading formulas, execution behavior, legacy endpoint, or production-acceptance defaults.
-
-### Research variables and evidence tiers
-
-Every variable has a stable ID and semantic version. Tier A is immutable point-in-time source data; Tier B is trusted structured point-in-time data or validated deterministic measurement data; Tier C is lower-trust model-derived evidence; and Tier D is experimental or difficult-to-reconstruct evidence. Current technical measurements, regime, sentiment, and fragility are Tier B variables that depend only on Tier A source variables.
-
-Definitions and snapshots are immutable variables: consumers receive read-only values, lineage, digests, coverage, deterministic suggestion policy, and optional GUI metadata. Monotonic inheritance means a derived variable cannot claim a higher trust tier than any of its inputs. Consequently Tier C or Tier D evidence cannot influence a Tier A or Tier B variable.
-
-`/api/v1/capabilities` builds `research_variables` metadata from registered definitions, including tiers, stable identities, dependencies, lineage, suggestion policy, and GUI metadata. This makes the registered contract—not a copied formula list—the source of truth for a future GUI.
-
-### Baseline strategy contract
-
-The existing baseline is the immutable `StrategyDefinition` `bktstr.bearish-regime-scalp`, executed by the strategy-neutral `bktstr.next-bar-open` execution model. Its registered parameter, variable-use, and filter metadata are published at `strategies.baseline` in `/api/v1/capabilities`; this publication does not add a second strategy or alter the legacy request payload.
-
-Strategy filters declare one of gate, rank, or annotate behavior and cannot mutate research variables. A strategy must explicitly opt into Tier C or Tier D evidence, and lower-trust evidence remains unable to change Tier A or Tier B measurements.
-
-### Missing data, suggestions, and forced runs
-
-Missing required evidence fails with an explanation and a deterministic suggestion. Suggestions are diagnostics only: they never modify source data or variable snapshots, and there is no automatic backfill. Optional missing evidence may be omitted only when its registered filter is both optional and forceable and the caller explicitly confirms a forced run. Such a forced run is degraded and non-canonical; it cannot be presented as a canonical result.
-
-The capability response publishes registered metadata only; it does not promise confirmation requirements or forced-run status. Run-specific information is split across run diagnostics, filter decisions and provenance, and the top-level StrategyRunResult degraded/canonical status when a registered optional, forceable filter is used; the current baseline has no registered filters.
-
-## v0.6 research API
-
-v0.6 makes the typed REST API BKTSTR's programmatic research interface. A
-future MCP server is only an adapter over these same services; it does not add
-agent-specific rules or a second experiment model. The complete machine-readable
-contract is available at `GET /openapi.json`.
-
-`GET /health` and `GET /api/v1/health` are unauthenticated deployment probes.
-Other `/api/v1/*` routes require `Authorization: Bearer <BKTSTR_API_KEY>`.
-Clients submit registered strategy work through `POST /api/v1/backtests`,
-`POST /api/v1/parameter-sweeps`, `POST /api/v1/compare`, or
-`POST /api/v1/regime-comparison`, then poll the canonical
-`/api/v1/experiments/{experiment_id}` envelope. `GET /api/v1/backtests/{experiment_id}`
-is the typed backtest view. The former `GET /api/v1/backtest` endpoint returns
-`410 legacy_endpoint_removed`.
-
-Experiments retain canonical requests, results, provenance, and immutable
-artifacts on the Railway volume, with SQLite as the committed source of record.
-For authentication, lifecycle, idempotency, errors, request examples, market
-data, and comparison details, use the canonical [API reference](API_REFERENCE.md).
-
-Set `BKTSTR_API_KEY` as the single bearer credential. Set
-`BKTSTR_EXPERIMENT_DIR` to a directory on the Railway volume so SQLite records
-and immutable artifacts survive a deployment. `BKTSTR_SYNC_MAX_CALENDAR_DAYS`
-sets the inclusive maximum span for an inline sync backtest (default `31`), and
-`BKTSTR_MAX_SWEEP_VARIANTS` caps parameter sweeps (default `500`).
-
-## Known limitations
-
-- v0.3.3 sentiment is price-implied, not literal investor-opinion measurement.
-- Provider history limits can reduce completeness for long-lookback fields.
-- The current sentiment weights are research priors, not statistically fitted production coefficients.
-- The multiplier is informational only.
-- Options, analyst, macro, news, and social sources are registered but not implemented.
-- Historical options contracts are not backtested by the underlying-equity engine.
-- Aggregate drawdown is still closed-trade equity rather than full mark-to-market.
-
-## Versioning
-
-This research branch advances sub-builds through `0.3.9`; the next release after `0.3.9` becomes `0.4.0`.
+Discussion and strategy authoring happen outside the timed execution loop.
+The bot runs a frozen assignment. It cannot rewrite its strategy, choose a new
+model, expand its universe, raise its limits, or tune thresholds during a run.
+
+Retain Python, FastAPI, SQLite, the existing experiment worker, and persistent
+caches. Use a separate process for the continuous paper runner so HTTP latency
+and research jobs do not control candle timing. Do not add a distributed queue,
+new database, or web application until there is a demonstrated need.
+
+## Strategy configuration
+
+The implemented research layer uses [reusable trade idea containers](TRADE_IDEA_CONTAINERS.md).
+Each thesis defines events, causal context, references, and separate future labels.
+An event-study path retains eligible observations independently of trading positions.
+Its evidence can inform a frozen policy that runs through the existing engine.
+Study variants and policy variants share immutable history, explicit applications,
+and controlled campaigns. These research foundations precede Jev integration.
+
+The [local configuration interface](STRATEGY_CONFIGURATION.md) implements the
+Task 1 numerical subset. The broader contract below remains the target design;
+macro/model filters and paper execution are future tasks. Controlled numerical
+campaigns, visual HTML cards, and secondary Markdown review files are documented
+in the [research guide](IDEA_RESEARCH_GUIDE.md).
+
+A versioned strategy document contains:
+
+- Stable strategy ID, semantic version, schema version, and canonical digest.
+- Hypothesis, falsification criteria, and allowed evidence tiers.
+- Instrument roles and explicit symbols or a versioned point-in-time universe.
+- Calendar, timezone, session, candle interval, and decision timing.
+- Ordered macro, market, sector, stock, and technical filter definitions.
+- Filter role: gate, rank, or annotate; required inputs and missing-data policy.
+- Jev question-set version, exact model ID, answer schema, threshold policy,
+  freshness limit, refresh schedule, timeout, and request/token budget.
+- Deterministic entry, sizing, exit, exposure, daily-loss, and session-end rules.
+- Execution-model version, spread, slippage, fee, and short-borrow assumptions.
+- Development/validation/final test periods, variant budget, and evaluation criteria.
+
+Publish an immutable resolved manifest before running. Unknown fields, unsupported
+indicators, incompatible calendars, missing limits, and invalid units fail before
+market or model provider calls. The initial authoring format is strict JSON;
+do not execute arbitrary code embedded in strategy documents.
+
+The current baseline remains available with its original semantics. A new
+generic minute strategy is a separate registered identity. No mandatory QQQ,
+SOXX, semiconductor, bearish, or fund-specific defaults apply to all strategies.
+
+## Evidence and macro timing
+
+Task 2 implements the local source/packet contracts described in
+[macro evidence](MACRO_EVIDENCE.md), with a prospective-only BLS CPI adapter.
+Historical archive coverage and strategy-filter consumers remain pending.
+
+Store source identity, content digest, units, observation/event time, publication
+time, ingestion time, availability time, revision/vintage, and coverage.
+Historical joins use the version actually available at the decision cutoff.
+A later revised economic value must not replace its first release silently.
+
+Retrospective publication-time simulation and prospective ingestion-time replay
+are separate declared modes. Prospective evidence is usable only after receipt.
+If historical publication/vintage evidence is unavailable, exclude it from
+canonical historical evaluation and use it prospectively.
+
+Derive changes in yields, returns, volatility, and relative strength in code.
+Jev receives a compact supplied evidence packet and explicit questions, such as
+whether a release represents tightening or easing relative to the supplied
+expectation. Missing consensus data must produce unavailable/uncertain evidence,
+not an invented surprise.
+
+Macro refresh can occur on a new release or a scheduled observation. It need not
+repeat every minute. Every reused judgment must remain within its declared
+freshness interval; a completed candle triggers deterministic strategy evaluation.
+
+## Jev boundary, planned
+
+Use OpenRouter's Decisions interface behind a Python adapter. Confirm the live
+wire schema during integration; do not assume chat-completions compatibility.
+Start with the explicitly versioned `typesafe/jev-1.13` identifier and recheck
+availability before implementation. Do not use a moving latest alias or silently
+fall back to another model.
+
+The adapter returns typed judgments and provider metadata. Jev does not calculate
+indicators, size positions, place orders, change risk limits, or control exits.
+Model probabilities describe its answer task; they are not trading win rates.
+Constrained answers can still be wrong.
+
+Persist the exact evidence packet, question/schema versions, requested and
+resolved model/provider identities when exposed, parameters, raw response,
+validated response, timestamps, duration, usage, and error classification.
+Record unavailable provider identity fields explicitly rather than inventing them.
+Keep secrets and unrelated account data out of these records.
+
+Two modes are required:
+
+- Acquisition: request a judgment, validate and persist it before use.
+- Replay: consume a specified immutable response record with no model network call.
+
+An input digest alone does not identify a fresh model outcome. Multiple acquisitions
+of identical input get distinct response IDs; each experiment pins one. Saving
+responses makes engine replay deterministic, not the remote model itself.
+
+Retries are bounded by deadline and budget. Responses arriving after the decision
+deadline may be retained for diagnostics but cannot retroactively cause a trade.
+Model unavailability, stale evidence, invalid responses, or exhausted budgets block
+new entries that depend on Jev. Protective exits continue without Jev.
+
+## Evidence governance
+
+Tier A is immutable point-in-time source data. Tier B is trusted structured point-in-time data or validated deterministic measurement data. Tier C is
+lower-trust model-derived evidence. Tier D is experimental or
+difficult-to-reconstruct evidence. Current technical measurements, regime, sentiment, and fragility are Tier B variables.
+
+Definitions and snapshots are immutable variables. Monotonic inheritance means
+a derived variable cannot claim a higher trust tier than its inputs. A Jev
+judgment has a Tier C floor and inherits Tier D if its inputs require it.
+A strategy must explicitly opt into lower-trust evidence.
+
+Missing required evidence fails with a deterministic suggestion and no automatic backfill. Existing optional/forceable filter contracts support an explicitly
+confirmed forced run that is degraded and non-canonical. Do not apply a forced
+historical omission as an implicit live-entry fallback.
+
+The capability response publishes registered metadata only; it does not promise confirmation requirements or forced-run status. Run-specific information belongs
+in run diagnostics, filter decisions and provenance, and the top-level StrategyRunResult degraded/canonical status. Planned Jev filters must extend
+these contracts without weakening them.
+
+## Decisions, execution, and paper sessions
+
+Extract a shared pure evaluator for historical and forward use. It consumes an
+as-of state, resolved strategy, and simulated account state. It emits a decision
+record and bounded order intents. Log no-trade decisions and failed gates as well
+as entries, so every filter's effect is measurable.
+
+Preserve the current next-bar-open baseline. A live-data paper fill cannot use
+a price that occurred before the signal and model response were available.
+The new execution model must declare gaps, spread, adverse slippage, fees,
+borrow assumptions, partial-fill policy, and mark-to-market accounting.
+OHLCV alone does not establish quote-level or queue-level fill realism.
+
+Each paper session declares its start, end, maximum positions, per-position
+notional, gross exposure, daily loss cap, model budget, and stale-data limits.
+Simulation capital is user-supplied; it is never read from a fund portfolio.
+Deduplicate candles and intents, persist positions and checkpoints, and recover
+without duplicate orders after restart.
+
+Stopping disables new entries immediately. Normal session expiry closes simulated
+positions under the declared execution policy. If prices are stale, mark positions
+unresolved rather than fabricate a fill. Persist failures and reconciliation state.
+
+Clear Street demo is a later, explicit adapter for testing broker workflows.
+Its replayed prices, automatic fills, and daily reset make it unsuitable as the
+performance ledger for a live-data paper experiment. Internal paper and broker-demo
+sessions have different execution identities and must not mix results.
+Production broker order endpoints remain outside scope.
+
+## Evaluation
+
+Net EV in R/trade is the primary objective when iterating on trading-policy
+features. Idea cards and test reports also show dollar EV, planned and realized
+reward/risk, daily Sharpe, and maximum drawdown. New configured research uses the
+[versioned metric contract](IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes), while
+historical results and the legacy baseline API retain their original definitions.
+
+Compare technical-only, numerical-context, and numerical-plus-Jev variants with
+identical dates, data, sizing, costs, and exits. Count rejected opportunities,
+trades, exposure, net performance, open-position drawdown, and sensitivity to costs.
+Separate model classification/calibration evaluation from trading outcome evaluation.
+
+Record all attempted variants and final-data inspections. Use chronological
+development, validation, and untouched final periods; purge overlaps caused by
+lookback and holding horizons where needed. Never tune on final evaluation data.
+A frozen classifier applied to historical text may still know later events from
+training. Document that limitation; forward paper sessions provide stronger
+evidence about actual decision-time behavior.
+
+Initial acceptance is operational and scientific: reproducible replay, correct
+causal timing, complete lineage, no duplicate paper orders, and an honest
+comparison. Profitability is an experiment result, not a delivery promise.
+
+## Storage and delivery
+
+Keep source data, numerical derived caches, model-response records, and decision
+logs distinct. See [cache architecture](CACHE_ARCHITECTURE.md).
+Existing `BKTSTR_DERIVED_CACHE_ENABLED` controls numerical derived caching;
+turning it off must not trigger fresh Jev inference during replay.
+
+Expose build `git_commit`, strategy, schema, formula, execution, and model
+identities in research artifacts. Planned capabilities remain labelled planned
+until tests and authenticated acceptance establish them.
+Follow the [implementation plan](IMPLEMENTATION_PLAN.md).
+
+## External contracts
+
+Reviewed on 2026-09-20; verify again when implementing an adapter.
+
+- [TypeSafe System One concepts](https://docs.typesafe.ai/concepts/system-one)
+- [OpenRouter Jev model](https://openrouter.ai/typesafe/jev-1.13/)
+- [OpenRouter Decisions example](https://openrouter.ai/labs/jev/compile)
+- [Clear Street demo](https://docs.clearstreet.io/studio/docs/sandbox)
+- [Clear Street authentication](https://docs.clearstreet.io/studio/docs/oauth2)
+
+Vendor pricing, advertised latency, and account entitlements are not fixed
+architecture guarantees. Measure the actual integration and record observed limits.

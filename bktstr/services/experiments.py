@@ -201,9 +201,14 @@ class ExperimentRecord:
 def experiment_root() -> Path:
     """Return the configured durable root, preferring an explicit local override."""
     configured = os.getenv("BKTSTR_EXPERIMENT_DIR")
+    railway_volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    if os.getenv('RAILWAY_ENVIRONMENT_ID'):
+        if not railway_volume:
+            raise RuntimeError('Railway research requires a persistent volume')
+        if configured and not Path(configured).resolve().is_relative_to(Path(railway_volume).resolve()):
+            raise RuntimeError('Research directory must be on the Railway volume')
     if configured:
         return Path(configured)
-    railway_volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
     if railway_volume:
         return Path(railway_volume) / "bktstr-experiments"
     return Path("/tmp/bktstr-experiments")
@@ -1122,6 +1127,7 @@ class ExperimentWorker:
         self.clock = clock
         self._has_lease = False
         self._lease_lost = threading.Event()
+        self._last_maintenance = None
 
     def _ensure_lease(self) -> tuple[bool, bool]:
         current = self.clock()
@@ -1182,7 +1188,7 @@ class ExperimentWorker:
         self, record: ExperimentRecord, error: Mapping[str, Any]
     ) -> ExperimentRecord:
         try:
-            return self.store.fail(
+            completed = self.store.fail(
                 record.experiment_id,
                 error,
                 owner_id=(
@@ -1191,10 +1197,24 @@ class ExperimentWorker:
                     else self.owner_id
                 ),
             )
+            self._publish_research_reports(completed)
+            return completed
         except ExperimentStateError:
             # Another owner may have terminalized or recovered this row while a
             # stale handler was returning. Its authoritative SQLite state wins.
             return self.store.load_experiment(record.experiment_id)
+
+    def _publish_research_reports(self, record: ExperimentRecord) -> None:
+        if record.operation not in {'event_study', 'configured_backtest'}:
+            return
+        try:
+            from .idea_reports import publish_research_reports
+            publish_research_reports(self.store, record)
+        except Exception:
+            # A derivative report failure must not rewrite a committed result.
+            # Authenticated report endpoints regenerate it from canonical records.
+            import logging
+            logging.getLogger(__name__).warning('Research Markdown publication failed for %s; regenerate through the report endpoint.', record.experiment_id)
 
     def _execute(self, record: ExperimentRecord) -> ExperimentRecord:
         operation = self.operations.get(record.operation)
@@ -1249,7 +1269,7 @@ class ExperimentWorker:
                 },
             )
         try:
-            return self.store.complete(
+            completed = self.store.complete(
                 record.experiment_id,
                 result,
                 provenance,
@@ -1259,6 +1279,8 @@ class ExperimentWorker:
                     else self.owner_id
                 ),
             )
+            self._publish_research_reports(completed)
+            return completed
         except ExperimentStateError:
             return self.store.load_experiment(record.experiment_id)
         except Exception as exc:
@@ -1276,6 +1298,16 @@ class ExperimentWorker:
     def _run_one_owned(self) -> ExperimentRecord | None:
         self.store.reconcile_artifacts(limit=_ARTIFACT_RECONCILE_LIMIT)
         record = self.store.claim_next(self.owner_id, now=self.clock())
+        if record is None and os.getenv('RAILWAY_ENVIRONMENT_ID'):
+            current = self.clock()
+            if self._last_maintenance is None or (current - self._last_maintenance).total_seconds() >= 3600:
+                self._last_maintenance = current
+                try:
+                    from .research_maintenance import maintain
+                    maintain(self.store)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).warning('Research maintenance failed; inspect authenticated storage status.')
         return None if record is None else self._execute(record)
 
     def run_one(self) -> ExperimentRecord | None:

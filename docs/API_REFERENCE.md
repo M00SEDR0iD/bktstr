@@ -4,6 +4,8 @@ Base URL: `https://bktstr-production.up.railway.app`
 
 BKTSTR is a read-only equity and ETF research API. It runs historical research and never places brokerage orders. `GET /openapi.json` is the machine-readable contract. This document explains the public request, lifecycle, market-data, and ownership rules.
 
+This reference describes implemented historical research only. Configurable macro filters, Jev judgments, paper sessions, and broker adapters remain planned; see the [system design](BKTSTR_SYSTEM_MANUAL.md) and [implementation plan](IMPLEMENTATION_PLAN.md). The existing named strategy is a baseline, not a project-wide trading mandate.
+
 ## Authentication and deployment ownership
 
 Send `Authorization: Bearer <BKTSTR_API_KEY>` on every `/api/v1/*` route except `GET /health` and `GET /api/v1/health`.
@@ -75,153 +77,22 @@ Every submission uses JSON and bearer authentication. The examples below are com
 }
 ```
 
-### Parameter sweep
+### Other research operations
 
-`POST /api/v1/parameter-sweeps`
+- `POST /api/v1/parameter-sweeps`: send `base` containing a complete backtest
+  request, `grid` mapping overridable parameter names to value lists, `objective`,
+  and `execution`. Objectives are `ev_per_trade`, `profit_factor`, `sharpe`,
+  `max_drawdown`, or `total_pnl`. These are metric names, not promises of validity
+  for every research design.
+- `POST /api/v1/compare`: send `candidates` containing completed experiment IDs or
+  objects with `name` and a complete `backtest` request, plus `execution`.
+  The first candidate is the reference; results do not automatically declare a winner.
+- `POST /api/v1/regime-comparison`: send `base`, `labels` containing `label`,
+  `start`, `end`, and optional `rule`, plus `disjoint_periods` and `execution`.
 
-```json
-{
-  "base": {
-    "strategy": {
-      "id": "bktstr.bearish-regime-scalp",
-      "version": "1.0.0",
-      "parameters": {
-        "stop_pct": 1.0,
-        "target_pct": 3.0
-      }
-    },
-    "market": {
-      "symbol": "NVDA",
-      "start": "2026-08-17",
-      "end": "2026-08-21",
-      "timeframe": "1m",
-      "source": "auto"
-    },
-    "side": "short",
-    "entry": "close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10",
-    "regime": {
-      "enabled": true,
-      "rules": "day_sma20_slope5.lt:0,relative_return20.lt:0",
-      "benchmark": "SOXX",
-      "sentiment_enabled": true,
-      "sentiment_sector_benchmark": "SOXX",
-      "sentiment_market_benchmark": "QQQ",
-      "sentiment_data_profile": "clean",
-      "sentiment_sources": ["price"]
-    },
-    "execution": "auto",
-    "include_trades": true
-  },
-  "grid": {
-    "stop_pct": [1.0, 2.0]
-  },
-  "objective": "profit_factor",
-  "execution": "auto"
-}
-```
-
-### Mixed comparison
-
-`POST /api/v1/compare`
-
-```json
-{
-  "candidates": [
-    "exp_0123456789abcdef",
-    {
-      "name": "wider-stop",
-      "backtest": {
-        "strategy": {
-          "id": "bktstr.bearish-regime-scalp",
-          "version": "1.0.0",
-          "parameters": {
-            "stop_pct": 2.0,
-            "target_pct": 3.0
-          }
-        },
-        "market": {
-          "symbol": "NVDA",
-          "start": "2026-08-17",
-          "end": "2026-08-21",
-          "timeframe": "1m",
-          "source": "auto"
-        },
-        "side": "short",
-        "entry": "close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10",
-        "regime": {
-          "enabled": true,
-          "rules": "day_sma20_slope5.lt:0,relative_return20.lt:0",
-          "benchmark": "SOXX",
-          "sentiment_enabled": true,
-          "sentiment_sector_benchmark": "SOXX",
-          "sentiment_market_benchmark": "QQQ",
-          "sentiment_data_profile": "clean",
-          "sentiment_sources": ["price"]
-        },
-        "execution": "auto",
-        "include_trades": true
-      }
-    }
-  ],
-  "execution": "auto"
-}
-```
-
-The first candidate is the reference. A named variant creates a child backtest. An experiment-ID candidate must name a completed backtest when the comparison worker executes. Candidate order controls the reference; the response reports metric deltas against it and does not declare a winner or causal result.
-
-### Regime comparison
-
-`POST /api/v1/regime-comparison`
-
-```json
-{
-  "base": {
-    "strategy": {
-      "id": "bktstr.bearish-regime-scalp",
-      "version": "1.0.0",
-      "parameters": {
-        "stop_pct": 1.0,
-        "target_pct": 3.0
-      }
-    },
-    "market": {
-      "symbol": "NVDA",
-      "start": "2025-01-01",
-      "end": "2026-08-21",
-      "timeframe": "1m",
-      "source": "auto"
-    },
-    "side": "short",
-    "entry": "close.cross_below:vwap,rsi14.lt:50,volume_ratio20.gt:1.10",
-    "regime": {
-      "enabled": true,
-      "rules": "day_sma20_slope5.lt:0,relative_return20.lt:0",
-      "benchmark": "SOXX",
-      "sentiment_enabled": true,
-      "sentiment_sector_benchmark": "SOXX",
-      "sentiment_market_benchmark": "QQQ",
-      "sentiment_data_profile": "clean",
-      "sentiment_sources": ["price"]
-    },
-    "execution": "auto",
-    "include_trades": true
-  },
-  "labels": [
-    {
-      "label": "2025",
-      "start": "2025-01-01",
-      "end": "2025-12-31"
-    },
-    {
-      "label": "2026",
-      "start": "2026-01-01",
-      "end": "2026-08-21"
-    }
-  ],
-  "disjoint_periods": true,
-  "execution": "auto"
-}
-```
+Use `/openapi.json` for exact field types and authenticated capabilities for
+registered bounds. The example dates and simulation sizes above illustrate a
+request; they are not an active strategy recommendation or account snapshot.
 
 ## Strategy and market rules
 
@@ -338,3 +209,69 @@ Historical raw-cache keys are provider, symbol, timeframe, and day. Historical e
 `POST /api/v1/compare` accepts 2 through 20 unique candidates. A candidate is either a completed backtest experiment ID beginning with `exp_`, or a named variant containing a complete typed backtest request. The first candidate is the reference. Named variants create linked child backtests. `metric_deltas` subtract the reference metric from each candidate metric, and `changed_inputs` compares canonical backtest requests.
 
 `POST /api/v1/regime-comparison` accepts 2 through 12 labels. Each label supplies a name, date range, and optional rule. Set `disjoint_periods` to require labelled ranges not to overlap. Both comparison operations create experiment records and return their results through the same polling lifecycle.
+# Idea research extension
+
+The following authenticated operations extend the existing baseline API. Bodies
+and exact schemas are published in OpenAPI. All revision references pin ID,
+semantic version, and content digest.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET/POST /api/v1/ideas` | List/create immutable idea revisions |
+| `GET/POST /api/v1/research/revisions/{kind}` | Study, policy, modifier, variant, and application records |
+| `GET /api/v1/research/components` | Supported causal numerical components |
+| `POST /api/v1/research/datasets` | Freeze supplied OHLCV and explicit session schedules |
+| `POST /api/v1/event-studies` | Queue a study; requires `Idempotency-Key` |
+| `POST /api/v1/configured-backtests` | Queue a configured policy; requires `Idempotency-Key` |
+| `POST /api/v1/research-protocols` | Freeze a controlled campaign |
+| `POST /api/v1/research-protocols/{id}/run` | Admit the fixed matrix and queue its jobs |
+| `GET /api/v1/research-protocols/{id}` | Campaign status and comparisons |
+| `GET /api/v1/experiments` | Paginated research history with idea, variant, instrument, campaign, status, date filters |
+| `GET /api/v1/ideas/{id}/report` | Idea history and results as JSON |
+| `GET /api/v1/ideas/{id}/html` | Default offline visual idea card; exposure-aware, authenticated |
+| `GET /api/v1/ideas/{id}/markdown` | Human-readable idea card |
+| `GET /api/v1/experiments/{id}/markdown` | Human-readable test results |
+| `GET /api/v1/experiments/{id}/artifacts/{kind}` | Event or label artifact with inspection logging |
+| `POST /api/v1/experiments/{id}/cancel` | Cooperative campaign-attempt cancellation; no budget refund |
+| `POST /api/v1/ideas/{id}/assessments` | Append a conclusion with evidence and limitations |
+| `POST /api/v1/research/inspections` | Disclose external/manual data exposure |
+
+Canonical experiment polling supports `event_study` and `configured_backtest`.
+Completed/failed jobs retain structured results. HTML/Markdown render on demand
+without input datasets or execution. See the [idea research guide](IDEA_RESEARCH_GUIDE.md).
+
+## Online storage and fresh reruns
+
+All routes below require bearer authentication. See [server storage](SERVER_RESEARCH_STORAGE.md)
+for retention, acquisition payloads, migration, and exact-replay distinctions.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/v1/research/storage` | Dataset inventory, pins, volume and backup status |
+| `POST /api/v1/research/datasets/acquire` | Fetch adjusted Massive minute data using explicit sessions |
+| `POST /api/v1/research/datasets/{dataset}/pin` | Set `pinned` true/false |
+| `POST /api/v1/research/storage/cleanup` | Preview expiry by default; `apply: true` deletes eligible inputs |
+| `POST /api/v1/research/storage/backup` | Refresh daily compressed backup, then expire eligible inputs |
+| `POST /api/v1/experiments/{experiment_id}/rerun` | Fresh-data linked exploratory run; requires `Idempotency-Key` |
+| `GET /api/v1/research/archive/export` | Consistent terminal-record archive, bounded to 64 MiB |
+| `POST /api/v1/research/archive/import` | Additive, collision-checked archive import |
+| `GET/POST /api/v1/research/archives` | List/preserve separate immutable historical archives |
+| `GET /api/v1/research/archives/{digest}` | Download a preserved archive, recording exposure |
+| `GET /api/v1/research/archives/{digest}/ideas/{idea}/html` | Render an archived idea from saved results |
+
+Cleanup keeps results permanently, uses a 30-day default, protects pins and frozen
+protocols, and pauses while work is queued/running. Reruns use a saved acquisition
+recipe or an explicit `acquisition` body; dates are fixed unless overridden along
+with an explicit schedule. Uploaded datasets have no inferred fetch recipe. Archives
+reject nonterminal source work and conflicting identities; oversized imports return 413.
+
+New backtest protocols default to and require `primary_metric: "ev_r_per_trade"`.
+Study protocols default to `mean` and still require an analysis label. Previously
+stored protocols retain their declared objectives; they are not migrated in place.
+Configured results include `metrics`, `metric_definitions`,
+`metric_unavailable_reasons`, and `daily_equity`. Trades include
+`initial_risk_dollars` and `net_r`. Policy comparisons provide `metric`, `unit`,
+primary `effect`, and `metric_changes` with baseline/candidate/difference for all
+headline outcomes. Undefined values are null. See the
+[metric contract](IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes) for formulas,
+sampling, modeled costs, and differences from the legacy baseline API.

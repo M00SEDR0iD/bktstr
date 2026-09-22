@@ -443,6 +443,8 @@ def test_openapi_polling_discriminates_operations_and_types_reproducibility_fiel
             "compare": "#/components/schemas/CompareExperimentResponse",
             "regime_comparison": "#/components/schemas/RegimeComparisonExperimentResponse",
             "pending": "#/components/schemas/PendingExperimentResponse",
+            "event_study": "#/components/schemas/EventStudyExperimentResponse",
+            "configured_backtest": "#/components/schemas/ConfiguredBacktestExperimentResponse",
         },
     }
     assert canonical["oneOf"] == [
@@ -450,6 +452,8 @@ def test_openapi_polling_discriminates_operations_and_types_reproducibility_fiel
         {"$ref": "#/components/schemas/ParameterSweepExperimentResponse"},
         {"$ref": "#/components/schemas/CompareExperimentResponse"},
         {"$ref": "#/components/schemas/RegimeComparisonExperimentResponse"},
+        {"$ref": "#/components/schemas/EventStudyExperimentResponse"},
+        {"$ref": "#/components/schemas/ConfiguredBacktestExperimentResponse"},
         {"$ref": "#/components/schemas/PendingExperimentResponse"},
     ]
 
