@@ -41,7 +41,7 @@ def remote_request(method, endpoint, *, bundle=None):
         with client.stream(method, origin + endpoint,
                            headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
                            content=canonical(bundle).encode('utf-8') if bundle is not None else None) as response:
-            if response.status_code != 200:
+            if response.status_code not in {200, 201}:
                 raise ValueError(f'server rejected archive operation (HTTP {response.status_code})')
             chunks, count = [], 0
             for chunk in response.iter_bytes():

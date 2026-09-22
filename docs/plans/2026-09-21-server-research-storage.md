@@ -55,4 +55,19 @@ separately with exposure history, rather than overwriting immutable identities.
 Verification: 619 full-suite tests passed before final vault fault fixes; the final
 39 focused storage/report/archive tests passed. Release consistency, compilation,
 and 120,000-row cache benchmark passed. Independent review findings have regression
-coverage. GitHub CI will verify the final commit before merge.
+coverage. All seven GitHub CI jobs passed before PR #19 merged.
+
+Production acceptance on merge b647b932 passed: authenticated baseline backtest
+and comparison, fresh Massive acquisition and linked rerun, configured backtest,
+unchanged original results, saved HTML/Markdown reports and application backup.
+The persistent Railway volume was verified. Fourteen current runs were imported
+and fourteen historical runs preserved separately; every imported result matched
+its original. Both server archives downloaded and restored into isolated stores.
+
+Railway currently requires a manual upstream update; auto deploy is unavailable.
+Its UI reported one day or $2.46 remaining on the trial. Provider-managed backups
+require Pro; application backups share the attached volume. Billing and an
+independent scheduled backup destination remain operational follow-ups.
+
+A final migration CLI correction accepts the historical archive endpoint's
+201 Created response. Its regression and archive tests passed (24 tests).
