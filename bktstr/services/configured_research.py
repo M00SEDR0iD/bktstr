@@ -41,6 +41,8 @@ def submit_research_run(store, request, idempotency_key):
 
 
 def _execute_study(record, store):
+    from .research_reruns import resolve_acquisition
+    record = resolve_acquisition(record, store)
     catalog = ResearchCatalog(store)
     from .research_protocol import check_cancelled, validate_attempt_execution
     check_cancelled(record.experiment_id, catalog)
@@ -52,9 +54,11 @@ def _execute_study(record, store):
         study = resolve_variant(study, catalog)
     app = catalog.require(request['application'], 'application')
     snapshot = load_snapshot(app.document['dataset'], catalog.datasets)
+    from .research_storage import remember_dataset
+    metadata = remember_dataset(catalog, snapshot)
     events = build_events(study, app, snapshot, start=request['start'], end=request['end'])
     labels = label_events(events, study.document['labels'], snapshot)
-    result = dict(kind='event_study', event_count=len(events.document['rows']),
+    result = dict(kind='event_study', dataset_metadata=metadata, event_count=len(events.document['rows']),
         events_artifact=catalog.save_artifact(events.document), labels_artifact=catalog.save_artifact(labels.document),
         study=study.document, application=app.document,
         interpretation='Forward observations, not executable trading profit.')
@@ -76,6 +80,8 @@ def _execute_study(record, store):
 
 
 def _execute_policy(record, store):
+    from .research_reruns import resolve_acquisition
+    record = resolve_acquisition(record, store)
     import asyncio
     from ..idea_resolution import resolve_variant, bind_policy
     from ..dataset_snapshots import SnapshotProvider, validate_scope
@@ -95,6 +101,8 @@ def _execute_policy(record, store):
         if evidence.operation != 'event_study' or evidence.status != 'completed' or evidence.request['idea']['id'] != request['idea']['id']:
             raise ValueError('policy evidence must be a completed study for this idea')
     snapshot = load_snapshot(app.document['dataset'], catalog.datasets)
+    from .research_storage import remember_dataset
+    metadata = remember_dataset(catalog, snapshot)
     validate_scope(snapshot, request['start'], request['end'], app.document['instruments'].values())
     # Legacy execution uses complete sessions. Reject intra-session split boundaries.
     for session in snapshot.document['schedule']:
@@ -108,7 +116,7 @@ def _execute_policy(record, store):
         bars=snapshot.frame(app.document['instruments']['subject']),
         schedule=[s for s in snapshot.document['schedule'] if instant(s['open']) >= instant(request['start']) and instant(s['close']) <= instant(request['end'])],
         risk=manifest.document['risk'], slippage_bps=manifest.document['execution']['slippage_bps'])
-    payload = dict(kind='configured_backtest', policy=policy.document, application=app.document,
+    payload = dict(kind='configured_backtest', dataset_metadata=metadata, policy=policy.document, application=app.document,
         manifest={'digest':manifest.digest, 'document':to_json_value(manifest.document)},
         summary=to_json_value(result.summary), trades=outcomes['trades'],
         metrics=outcomes['metrics'], metric_definitions=outcomes['definitions'],

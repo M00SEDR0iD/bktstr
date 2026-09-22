@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- Publish reusable idea research, controlled studies, configured policies and R-based outcomes.
+- Retain server results permanently; render HTML/Markdown only when requested.
+- Add fresh-data reruns, acquisition recipes, dataset pinning/expiry and online archive transfer.
+- Require persistent Railway storage; add daily application backups before automatic cleanup.
+- Keep exact offline replay optional and preserve existing baseline execution behavior.
+
 This file records compatibility-relevant changes. Historical development journals
 and research results belong in Git history and experiment artifacts.
 

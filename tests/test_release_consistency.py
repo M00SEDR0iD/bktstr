@@ -27,7 +27,7 @@ def test_link_check_covers_agent_and_integration_entry_points(tmp_path, relative
 
 
 def test_v060_release_metadata_requires_fastapi_research_contract():
-    assert __version__ == "0.6.0"
+    assert __version__ == "0.7.0"
     schema = create_app().openapi()
     expected = {
         "/api/v1/backtests",

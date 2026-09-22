@@ -73,6 +73,17 @@ def replay_research(experiment_id, store):
     if original.operation not in {'event_study', 'configured_backtest'}:
         raise ValueError('only pinned research operations can be replayed')
     request = to_json_value(original.request)
+    if request.get('acquisition'):
+        from .research_store import ResearchCatalog
+        from .research_storage import initialize
+        catalog = ResearchCatalog(store)
+        initialize(catalog)
+        with closing(store._connect()) as db:
+            row = db.execute('SELECT application FROM research_acquisitions WHERE experiment_id=?', (experiment_id,)).fetchone()
+        if row is None:
+            raise ValueError('original acquisition did not finish; use a fresh rerun')
+        request['application'] = json.loads(row[0])
+        request.pop('acquisition')
     request['replay_of'] = experiment_id
     replay, _ = store.create_experiment(original.operation, request, execution='async',
         idempotency_key='replay:' + experiment_id, parent_experiment_id=experiment_id)

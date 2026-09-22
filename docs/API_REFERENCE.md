@@ -237,8 +237,33 @@ semantic version, and content digest.
 | `POST /api/v1/research/inspections` | Disclose external/manual data exposure |
 
 Canonical experiment polling supports `event_study` and `configured_backtest`.
-Completed/failed research jobs generate Markdown under the persistent research
-root. See the [idea research guide](IDEA_RESEARCH_GUIDE.md) for interpretation.
+Completed/failed jobs retain structured results. HTML/Markdown render on demand
+without input datasets or execution. See the [idea research guide](IDEA_RESEARCH_GUIDE.md).
+
+## Online storage and fresh reruns
+
+All routes below require bearer authentication. See [server storage](SERVER_RESEARCH_STORAGE.md)
+for retention, acquisition payloads, migration, and exact-replay distinctions.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/v1/research/storage` | Dataset inventory, pins, volume and backup status |
+| `POST /api/v1/research/datasets/acquire` | Fetch adjusted Massive minute data using explicit sessions |
+| `POST /api/v1/research/datasets/{dataset}/pin` | Set `pinned` true/false |
+| `POST /api/v1/research/storage/cleanup` | Preview expiry by default; `apply: true` deletes eligible inputs |
+| `POST /api/v1/research/storage/backup` | Refresh daily compressed backup, then expire eligible inputs |
+| `POST /api/v1/experiments/{experiment_id}/rerun` | Fresh-data linked exploratory run; requires `Idempotency-Key` |
+| `GET /api/v1/research/archive/export` | Consistent terminal-record archive, bounded to 64 MiB |
+| `POST /api/v1/research/archive/import` | Additive, collision-checked archive import |
+| `GET/POST /api/v1/research/archives` | List/preserve separate immutable historical archives |
+| `GET /api/v1/research/archives/{digest}` | Download a preserved archive, recording exposure |
+| `GET /api/v1/research/archives/{digest}/ideas/{idea}/html` | Render an archived idea from saved results |
+
+Cleanup keeps results permanently, uses a 30-day default, protects pins and frozen
+protocols, and pauses while work is queued/running. Reruns use a saved acquisition
+recipe or an explicit `acquisition` body; dates are fixed unless overridden along
+with an explicit schedule. Uploaded datasets have no inferred fetch recipe. Archives
+reject nonterminal source work and conflicting identities; oversized imports return 413.
 
 New backtest protocols default to and require `primary_metric: "ev_r_per_trade"`.
 Study protocols default to `mean` and still require an analysis label. Previously

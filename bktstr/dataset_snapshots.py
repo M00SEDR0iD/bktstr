@@ -28,7 +28,8 @@ def build_identity():
              'strategies.py', 'strategy_config.py', 'research_components.py', 'event_research.py',
              'runtime.py', 'dataset_snapshots.py', 'idea_resolution.py', 'research_ideas.py',
              'service.py', 'services/event_studies.py', 'services/configured_research.py',
-             'services/research_protocol.py', 'services/research_archive.py', 'services/policy_metrics.py']
+             'services/research_protocol.py', 'services/research_archive.py', 'services/policy_metrics.py',
+             'services/research_reruns.py']
     return digest(dict(sources={name: hashlib.sha256((root / name).read_bytes()).hexdigest()
                    for name in names if (root / name).exists()},
                    python=platform.python_version(), pandas=pd.__version__, numpy=np.__version__,

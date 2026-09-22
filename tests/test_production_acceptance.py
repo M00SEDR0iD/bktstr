@@ -46,7 +46,7 @@ def _completed_backtest(
 
 def _transport(
     *,
-    version: str = "0.6.0",
+    version: str = "0.7.0",
     health_commits: list[str] | None = None,
     backtest_status: str = "completed",
     include_comparison: bool = True,
@@ -261,7 +261,7 @@ def test_production_acceptance_uses_bearer_and_completed_backtest():
     )
 
     assert report["status"] == "pass"
-    assert report["version"] == "0.6.0"
+    assert report["version"] == "0.7.0"
     assert report["backtest"] == {
         "experiment_id": "exp_acceptance_1",
         "status": "completed",
@@ -452,7 +452,7 @@ def test_run_acceptance_rejects_queued_backtest():
 def test_run_acceptance_rejects_wrong_version():
     module = _module()
 
-    with pytest.raises(module.AcceptanceError, match="expected version 0.6.0"):
+    with pytest.raises(module.AcceptanceError, match="expected version 0.7.0"):
         module.run_acceptance(
             "https://bktstr.example", api_key="test-key", transport=_transport(version="0.5.0")
         )
@@ -484,7 +484,7 @@ def test_run_acceptance_exhaustion_reports_last_identity_and_http_error():
             return httpx.Response(503, request=request)
         return httpx.Response(
             200,
-            json={"version": "0.6.0", "git_commit": "old-commit"},
+            json={"version": "0.7.0", "git_commit": "old-commit"},
             request=request,
         )
 
@@ -500,9 +500,9 @@ def test_run_acceptance_exhaustion_reports_last_identity_and_http_error():
         )
 
     message = str(error.value)
-    assert "expected version 0.6.0" in message
+    assert "expected version 0.7.0" in message
     assert "expected commit new-commit" in message
-    assert "observed version 0.6.0" in message
+    assert "observed version 0.7.0" in message
     assert "observed commit old-commit" in message
     assert "503 Service Unavailable" in message
 
@@ -532,7 +532,7 @@ def test_main_reads_bearer_key_from_environment(monkeypatch, tmp_path, capsys):
 
     def run_acceptance(base_url, expected_version, **options):
         assert base_url == "https://bktstr.example"
-        assert expected_version == "0.6.0"
+        assert expected_version == "0.7.0"
         assert options["api_key"] == "test-key"
         assert options["expected_commit"] == "new-commit"
         return {"status": "pass", "git_commit": options["expected_commit"]}

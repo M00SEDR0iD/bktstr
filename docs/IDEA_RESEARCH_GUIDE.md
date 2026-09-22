@@ -70,10 +70,12 @@ demonstration is retained as a record of the prior metric contract.
 
 ## Files a human reviews
 
-Use an explicit persistent `BKTSTR_EXPERIMENT_DIR`. Its `research/reports/` directory
-contains the default `<idea-id>-idea-card.html`, a secondary
-`<idea-id>-idea-card.md`, and `<experiment-id>-results.md`. The worker generates
-these after completion or failure. The visual card works offline and provides
+Use the server's authenticated HTML/Markdown endpoints. They render permanent
+saved results on demand without writing report files or rerunning tests. Explicit
+local export functions can still write `<idea-id>-idea-card.html`,
+`<idea-id>-idea-card.md`, and `<experiment-id>-results.md` under `research/reports/`.
+See [server storage](SERVER_RESEARCH_STORAGE.md) for retention, fresh-data reruns,
+pinning and migration. The visual card works offline and provides
 instrument, period/campaign, and variation selectors, headline outcomes, a
 session-end equity chart, and expandable history, definitions, and assessments.
 Failed and untested results remain visible; event observations are never presented
@@ -88,8 +90,8 @@ Publication uses the same exposure ledger as other exports. The authenticated
 
 Each test report contains the exact specification, period, application, results,
 limitations, pinned data/build references, and stored replay request. A report
-publication failure does not rewrite a committed experiment; regenerate the file
-through the Markdown endpoint. JSON/SQLite records remain authoritative.
+publication failure does not rewrite a committed experiment; request the report
+again. JSON/SQLite records remain authoritative after input-cache expiry.
 
 Publishing a report records data exposure. Viewing final outcomes means those
 periods cannot later be described as untouched. The application cannot prevent

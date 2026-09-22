@@ -16,7 +16,7 @@ A local change is not a verified production release.
 Use the existing production acceptance workflow or the local helper:
 
 ```powershell
-python -m bktstr.local_credentials run -- python scripts/production_acceptance.py --base-url https://bktstr-production.up.railway.app --expected-version 0.6.0 --expected-commit <full-commit-sha>
+python -m bktstr.local_credentials run -- python scripts/production_acceptance.py --base-url https://bktstr-production.up.railway.app --expected-version 0.7.0 --expected-commit <full-commit-sha>
 ```
 
 Supply the intended release version and actual deployed commit. This command

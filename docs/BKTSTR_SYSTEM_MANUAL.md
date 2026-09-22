@@ -1,6 +1,11 @@
 # BKTSTR system design
 
-**Current release:** v0.6.0
+**Current release:** v0.7.0
+
+The [server storage contract](SERVER_RESEARCH_STORAGE.md) defines permanent online
+results, on-demand report rendering, fresh-data reruns and optional exact replay.
+Persisted recipes and results survive input snapshot expiry. SQLite and artifacts
+remain on the production volume; historical archives preserve conflicting older IDs.
 **Design direction:** approved 2026-09-20; implementation remains planned.
 
 ## Purpose

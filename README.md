@@ -1,6 +1,6 @@
 # BKTSTR
 
-**Current release: v0.6.0**
+**Current release: v0.7.0**
 
 BKTSTR is an independent trading research system for turning ideas into explicit,
 versioned strategies and testing them against market evidence. It is separate
@@ -36,8 +36,10 @@ historical release vintages or drive strategy gates yet.
 
 [Idea research](docs/IDEA_RESEARCH_GUIDE.md) now adds reusable idea cards, causal
 event studies, frozen datasets, controlled campaigns, durable configured backtests,
-and searchable history. Completed jobs generate Markdown idea cards and test-result
-reports for human review. The direct numerical runtime remains available.
+and searchable history. HTML idea cards and Markdown test reports render on demand
+from permanent server results. Fresh-data reruns create linked experiments;
+reacquirable input snapshots can expire. See [server storage](docs/SERVER_RESEARCH_STORAGE.md).
+The direct numerical runtime remains available.
 
 Jev integration, historical macro release ingestion,
 continuous paper testing, and Clear Street connectivity are planned and are not implemented.

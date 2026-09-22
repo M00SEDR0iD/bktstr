@@ -1,5 +1,10 @@
 # Configurable research and paper testing implementation plan
 
+Server research storage precedes Jev Task 3. See the
+[approved storage plan](plans/2026-09-21-server-research-storage.md) and
+[implemented storage contract](SERVER_RESEARCH_STORAGE.md): permanent server results,
+fresh acquisition/reruns, on-demand reports, retention and backups.
+
 > **For agentic workers:** Use superpowers:executing-plans for inline implementation,
 > or superpowers:subagent-driven-development if the user selects delegated execution.
 > Complete and verify one task at a time. Implement only the tasks authorized in the current request.

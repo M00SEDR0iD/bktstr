@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+.env
+.env.*
+.pytest*
+**/__pycache__
+**/*.pyc
+.bktstr-research
+bktstr-cache
+.worktrees
+.superpowers
+*.log

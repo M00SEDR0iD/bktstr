@@ -201,9 +201,14 @@ class ExperimentRecord:
 def experiment_root() -> Path:
     """Return the configured durable root, preferring an explicit local override."""
     configured = os.getenv("BKTSTR_EXPERIMENT_DIR")
+    railway_volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    if os.getenv('RAILWAY_ENVIRONMENT_ID'):
+        if not railway_volume:
+            raise RuntimeError('Railway research requires a persistent volume')
+        if configured and not Path(configured).resolve().is_relative_to(Path(railway_volume).resolve()):
+            raise RuntimeError('Research directory must be on the Railway volume')
     if configured:
         return Path(configured)
-    railway_volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
     if railway_volume:
         return Path(railway_volume) / "bktstr-experiments"
     return Path("/tmp/bktstr-experiments")
@@ -1122,6 +1127,7 @@ class ExperimentWorker:
         self.clock = clock
         self._has_lease = False
         self._lease_lost = threading.Event()
+        self._last_maintenance = None
 
     def _ensure_lease(self) -> tuple[bool, bool]:
         current = self.clock()
@@ -1292,6 +1298,16 @@ class ExperimentWorker:
     def _run_one_owned(self) -> ExperimentRecord | None:
         self.store.reconcile_artifacts(limit=_ARTIFACT_RECONCILE_LIMIT)
         record = self.store.claim_next(self.owner_id, now=self.clock())
+        if record is None and os.getenv('RAILWAY_ENVIRONMENT_ID'):
+            current = self.clock()
+            if self._last_maintenance is None or (current - self._last_maintenance).total_seconds() >= 3600:
+                self._last_maintenance = current
+                try:
+                    from .research_maintenance import maintain
+                    maintain(self.store)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).warning('Research maintenance failed; inspect authenticated storage status.')
         return None if record is None else self._execute(record)
 
     def run_one(self) -> ExperimentRecord | None:

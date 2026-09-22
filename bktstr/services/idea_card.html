@@ -160,6 +160,8 @@ body { margin:0; padding:20px; background:light-dark(#eef2f4,#10161b); color-sch
     const description=readableRules(r.policy?.recipe?.entry?.rules || r.study?.event_rules);
     q('idea-change').textContent=a ? `${a.specification.id} @ ${a.specification.version}. ${description?description+'. ':''}${risk?'Stop '+risk.stop_pct+'%, target '+risk.target_pct+'%, hold up to '+risk.max_hold_minutes+' minutes. ':''}${a.error?a.error.message:''}`:'Register an idea study to begin collecting evidence.';
     if(a?.replay_of)q('idea-change').textContent+=` Exact replay of ${a.replay_of}; not an independent final test.`;
+    if(a?.rerun_of)q('idea-change').textContent+=` Fresh-data rerun of ${a.rerun_of}; original results remain unchanged.`;
+    if(a?.input_snapshot_retained===false)q('idea-change').textContent+=' Saved results remain available. The input snapshot has been removed, so exact replay is unavailable.';
     const protocol=data.protocols.find(p=>p.id===a?.protocol?.id);
     const baseline=attempts.find(b=>protocol&&b.protocol?.id===protocol.id&&b.application.digest===a.application.digest&&b.start===a.start&&b.end===a.end&&b.specification.digest===protocol.baseline.digest&&b.status==='completed');
     const baseEV=baseline?.result?.metrics?.ev_r_per_trade;

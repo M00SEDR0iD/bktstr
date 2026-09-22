@@ -6,7 +6,7 @@ on:
       expected_version:
         description: Version expected from production health and capabilities
         required: true
-        default: '0.6.0'
+        default: '0.7.0'
         type: string
       expected_commit:
         description: Full Git SHA expected from Railway health

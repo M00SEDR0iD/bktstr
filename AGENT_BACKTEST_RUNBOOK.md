@@ -1,6 +1,6 @@
 # BKTSTR research runbook
 
-**Current release:** v0.6.0
+**Current release:** v0.7.0
 
 BKTSTR tests trading hypotheses independently of any investment fund or portfolio.
 Read [AGENTS.md](AGENTS.md) and the [system design](docs/BKTSTR_SYSTEM_MANUAL.md).
@@ -35,7 +35,8 @@ For configurable numerical research in the local checkout, use the
 [strategy document interface](docs/STRATEGY_CONFIGURATION.md). Save the normalized
 manifest and digest with the result. The direct runtime returns an in-memory result;
 use `submit_research_run` or the configured-backtest endpoint for durable experiments
-and automatic visual idea cards with secondary Markdown reports.
+and on-demand visual idea cards with secondary Markdown reports. Ongoing research
+belongs on the server; see [storage and fresh reruns](docs/SERVER_RESEARCH_STORAGE.md).
 
 ## Connect to the current service
 

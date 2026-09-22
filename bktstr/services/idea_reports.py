@@ -62,7 +62,8 @@ def list_research_experiments(store, *, idea_id=None, kind=None, variant=None, i
             operation=row['operation'], status=row['status'], idea=request['idea'],
             specification=request['specification'], application=request['application'],
             instruments=app.document['instruments'], protocol=request.get('protocol'),
-            start=request['start'], end=request['end'], replay_of=request.get('replay_of')))
+            start=request['start'], end=request['end'], replay_of=request.get('replay_of'),
+            rerun_of=request.get('rerun_of')))
     items = matched[:limit]
     next_cursor = None
     if len(matched) > limit:
@@ -118,7 +119,7 @@ def idea_report(idea_id, store):
                      'Research associations and simulated trading profit are separate evidence.'])
 
 
-def render_experiment_markdown(record):
+def render_experiment_markdown(record, *, snapshot_available=None):
     result = to_json_value(record.result) or {}
     request = to_json_value(record.request)
     provenance = to_json_value(record.provenance) or {}
@@ -150,6 +151,8 @@ def render_experiment_markdown(record):
         lines[at:at] = headline
     if request.get('replay_of'):
         lines += [f'Exact replay of {_text(request["replay_of"])}. This is not an independent final test.', '']
+    if request.get('rerun_of'):
+        lines += [f'Fresh-data rerun of {_text(request["rerun_of"])}. Original results remain unchanged.', '']
     if record.error:
         lines += ['## Failure or cancellation', '', _text(record.error['message']), '']
     if result.get('kind') == 'event_study':
@@ -180,7 +183,10 @@ def render_experiment_markdown(record):
         lines.append('- ' + _text(limitation))
     lines += ['- Synthetic demonstrations verify behavior; they are not market evidence.',
               '- All inspected results remain in the archive. Repeated tuning does not create a fresh holdout.', '',
-              '## Replay', '', 'Use the stored request with the pinned data and original numerical build. No network fallback is allowed.', '',
+              '## Replay and fresh-data reruns', '',
+              'A fresh-data rerun retrieves data again and saves a new result. Viewing this report does not execute a test.', '',
+              ('The pinned input snapshot is unavailable; exact replay is unavailable.' if snapshot_available is False else
+               'Exact replay requires the pinned input snapshot and original numerical build. Snapshot presence alone does not verify replay compatibility.'), '',
               f'Dataset digest: {_text(provenance.get("dataset", "unavailable"))}', '',
               f'Numerical build: {_text(provenance.get("build", "unavailable"))}', '',
               '```json', json.dumps(request, indent=2), '```', '',
@@ -188,20 +194,27 @@ def render_experiment_markdown(record):
     return '\n'.join(lines)
 
 
-def export_experiment_markdown(experiment_id, store):
+def render_test_markdown(experiment_id, store):
     catalog = ResearchCatalog(store)
     record = store.load_experiment(experiment_id)
     if record.operation not in {'event_study', 'configured_backtest'}:
         raise ValueError('not an idea research experiment')
     inspect_experiment(catalog, record, reason='Markdown test report publication')
-    path = catalog.reports / f'{record.experiment_id}-results.md'
-    atomic_text(path, render_experiment_markdown(record))
+    dataset = (record.provenance or {}).get('dataset') or catalog.require(record.request['application'], 'application').document['dataset']
+    return render_experiment_markdown(record, snapshot_available=(catalog.datasets / f'{dataset}.json').is_file())
+
+
+def export_experiment_markdown(experiment_id, store):
+    content = render_test_markdown(experiment_id, store)
+    path = ResearchCatalog(store).reports / f'{experiment_id}-results.md'
+    atomic_text(path, content)
     return path
 
 
-def export_idea_markdown(idea_id, store):
-    catalog = ResearchCatalog(store)
+def render_idea_markdown(idea_id, store, *, file_links=False):
     report = idea_report(idea_id, store)
+    def test_link(experiment_id):
+        return f'{experiment_id}-results.md' if file_links else f'/api/v1/experiments/{experiment_id}/markdown'
     lines = [f'# Idea card: {_text(idea_id)}', '', 'Status: research record; no live-trading approval.', '']
     lines += ['## Primary outcomes', '',
               'Iterate on net EV (R/trade). Review RR, Sharpe, maximum drawdown, sample size and held-out evidence alongside it. Higher EV alone does not promote a variant.', '',
@@ -217,7 +230,7 @@ def export_idea_markdown(idea_id, store):
         values = ' | '.join(_display(m.get(key)) for key, _ in HEADLINE_METRICS)
         name = f'{attempt["specification"]["id"]} @ {attempt["specification"]["version"]}'
         period += f' / {attempt["start"][:10]} to {attempt["end"][:10]}'
-        lines.append(f'| [{_text(name)}]({experiment_id}-results.md) | {_text(attempt["instruments"]["subject"])} | {_text(period)} | {values} | {_display(result["summary"].get("trades"))} |')
+        lines.append(f'| [{_text(name)}]({test_link(experiment_id)}) | {_text(attempt["instruments"]["subject"])} | {_text(period)} | {values} | {_display(result["summary"].get("trades"))} |')
     lines += ['', 'Policy metrics require a trading simulation. Event studies retain forward-outcome statistics. Results stay separate by instrument and period; they are not a portfolio score.', '',
               'Drawdown uses minute-close marked equity. Sharpe uses daily returns including inactive sessions, 252 sessions/year, and zero risk-free return. RR reports reward divided by risk.', '']
     for idea in report['revisions']:
@@ -246,9 +259,8 @@ def export_idea_markdown(idea_id, store):
     lines += ['', '## Tests and results', '', '| Test | Instrument | Kind | Specification | Period | Status |', '| --- | --- | --- | --- | --- | --- |']
     for attempt in report['attempts']:
         experiment_id = attempt['experiment_id']
-        export_experiment_markdown(experiment_id, store)
         period = attempt['protocol']['split'] if attempt['protocol'] else 'exploratory'
-        lines.append(f'| [{experiment_id[4:12]}]({experiment_id}-results.md) | {_text(attempt["instruments"]["subject"])} | {_text(attempt["operation"])} | {_text(attempt["specification"]["id"])} | {_text(period)} | {_text(attempt["status"])} |')
+        lines.append(f'| [{experiment_id[4:12]}]({test_link(experiment_id)}) | {_text(attempt["instruments"]["subject"])} | {_text(attempt["operation"])} | {_text(attempt["specification"]["id"])} | {_text(period)} | {_text(attempt["status"])} |')
     lines += ['', '## Blocked admissions', '']
     for blocked in report['blocked_admissions']:
         lines.append(f'- {_text(blocked["protocol_id"])} / {_text(blocked["split"])}: {_text(blocked["reason"])}')
@@ -257,7 +269,7 @@ def export_idea_markdown(idea_id, store):
     for assessment in report['assessments']:
         lines += [f'### {_text(assessment["author"])}', '', _text(assessment['conclusion']), '',
                   'Limitations: ' + _text(assessment['limitations']), '',
-                  'Evidence: ' + ', '.join(f'[{x}]({x}-results.md)' for x in assessment['evidence']), '']
+                  'Evidence: ' + ', '.join(f'[{x}]({test_link(x)})' for x in assessment['evidence']), '']
     if not report['assessments']: lines.append('No assessment recorded yet.')
     history = report['search_history']
     lines += ['', '## Search history', '',
@@ -268,19 +280,30 @@ def export_idea_markdown(idea_id, store):
         for amendment in family['amendments']:
             lines += ['', f'Budget amendment {_text(amendment["id"])}: {_text(amendment["amendment_reason"])}', '']
     lines += ['', 'A failed or inconclusive study remains part of this card. Results are specific to the tested inputs.', '']
-    path = catalog.reports / f'{idea_id}-idea-card.md'
-    atomic_text(path, '\n'.join(lines))
+    return '\n'.join(lines)
+
+
+def export_idea_markdown(idea_id, store):
+    content = render_idea_markdown(idea_id, store, file_links=True)
+    # Explicit file exports retain the companion files targeted by relative links.
+    cursor = None
+    while True:
+        page = list_research_experiments(store, idea_id=idea_id, limit=200, cursor=cursor)
+        for attempt in page['items']:
+            export_experiment_markdown(attempt['experiment_id'], store)
+        cursor = page['next_cursor']
+        if cursor is None:
+            break
+    path = ResearchCatalog(store).reports / f'{idea_id}-idea-card.md'
+    atomic_text(path, content)
     return path
 
 
 def publish_research_reports(store, record):
-    if record.operation in {'event_study', 'configured_backtest'}:
-        export_experiment_markdown(record.experiment_id, store)
-        export_idea_markdown(record.request['idea']['id'], store)
-        export_idea_html(record.request['idea']['id'], store)
+    """Compatibility hook: completion persists results; reports render on request."""
 
 
-def export_idea_html(idea_id, store):
+def render_idea_html(idea_id, store):
     """Self-contained human edition; canonical results and exposure rules are shared."""
     report = idea_report(idea_id, store)
     from ..dataset_snapshots import load_snapshot
@@ -288,14 +311,26 @@ def export_idea_html(idea_id, store):
     sources = {}
     # Keep every attempt, but omit large trade arrays and duplicate runtime manifests.
     for attempt in report['attempts']:
-        dataset = catalog.require(attempt['application'], 'application').document['dataset']
+        result = attempt.get('result')
+        dataset = (result or {}).get('application', {}).get('dataset') or catalog.require(attempt['application'], 'application').document['dataset']
+        saved_source = (result or {}).get('dataset_metadata', {}).get('source')
+        if saved_source:
+            sources[dataset] = saved_source
+        if dataset not in sources:
+            try:
+                from .research_storage import dataset_metadata
+                metadata = dataset_metadata(catalog, dataset)
+            except (ValueError, FileNotFoundError):
+                metadata = {}
+            if metadata and metadata.get('source'):
+                sources[dataset] = metadata['source']
         if dataset not in sources:
             try:
                 sources[dataset] = load_snapshot(dataset, catalog.datasets, verify_build=False).document['source']
             except (ValueError, FileNotFoundError):
                 sources[dataset] = 'Source metadata unavailable; inspect the saved provenance.'
         attempt['data_source'] = sources[dataset]
-        result = attempt.get('result')
+        attempt['input_snapshot_retained'] = (catalog.datasets / f'{dataset}.json').is_file()
         if result:
             attempt['result'] = {key: result[key] for key in (
                 'kind', 'metrics', 'metric_definitions', 'metric_unavailable_reasons',
@@ -304,7 +339,11 @@ def export_idea_html(idea_id, store):
     embedded = json.dumps(report, ensure_ascii=True, allow_nan=False)
     embedded = embedded.replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e')
     template = Path(__file__).with_name('idea_card.html').read_text(encoding='utf-8')
-    content = template.replace('__IDEA_REPORT_JSON__', embedded)
-    path = catalog.reports / f'{idea_id}-idea-card.html'
+    return template.replace('__IDEA_REPORT_JSON__', embedded)
+
+
+def export_idea_html(idea_id, store):
+    content = render_idea_html(idea_id, store)
+    path = ResearchCatalog(store).reports / f'{idea_id}-idea-card.html'
     atomic_text(path, content)
     return path

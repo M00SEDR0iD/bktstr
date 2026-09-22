@@ -55,6 +55,10 @@ def test_html_endpoint_is_authenticated_and_records_exposure(tmp_path, monkeypat
     assert response.headers['content-type'].startswith('text/html')
     assert "connect-src 'none'" in response.headers['content-security-policy']
     assert record.experiment_id in response.text
+    for report_path in ('/api/v1/ideas/vwap-reclaim/markdown',
+                        f'/api/v1/experiments/{record.experiment_id}/markdown'):
+        assert client.get(report_path, headers={'Authorization':'Bearer test-key'}).status_code == 200
+    assert not list(catalog.reports.iterdir())
     with catalog.transaction() as db:
         assert db.execute('SELECT count(*) FROM research_exposures').fetchone()[0] > before
 

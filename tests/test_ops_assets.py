@@ -309,7 +309,7 @@ def _assert_production_acceptance_workflow_contract(text: str) -> None:
     assert _scalar_mapping(inputs["expected_version"], 8) == {
         "description": "Version expected from production health and capabilities",
         "required": "true",
-        "default": "'0.6.0'",
+        "default": "'0.7.0'",
         "type": "string",
     }
     assert _scalar_mapping(inputs["expected_commit"], 8) == {
