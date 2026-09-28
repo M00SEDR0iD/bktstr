@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1
+
+- Add authenticated Massive futures contract discovery and raw one-minute candle downloads using the existing server credential.
+- Bound downloads to 31 inclusive UTC dates and validate pagination, contract identity, timestamps, and OHLCV integrity.
+- Report missing configuration, denied futures access, rate limits, and provider errors without exposing credentials.
+- Keep futures data acquisition separate from equity strategy execution and saved research. No futures backtest, continuous-contract series, or prop-evaluation simulator is introduced.
+
 ## 0.7.0
 
 - Publish reusable idea research, controlled studies, configured policies and R-based outcomes.

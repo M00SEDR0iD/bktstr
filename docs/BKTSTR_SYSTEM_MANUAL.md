@@ -1,6 +1,6 @@
 # BKTSTR system design
 
-**Current release:** v0.7.0
+**Current release:** v0.7.1
 
 The [server storage contract](SERVER_RESEARCH_STORAGE.md) defines permanent online
 results, on-demand report rendering, fresh-data reruns and optional exact replay.
@@ -18,6 +18,11 @@ The initial scope is equity/ETF research using minute bars and holding periods o
 minutes to hours. Add broader strategies through configuration and registered
 components. Options, sub-second execution, live-money trading, and a general
 portfolio-management application are outside the next implementation scope.
+
+The [futures data adapter](FUTURES_DATA.md) adds contract discovery and raw minute
+downloads through the existing Massive credential. This provider capability is
+separate from strategy ideas: futures execution and evaluation-account rules are
+not implemented, and the equity policy pipeline is unchanged.
 
 Success means completing one auditable chain: hypothesis, frozen strategy,
 historical comparison, held-out evaluation, bounded forward paper session, and
