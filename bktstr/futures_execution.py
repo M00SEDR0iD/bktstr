@@ -193,7 +193,7 @@ def evaluate_attempt(trades, terms):
             status = 'timeout'
     return dict(status=status, trades=count, ending_balance=balance if status != 'failed' else None,
                 last_closed_balance=balance, failure_equity_bound=failure_equity,
-                drawdown_bound_dollars=drawdown, within_4pct_starting_capital=drawdown < .04*account.starting_balance)
+                drawdown_bound_dollars=drawdown, within_4pct_starting_capital=bool(drawdown < .04*account.starting_balance))
 
 
 def summarize(trades, daily, terms, recipe):

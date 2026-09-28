@@ -2,6 +2,8 @@
 
 ## 0.8.0
 
+- Persist futures evaluation drawdown flags as native JSON booleans, including nonempty trade results.
+
 - Reuse the immutable dataset fingerprint during event preparation. Large studies produce identical event records without rehashing all input bars for every event.
 
 - Add a versioned futures execution profile to configured research and the shared orchestrator, preserving equity identities and behavior.
