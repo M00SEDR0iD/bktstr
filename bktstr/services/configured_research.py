@@ -95,6 +95,22 @@ def _execute_policy(record, store):
     if policy.kind == 'variant':
         policy = resolve_variant(policy, catalog)
     app = catalog.require(request['application'], 'application')
+    if app.document['profile'] == 'futures-minute':
+        for evidence_id in policy.document['evidence'] + policy.document['contrary_evidence']:
+            evidence = store.load_experiment(evidence_id)
+            if evidence.operation != 'event_study' or evidence.status != 'completed' or evidence.request['idea']['id'] != request['idea']['id']:
+                raise ValueError('policy evidence must be a completed study for this idea')
+        from ..orchestrator import run_futures_research
+        snapshot = load_snapshot(app.document['dataset'], catalog.datasets)
+        from .research_storage import remember_dataset
+        metadata = remember_dataset(catalog, snapshot)
+        result = run_futures_research(snapshot, app.document, policy.document['recipe'], request['start'], request['end'])
+        result['decisions_artifact'] = catalog.save_artifact(result.pop('decisions'))
+        result.update(kind='configured_backtest', dataset_metadata=metadata, policy=policy.document, application=app.document)
+        check_cancelled(record.experiment_id, catalog)
+        return result, dict(dataset=snapshot.id, build=snapshot.document['build'],
+            consumed_inputs=[snapshot.id, policy.digest, app.digest], attached_evidence=policy.document['evidence'] + policy.document['contrary_evidence'],
+            execution_model='futures-ohlcv.1.0.0')
     manifest = bind_policy(policy, app, (request['start'], request['end']))
     for evidence_id in policy.document['evidence'] + policy.document['contrary_evidence']:
         evidence = store.load_experiment(evidence_id)

@@ -133,6 +133,7 @@ def render_experiment_markdown(record, *, snapshot_available=None):
         f'Application: {_text(request["application"]["id"])}', '',
         f'Protocol: {_display(request.get("protocol", "Uncontrolled exploration"))}', '']
     if result.get('kind') == 'configured_backtest':
+        futures = result.get('metric_definitions', {}).get('execution_model') == 'futures-ohlcv.1.0.0'
         objective = ('Primary objective: net EV in R/trade.' if result.get('metric_definitions')
                      else 'Historical result: original objective retained; current R-based metrics were not recorded.')
         headline = ['## Primary outcomes', '', objective, '',
@@ -141,8 +142,10 @@ def render_experiment_markdown(record, *, snapshot_available=None):
             headline.append(f'| {label} | {_display(result.get("metrics", {}).get(key))} |')
         headline += ['', f'Trades: {result.get("metrics", {}).get("trade_count", result["summary"].get("trades"))}. '
                       f'Scored sessions: {_display(result.get("metrics", {}).get("sessions"))}.', '',
-                      'R is initial planned stop risk. Net results include modeled slippage; commissions and borrow fees are not modeled.', '',
-                      'Drawdown samples minute-close marked equity. Sharpe uses all scored daily returns, 252 sessions/year and a zero risk-free rate.', '',
+                      ('R is initial planned stop risk. Net futures results include per-side commissions and adverse tick slippage.' if futures else
+                       'R is initial planned stop risk. Net results include modeled slippage; commissions and borrow fees are not modeled.'), '',
+                      ('Futures drawdown is a conservative intrabar liquidation-equity bound. Sharpe uses scored daily returns and 252 sessions/year.' if futures else
+                       'Drawdown samples minute-close marked equity. Sharpe uses all scored daily returns, 252 sessions/year and a zero risk-free rate.'), '',
                       'Historical results without this metric definition remain unavailable; they are not recalculated silently.', '']
         for key, reason in result.get('metric_unavailable_reasons', {}).items():
             headline += [f'- {_text(key)} unavailable: {_text(reason)}']
@@ -151,6 +154,13 @@ def render_experiment_markdown(record, *, snapshot_available=None):
         lines[at:at] = headline
     if request.get('replay_of'):
         lines += [f'Exact replay of {_text(request["replay_of"])}. This is not an independent final test.', '']
+    if result.get('challenge'):
+        lines += ['## Evaluation attempts', '', '| Start convention | Passed | Failed | Timeout | Censored |', '| --- | --- | --- | --- | --- |']
+        for label, key in [('Every scored session, overlapping', 'session_starts'), ('Disjoint trade blocks', 'disjoint_trade_blocks')]:
+            rows = result['challenge'][key]
+            counts = [sum(r['status'] == state for r in rows) for state in ('passed','failed','timeout','censored')]
+            lines.append('| ' + label + ' | ' + ' | '.join(str(x) for x in counts) + ' |')
+        lines += ['', 'Overlapping starts are dependent. Disjoint blocks can also share market regimes. Censored attempts are incomplete, not passes.', '']
     if request.get('rerun_of'):
         lines += [f'Fresh-data rerun of {_text(request["rerun_of"])}. Original results remain unchanged.', '']
     if record.error:
@@ -172,7 +182,8 @@ def render_experiment_markdown(record, *, snapshot_available=None):
         lines += ['### Exact study definition', '', '```json', json.dumps(result['study'], indent=2), '```', '']
     elif result.get('kind') == 'configured_backtest':
         lines += ['## Supporting engine summary', '',
-                  'Legacy engine drawdown below uses closed trades and a negative sign. Use the marked-equity maximum drawdown above for new comparisons.', '',
+                  ('Futures totals include commissions and slippage. Main drawdown above is a conservative intrabar bound.' if futures else
+                   'Legacy engine drawdown below uses closed trades and a negative sign. Use the marked-equity maximum drawdown above for new comparisons.'), '',
                   '| Measure | Result |', '| --- | --- |']
         for key, value in result['summary'].items():
             lines.append(f'| {_text(key).replace("_", " ").capitalize()} | {_display(value)} |')
@@ -232,7 +243,7 @@ def render_idea_markdown(idea_id, store, *, file_links=False):
         period += f' / {attempt["start"][:10]} to {attempt["end"][:10]}'
         lines.append(f'| [{_text(name)}]({test_link(experiment_id)}) | {_text(attempt["instruments"]["subject"])} | {_text(period)} | {values} | {_display(result["summary"].get("trades"))} |')
     lines += ['', 'Policy metrics require a trading simulation. Event studies retain forward-outcome statistics. Results stay separate by instrument and period; they are not a portfolio score.', '',
-              'Drawdown uses minute-close marked equity. Sharpe uses daily returns including inactive sessions, 252 sessions/year, and zero risk-free return. RR reports reward divided by risk.', '']
+              'Drawdown follows each saved execution definition: equity uses minute-close marks; futures uses a conservative intrabar bound. Sharpe uses daily returns including inactive sessions, 252 sessions/year, and zero risk-free return. RR reports reward divided by risk.', '']
     for idea in report['revisions']:
         lines += [f'## {_text(idea["title"])} / {_text(idea["version"])}', '',
             '### Thesis', '', _text(idea['thesis']), '', '### Proposed mechanism', '', _text(idea['mechanism']), '',
@@ -335,7 +346,7 @@ def render_idea_html(idea_id, store):
             attempt['result'] = {key: result[key] for key in (
                 'kind', 'metrics', 'metric_definitions', 'metric_unavailable_reasons',
                 'daily_equity', 'policy', 'study', 'analysis', 'event_count',
-                'summary', 'limitations') if key in result}
+                'summary', 'limitations', 'application', 'challenge') if key in result}
     embedded = json.dumps(report, ensure_ascii=True, allow_nan=False)
     embedded = embedded.replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e')
     template = Path(__file__).with_name('idea_card.html').read_text(encoding='utf-8')

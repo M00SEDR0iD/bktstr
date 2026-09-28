@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+
+- Add a versioned futures execution profile to configured research and the shared orchestrator, preserving equity identities and behavior.
+- Model whole contracts, tick-valid brackets, commissions, adverse slippage and gap stops, conservative intrabar drawdown, and fixed-floor evaluation attempts.
+- Keep signals and account/contract bindings in separate research revisions. Add VWAP, Bollinger and RSI recovery detectors with session resets.
+- Retain signal decisions and report overlapping versus disjoint evaluation windows, including incomplete-data censorship.
+- Futures downloads now advertise execution support through the explicit research profile. Broker execution, margin and firm-specific rules remain unsupported.
+
 ## 0.7.1
 
 - Add authenticated Massive futures contract discovery and raw one-minute candle downloads using the existing server credential.

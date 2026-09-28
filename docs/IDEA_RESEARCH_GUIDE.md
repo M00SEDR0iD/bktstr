@@ -1,7 +1,9 @@
 # Idea research and human review
 
 The research foundation supports equity/ETF minute-bar event studies and frozen
-policies. Jev, active macro gates, paper sessions, and broker execution remain pending.
+policies, plus an explicit [futures policy profile](FUTURES_RESEARCH.md) with
+separate execution and metric definitions. Jev, active macro gates, paper sessions,
+and broker execution remain pending.
 
 ## Primary policy outcomes
 

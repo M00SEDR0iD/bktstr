@@ -1,6 +1,6 @@
 # BKTSTR system design
 
-**Current release:** v0.7.1
+**Current release:** v0.8.0
 
 The [server storage contract](SERVER_RESEARCH_STORAGE.md) defines permanent online
 results, on-demand report rendering, fresh-data reruns and optional exact replay.
@@ -29,6 +29,10 @@ historical comparison, held-out evaluation, bounded forward paper session, and
 replay of the same decisions from saved inputs.
 
 ## Existing implementation
+
+Configured research also supports the explicit [futures execution profile](FUTURES_RESEARCH.md).
+Its integer sizing and execution semantics are separately versioned; the original
+equity baseline is unchanged. Application terms specify contracts and accounts.
 
 | Responsibility | Existing source |
 | --- | --- |

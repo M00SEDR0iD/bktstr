@@ -39,6 +39,12 @@ if TYPE_CHECKING:
 
 
 _OHLCV_COLUMNS = frozenset(("open", "high", "low", "close", "volume"))
+
+
+def run_futures_research(snapshot, application, recipe, start, end):
+    """Shared orchestration entry point for the explicit futures execution model."""
+    from .futures_execution import run_scheduled
+    return run_scheduled(snapshot, application, recipe, start, end)
 _BUILD_IDENTITY_KEYS = (
     "git_commit",
     "git_branch",
