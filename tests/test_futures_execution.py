@@ -89,13 +89,14 @@ def test_equity_revision_digest_preserved_and_futures_terms_required():
         parse_application(doc | {'profile': 'futures-minute'})
 
 
-def test_futures_runs_through_existing_worker_and_persists(tmp_path):
+def test_futures_runs_through_existing_worker_and_persists(tmp_path, monkeypatch):
     from bktstr.services.experiments import ExperimentStore, ExperimentWorker
     from bktstr.services.research_store import ResearchCatalog
     from bktstr.services.configured_research import submit_research_run, research_operations
     from bktstr.dataset_snapshots import freeze_dataset
     store = ExperimentStore(tmp_path); catalog = ResearchCatalog(store)
     frame = bars([[100, 101, 99, 100, 10]] * 40)
+    monkeypatch.setattr('bktstr.futures_execution.signals', lambda frame, cfg: [0]*30+[1]+[0]*9)
     schedule = [{'date': '2026-09-01', 'open': frame.index[0].isoformat(), 'close': (frame.index[-1]+pd.Timedelta(minutes=1)).isoformat()}]
     snapshot = freeze_dataset({'NQ': frame}, schedule, catalog.datasets, source='synthetic-futures')
     idea = catalog.register('idea', dict(id='futures', version='1.0.0', title='Reversion', thesis='Test', mechanism='Test', falsification='Test', applicability='Futures', roles=['subject']))
@@ -107,7 +108,9 @@ def test_futures_runs_through_existing_worker_and_persists(tmp_path):
     result = worker.run_one(); worker.release_lease()
     assert result.status == 'completed', result.error
     saved = store.load_experiment(record.experiment_id)
-    assert saved.result['metrics']['trade_count'] == 0
+    assert saved.result['metrics']['trade_count'] == 1
+    assert saved.result['trades'][0]['pnl_dollars'] < 0
+    assert type(saved.result['challenge']['session_starts'][0]['within_4pct_starting_capital']) is bool
     assert saved.result['metric_definitions']['execution_model'] == 'futures-ohlcv.1.0.0'
     assert saved.result['decisions_artifact']
     from bktstr.services.idea_reports import render_idea_html, render_test_markdown
