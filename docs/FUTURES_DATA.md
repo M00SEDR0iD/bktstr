@@ -65,11 +65,11 @@ and credential-bearing URLs are never included in error responses.
 
 ## Data infrastructure versus strategy research
 
-Futures downloads explicitly return `execution_supported: false`. The current
-strategy engine and research application schema remain equity-based. Data access
-does not establish correct futures P&L, contract sizing, commission, margin,
-intrabar loss-floor, or rollover behavior. Do not send these candles through the
-equity engine and label the result an NQ evaluation backtest.
+Since version 0.8.0, downloads return `execution_supported: true` for the explicit
+[futures research profile](FUTURES_RESEARCH.md). Freeze a complete session dataset
+and supply contract/account terms before submitting a configured backtest.
+Do not send raw futures candles through the legacy equity execution model.
+Data acquisition alone does not validate a strategy, margin or prop-firm rules.
 
 Strategy theses, thresholds, risk budgets and evaluation targets continue to belong
 in versioned ideas, policies, applications and protocols. Provider support is an

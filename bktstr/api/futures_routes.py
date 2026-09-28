@@ -47,7 +47,7 @@ class FuturesBarsResponse(BaseModel):
     timeframe: Literal['1m'] = '1m'
     adjustment: Literal['unadjusted'] = 'unadjusted'
     timestamp_convention: Literal['minute-open UTC'] = 'minute-open UTC'
-    execution_supported: Literal[False] = False
+    execution_supported: Literal[True] = True
     ticker: str
     start: date
     end: date

@@ -170,11 +170,17 @@ body { margin:0; padding:20px; background:light-dark(#eef2f4,#10161b); color-sch
     const censored=Object.values(r.analysis?.censored || {}).reduce((sum,n)=>sum+(number(n)?n:0),0);
     const interval=Array.isArray(r.analysis?.interval)?r.analysis.interval.map(n=>fmt(n,4)+'%').join(' to '):'unavailable';
     study.textContent=`Forward outcomes, not trading profit. ${r.analysis?.primary_label || ''} mean: ${fmt(r.analysis?.mean,4)}%. Usable: ${r.analysis?.usable??'unavailable'}. Censored: ${r.analysis?censored:'unavailable'}. Interval: ${interval}. Uncertainty: ${r.analysis?.uncertainty_status || 'unavailable'}.`;
-    const daily=r.daily_equity || [],capital=r.policy?.recipe?.risk?.starting_capital;
+    const futures=r.metric_definitions?.execution_model==='futures-ohlcv.1.0.0';
+    if(futures&&r.challenge){
+      study.hidden=false;
+      const rows=r.challenge.session_starts||[],count=s=>rows.filter(x=>x.status===s).length;
+      study.textContent=`Evaluation starts: ${count('passed')} passed, ${count('failed')} failed, ${count('timeout')} timed out, ${count('censored')} incomplete. Session starts overlap; these are dependent observations.`;
+    }
+    const daily=r.daily_equity || [],capital=r.application?.futures?.starting_balance??r.policy?.recipe?.risk?.starting_capital;
     activePoints=daily.filter(p=>number(p.equity)).map(p=>({date:p.date.slice(5),value:p.equity}));
     if(activePoints.length&&number(capital))activePoints.unshift({date:'Start',value:capital});
     q('idea-equity-label').textContent=activePoints.length?money(activePoints[0].value)+' → '+money(activePoints.at(-1).value):'Unavailable';
-    q('idea-curve-note').textContent=activePoints.length?'Session-end points · maximum drawdown uses minute-close equity':'No equity series is recorded for this test.';
+    q('idea-curve-note').textContent=activePoints.length?(futures?'Session-end points · maximum drawdown is a conservative intrabar bound':'Session-end points · maximum drawdown uses minute-close equity'):'No equity series is recorded for this test.';
     const recipe=q('idea-recipe');recipe.replaceChildren();
     const fields=[['Mechanism',idea?.mechanism],['Reject if',idea?.falsification],['Applicability',idea?.applicability],['Data source',a?.data_source],['Entry rule',r.policy?.recipe?.entry?.rules || r.study?.event_rules],['Variation',variant?.rationale],['Assessment',data.assessments.map(x=>x.conclusion+' '+x.limitations).join(' / ')||'No assessment recorded']];
     fields.forEach(([key,value])=>{if(value){[key,value].forEach(t=>{const s=document.createElement('span');s.textContent=t;recipe.append(s);});}});

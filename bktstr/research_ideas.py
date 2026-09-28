@@ -123,7 +123,8 @@ class Variant(Definition):
 class Application(Definition):
     instruments: dict[str, str]
     dataset: str = Field(pattern=r'^[0-9a-f]{64}$')
-    profile: Literal['equity-minute'] = 'equity-minute'
+    profile: Literal['equity-minute', 'futures-minute'] = 'equity-minute'
+    futures: dict | None = None
     calendar: Literal['XNYS'] = 'XNYS'
     timezone: Literal['America/New_York'] = 'America/New_York'
     timeframe: Literal['1m'] = '1m'
@@ -132,6 +133,13 @@ class Application(Definition):
     @model_validator(mode='after')
     def roles(self):
         import re
+        if self.profile == 'futures-minute':
+            from .futures_execution import FuturesTerms
+            FuturesTerms.model_validate(self.futures)
+            if set(self.instruments) != {'subject'}:
+                raise ValueError('futures supports one subject per application')
+        elif self.futures is not None:
+            raise ValueError('futures terms require futures profile')
         if 'subject' not in self.instruments or set(self.instruments) - {'subject', 'benchmark'}:
             raise ValueError('subject and optional benchmark required')
         if any(not re.fullmatch(r'[A-Z][A-Z0-9.\-]{0,14}', x) for x in self.instruments.values()):
@@ -177,7 +185,10 @@ MODELS = {'idea': Idea, 'study': Study, 'policy': Policy, 'modifier': Modifier,
 
 def parse_revision(kind, document):
     validated = MODELS[kind].model_validate(document)
-    return Revision(kind, canonical(validated.model_dump(mode='json')))
+    document = validated.model_dump(mode='json')
+    if kind == 'application' and document.get('futures') is None:
+        document.pop('futures', None)  # Preserve all existing equity revision hashes.
+    return Revision(kind, canonical(document))
 
 
 def parse_idea(document): return parse_revision('idea', document)

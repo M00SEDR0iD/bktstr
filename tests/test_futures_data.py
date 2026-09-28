@@ -165,7 +165,7 @@ def test_api_download_is_typed_unadjusted_and_not_an_execution_claim(monkeypatch
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "massive" and body["adjustment"] == "unadjusted"
-    assert body["execution_supported"] is False
+    assert body["execution_supported"] is True
     assert body["bars"][0]["timestamp"] == "2026-09-25T13:30:00Z"
     assert body["bars"][0]["close"] == 25001
 

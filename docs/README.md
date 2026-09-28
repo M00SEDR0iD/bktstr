@@ -12,6 +12,7 @@ research contracts, and implementation sequence, not a fund portfolio.
 | [Implementation plan](IMPLEMENTATION_PLAN.md) | Ordered work, interfaces, verification, and acceptance gates |
 | [API reference](API_REFERENCE.md) | Implemented HTTP behavior |
 | [Futures data](FUTURES_DATA.md) | Massive contract discovery and one-minute downloads, separate from strategy execution |
+| [Futures research](FUTURES_RESEARCH.md) | Versioned configured execution and fixed-floor evaluation accounting |
 | [Strategy configuration](STRATEGY_CONFIGURATION.md) | Local JSON/Python compilation and supported numerical filters |
 | [Macro evidence](MACRO_EVIDENCE.md) | Point-in-time selection, replay, and verified BLS adapter coverage |
 | [Project status report](PROJECT_STATUS.md) | Standalone usefulness, personal research fit, and remaining structural gaps |

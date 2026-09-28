@@ -1,6 +1,6 @@
 # BKTSTR
 
-**Current release: v0.7.1**
+**Current release: v0.8.0**
 
 BKTSTR is an independent trading research system for turning ideas into explicit,
 versioned strategies and testing them against market evidence. It is separate
@@ -19,7 +19,8 @@ objective. Generated visual idea cards and reports show dollar EV, planned and r
 daily Sharpe, and maximum drawdown alongside it. See the
 [metric definitions](docs/IDEA_RESEARCH_GUIDE.md#primary-policy-outcomes).
 
-The existing application runs historical equity/ETF research. It provides typed
+The application runs historical equity/ETF research and explicit
+[futures research](docs/FUTURES_RESEARCH.md). It provides typed
 backtests, parameter sweeps, comparisons, durable experiments, market-data
 inspection, deterministic caches, and evidence provenance. Its registered
 strategy is `bktstr.bearish-regime-scalp` version `1.0.0`, using one-minute bars.
