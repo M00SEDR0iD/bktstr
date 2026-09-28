@@ -45,3 +45,19 @@ def test_missing_minutes_and_split_boundary_are_censored(tmp_path):
     labels = label_events(events, study['labels'], snap, end='2026-08-17T13:34:00Z')
     assert labels.document['rows'][0]['reasons']['r2'] == 'missing_price'
     assert any(row['reasons'].get('r2') == 'split_boundary' for row in labels.document['rows'])
+
+
+def test_event_preparation_fingerprints_snapshot_once(tmp_path, monkeypatch):
+    from bktstr.dataset_snapshots import DatasetSnapshot
+    from bktstr.event_research import build_events
+    snap = prepare(tmp_path)
+    original = DatasetSnapshot.id.fget
+    expected = build_events(study_doc(event_rules='close.gt:0'), {'instruments': {'subject': 'SPY'}}, snap)
+    calls = []
+    def measured(snapshot):
+        calls.append(1)
+        return original(snapshot)
+    monkeypatch.setattr(DatasetSnapshot, 'id', property(measured))
+    actual = build_events(study_doc(event_rules='close.gt:0'), {'instruments': {'subject': 'SPY'}}, snap)
+    assert actual.canonical_json == expected.canonical_json
+    assert len(calls) == 1
