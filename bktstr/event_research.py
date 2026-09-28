@@ -46,6 +46,7 @@ def build_events(study, application, snapshot, *, start=None, end=None):
     frame = add_indicators(raw)
     session = pd.Series(frame.index.date, index=frame.index)
     selected = evaluate_rules(frame, parse_rules(study.document['event_rules']), session)
+    snapshot_id = snapshot.id
     rows = []
     for timestamp, row in frame.loc[selected].iterrows():
         cutoff = instant(timestamp) + timedelta(minutes=1)
@@ -59,7 +60,7 @@ def build_events(study, application, snapshot, *, start=None, end=None):
                 missing[column] = 'insufficient_history_or_missing_input'
             values[column] = value
         # Context/label changes keep the same candidate IDs when the detector agrees.
-        identity = dict(dataset=snapshot.id, symbol=symbol, timestamp=timestamp.isoformat(),
+        identity = dict(dataset=snapshot_id, symbol=symbol, timestamp=timestamp.isoformat(),
                         detector=study.document['event_rules'], version=study.document['component_version'])
         rows.append(dict(id=digest(identity), symbol=symbol, session=str(timestamp.date()),
             bar_open=instant(timestamp).isoformat(), cutoff=cutoff.isoformat(), values=values,
@@ -68,7 +69,7 @@ def build_events(study, application, snapshot, *, start=None, end=None):
                 if scored_start <= t + timedelta(minutes=1) < scored_end]
     missing = [t for t in expected if t not in raw.index]
     return EventDataset(canonical(dict(study=study.document, study_digest=study.digest,
-        dataset=snapshot.id, symbol=symbol, start=start, end=end,
+        dataset=snapshot_id, symbol=symbol, start=start, end=end,
         warmup='scored_sessions_only', session_axis=[s['date'] for s in sessions],
         coverage=dict(expected=len(expected), actual=len(expected)-len(missing), missing=len(missing),
                       missing_timestamps=[t.isoformat() for t in missing]),
