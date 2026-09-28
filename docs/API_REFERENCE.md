@@ -4,6 +4,9 @@ Base URL: `https://bktstr-production.up.railway.app`
 
 BKTSTR is a read-only equity and ETF research API. It runs historical research and never places brokerage orders. `GET /openapi.json` is the machine-readable contract. This document explains the public request, lifecycle, market-data, and ownership rules.
 
+Version 0.7.1 also supports [futures data downloads](FUTURES_DATA.md). These are
+data-only operations; the existing equity research and execution contracts remain unchanged.
+
 This reference describes implemented historical research only. Configurable macro filters, Jev judgments, paper sessions, and broker adapters remain planned; see the [system design](BKTSTR_SYSTEM_MANUAL.md) and [implementation plan](IMPLEMENTATION_PLAN.md). The existing named strategy is a baseline, not a project-wide trading mandate.
 
 ## Authentication and deployment ownership
@@ -32,6 +35,8 @@ Start with authenticated `GET /api/v1/capabilities`. It publishes the registered
 | `GET` | `/api/v1/backtests/{experiment_id}` | Retrieve a backtest experiment only. |
 | `GET` | `/api/v1/experiments/{experiment_id}` | Retrieve the canonical envelope for any experiment. |
 | `GET` | `/api/v1/market-data` | Inspect normalized, paginated OHLCV data. |
+| `GET` | `/api/v1/market-data/futures/contracts` | Discover explicit futures contracts at a specified date. |
+| `GET` | `/api/v1/market-data/futures/bars` | Download raw one-minute candles for one futures contract. |
 
 The former `GET /api/v1/backtest` route is removed. It returns `410 legacy_endpoint_removed` and identifies `POST /api/v1/backtests` as the replacement.
 

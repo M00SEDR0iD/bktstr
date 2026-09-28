@@ -165,6 +165,7 @@ class ExecutionModelCapabilities(CapabilityModel):
 class ProviderCapabilities(CapabilityModel):
     massive: str
     yahoo: str
+    massive_futures: str
 
 
 class BuildCapabilities(CapabilityModel):
