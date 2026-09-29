@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0
+
+- Add futures execution model 1.2 with configurable signal lookbacks and a completed-candle efficiency-ratio entry filter.
+- Retain filter measurements and rejection reasons in durable research, with existing exits and older execution models preserved.
+- Keep the engine capability release separate from recipe selection and account-pass research.
+
 ## 0.9.0
 
 - Add explicit futures execution 1.1 with opening-candle direction filtering, causal ATR quantity scaling, integer quantity increments and premarket indicator warmup.

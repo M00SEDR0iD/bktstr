@@ -89,7 +89,8 @@ def test_equity_revision_digest_preserved_and_futures_terms_required():
         parse_application(doc | {'profile': 'futures-minute'})
 
 
-def test_futures_runs_through_existing_worker_and_persists(tmp_path, monkeypatch):
+@pytest.mark.parametrize('version',['1.0.0','1.1.0','1.2.0'])
+def test_futures_runs_through_existing_worker_and_persists(tmp_path, monkeypatch, version):
     from bktstr.services.experiments import ExperimentStore, ExperimentWorker
     from bktstr.services.research_store import ResearchCatalog
     from bktstr.services.configured_research import submit_research_run, research_operations
@@ -100,7 +101,10 @@ def test_futures_runs_through_existing_worker_and_persists(tmp_path, monkeypatch
     schedule = [{'date': '2026-09-01', 'open': frame.index[0].isoformat(), 'close': (frame.index[-1]+pd.Timedelta(minutes=1)).isoformat()}]
     snapshot = freeze_dataset({'NQ': frame}, schedule, catalog.datasets, source='synthetic-futures')
     idea = catalog.register('idea', dict(id='futures', version='1.0.0', title='Reversion', thesis='Test', mechanism='Test', falsification='Test', applicability='Futures', roles=['subject']))
-    policy = catalog.register('policy', dict(id='p', version='1.0.0', recipe=recipe(), rationale='test', limitations='OHLC'))
+    cfg = recipe() | {'execution_model':'futures-ohlcv.'+version}
+    if version != '1.0.0':cfg.update(opening_bias=False,cash_start_offset=0,quantity_step=1)
+    if version == '1.2.0':cfg.update(signal_period=5,efficiency_period=2,max_efficiency_ratio=1)
+    policy = catalog.register('policy', dict(id='p', version='1.0.0', recipe=cfg, rationale='test', limitations='OHLC'))
     app = catalog.register('application', dict(id='a', version='1.0.0', instruments={'subject':'NQ'}, dataset=snapshot.id, profile='futures-minute', futures=terms()))
     record = submit_research_run(store, dict(operation='configured_backtest', idea=idea.ref, specification=policy.ref,
         application=app.ref, start=schedule[0]['open'], end=schedule[0]['close']), 'futures-test')
@@ -111,7 +115,8 @@ def test_futures_runs_through_existing_worker_and_persists(tmp_path, monkeypatch
     assert saved.result['metrics']['trade_count'] == 1
     assert saved.result['trades'][0]['pnl_dollars'] < 0
     assert type(saved.result['challenge']['session_starts'][0]['within_4pct_starting_capital']) is bool
-    assert saved.result['metric_definitions']['execution_model'] == 'futures-ohlcv.1.0.0'
+    assert saved.result['metric_definitions']['execution_model'] == 'futures-ohlcv.'+version
+    if version == '1.2.0':assert saved.result['trades'][0]['efficiency_ratio_at_entry']==0
     assert saved.result['decisions_artifact']
     from bktstr.services.idea_reports import render_idea_html, render_test_markdown
     import json, re
@@ -122,7 +127,7 @@ def test_futures_runs_through_existing_worker_and_persists(tmp_path, monkeypatch
     markdown = render_test_markdown(record.experiment_id,store)
     assert 'per-side commissions' in markdown and 'Evaluation attempts' in markdown
     from bktstr.services.research_protocol import register_protocol, run_protocol
-    second = catalog.register('policy', policy.document | {'id':'p2', 'recipe':recipe() | {'risk_budget':250.0}})
+    second = catalog.register('policy', policy.document | {'id':'p2', 'recipe':cfg | {'risk_budget':250.0}})
     register_protocol(dict(id='futures-campaign',version='1.0.0',idea=idea.ref,kind='backtest',
         baseline=policy.ref,candidates=[policy.ref,second.ref],applications=[app.ref],
         splits=[dict(name='development',stage='development',start=schedule[0]['open'],end=schedule[0]['close'])],
