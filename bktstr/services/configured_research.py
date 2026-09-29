@@ -110,7 +110,7 @@ def _execute_policy(record, store):
         check_cancelled(record.experiment_id, catalog)
         return result, dict(dataset=snapshot.id, build=snapshot.document['build'],
             consumed_inputs=[snapshot.id, policy.digest, app.digest], attached_evidence=policy.document['evidence'] + policy.document['contrary_evidence'],
-            execution_model='futures-ohlcv.1.0.0')
+            execution_model=policy.document['recipe']['execution_model'])
     manifest = bind_policy(policy, app, (request['start'], request['end']))
     for evidence_id in policy.document['evidence'] + policy.document['contrary_evidence']:
         evidence = store.load_experiment(evidence_id)

@@ -4,7 +4,7 @@ Base URL: `https://bktstr-production.up.railway.app`
 
 BKTSTR is a historical equity, ETF and configured futures research API. It never places brokerage orders. `GET /openapi.json` is the machine-readable contract. This document explains the public request, lifecycle, market-data, and ownership rules.
 
-Version 0.8.0 supports [futures data downloads](FUTURES_DATA.md) and an explicit
+Version 0.9.0 supports [futures data downloads](FUTURES_DATA.md) and an explicit
 [futures configured research profile](FUTURES_RESEARCH.md). Existing equity
 research and execution contracts remain unchanged.
 

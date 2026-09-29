@@ -1,6 +1,6 @@
 # BKTSTR research runbook
 
-**Current release:** v0.8.0
+**Current release:** v0.9.0
 
 BKTSTR tests trading hypotheses independently of any investment fund or portfolio.
 Read [AGENTS.md](AGENTS.md) and the [system design](docs/BKTSTR_SYSTEM_MANUAL.md).

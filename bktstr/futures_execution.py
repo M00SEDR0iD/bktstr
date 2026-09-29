@@ -42,7 +42,7 @@ class Signal(Object):
 
 
 class FuturesRecipe(Object):
-    execution_model: Literal['futures-ohlcv.1.0.0']
+    execution_model: Literal['futures-ohlcv.1.0.0', 'futures-ohlcv.1.1.0']
     signal: Signal
     stop_points: float = Field(gt=0)
     risk_budget: float = Field(gt=0)
@@ -54,6 +54,28 @@ class FuturesRecipe(Object):
     last_entry_buffer: int = Field(ge=0, le=390)
     max_hold_minutes: int = Field(gt=0, le=390)
     cooldown_minutes: int = Field(ge=0, le=390)
+    opening_bias: bool | None = None
+    cash_start_offset: int | None = Field(default=None, ge=0, le=390)
+    quantity_step: int | None = Field(default=None, gt=0, le=100)
+    atr_period: int | None = Field(default=None, gt=0, le=390)
+    atr_reference_points: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode='after')
+    def versioned_options(self):
+        additions = {'opening_bias', 'cash_start_offset', 'quantity_step', 'atr_period', 'atr_reference_points'}
+        if self.execution_model == 'futures-ohlcv.1.0.0':
+            if additions & self.model_fields_set:
+                raise ValueError('new execution options require futures-ohlcv.1.1.0')
+        else:
+            if any(getattr(self, k) is None for k in ('opening_bias', 'cash_start_offset', 'quantity_step')):
+                raise ValueError('1.1 requires explicit opening bias, cash offset and quantity step')
+            if (self.atr_period is None) != (self.atr_reference_points is None):
+                raise ValueError('ATR period and reference must be specified together')
+            if self.opening_bias and self.warmup_minutes < 1:
+                raise ValueError('opening candle must close before entry')
+            if self.max_contracts < self.quantity_step:
+                raise ValueError('quantity step exceeds contract cap')
+        return self
 
 
 def signals(frame, recipe):
@@ -73,7 +95,10 @@ def signals(frame, recipe):
             center = close.rolling(20, min_periods=20).mean()
         else:
             typical = (frame.high + frame.low + close) / 3
-            center = (typical * frame.volume).cumsum() / frame.volume.cumsum().replace(0, np.nan)
+            weights = frame.volume.copy()
+            if cfg.cash_start_offset:
+                weights.iloc[:cfg.cash_start_offset] = 0
+            center = (typical * weights).cumsum() / weights.cumsum().replace(0, np.nan)
         value = (close - center) / deviation
         lower, upper = -cfg.signal.threshold, cfg.signal.threshold
     long = (value.shift(1) < lower) & (value >= lower)
@@ -105,7 +130,17 @@ def execute_session(frame, signal_values, recipe, terms, contract):
     day = str(frame.index[0].tz_convert('America/New_York').date())
     if account.contracts.get(day) != contract:
         raise ValueError('session contract mapping mismatch')
-    size = min(cfg.max_contracts, int(cfg.risk_budget // (cfg.stop_points * multiplier)))
+    base_size = cfg.risk_budget / (cfg.stop_points * multiplier)
+    legacy_size = min(cfg.max_contracts, int(cfg.risk_budget // (cfg.stop_points * multiplier)))
+    offset, step = cfg.cash_start_offset or 0, cfg.quantity_step or 1
+    if offset >= len(frame):
+        raise ValueError('cash open outside supplied session')
+    atr_values = None
+    if cfg.atr_period:
+        previous = frame.close.shift(1)
+        true_range = pd.concat([frame.high-frame.low, (frame.high-previous).abs(),
+                                (frame.low-previous).abs()], axis=1).max(axis=1)
+        atr_values = true_range.rolling(cfg.atr_period, min_periods=cfg.atr_period).mean().to_numpy()
     slip = cfg.slippage_ticks * tick
     trades, decisions, marks = [], [], []
     pos, realized, last_exit = None, 0.0, -10000
@@ -113,17 +148,30 @@ def execute_session(frame, signal_values, recipe, terms, contract):
         # A signal becomes known at the next minute open, never its own open.
         signal = int(signal_values[i-1]) if i else 0
         if signal:
-            reason = ('position_open' if pos else 'warmup' if i < cfg.warmup_minutes else
+            atr = float(atr_values[i-1]) if atr_values is not None and i else None
+            available = atr is None or (math.isfinite(atr) and atr > 0)
+            requested = base_size * cfg.atr_reference_points / atr if atr_values is not None and available else base_size
+            quantity = int(min(cfg.max_contracts, requested) // step) * step
+            if cfg.execution_model == 'futures-ohlcv.1.0.0':
+                quantity = legacy_size
+            fair = float((values[offset,1]+values[offset,2])/2) if cfg.opening_bias and i > offset else None
+            entry = opened + signal * slip
+            wrong_direction = fair is not None and (signal*(values[i-1,3]-fair) >= 0 or signal*(entry-fair) >= 0)
+            reason = ('position_open' if pos else 'warmup' if i < offset + cfg.warmup_minutes else
                       'entry_cutoff' if i >= len(frame)-cfg.last_entry_buffer else
                       'cooldown' if i <= last_exit + cfg.cooldown_minutes else
-                      'risk_budget_below_one_contract' if size < 1 else 'accepted')
+                      'volatility_unavailable' if not available else
+                      'opening_direction' if wrong_direction else
+                      'risk_budget_below_one_contract' if quantity < step else 'accepted')
+            extra = dict(fair_value=fair, atr_at_entry=atr if available else None, proposed_contracts=quantity) if cfg.execution_model=='futures-ohlcv.1.1.0' else {}
             decisions.append(dict(signal_time=frame.index[i-1].isoformat(), eligible_at=frame.index[i].isoformat(),
-                                  side='long' if signal == 1 else 'short', reason=reason))
+                                  side='long' if signal == 1 else 'short', reason=reason, **extra))
             if reason == 'accepted':
-                entry = opened + signal * slip
-                pos = dict(sign=signal, entry=entry, index=i, minimum=0.0, maximum=0.0, peak=0.0, dd=0.0)
+                pos = dict(sign=signal, entry=entry, index=i, minimum=0.0, maximum=0.0, peak=0.0, dd=0.0,
+                           size=quantity, extra=extra)
         lower = upper = mark = realized
         if pos:
+            size = pos['size']
             sign, entry = pos['sign'], pos['entry']
             stop, target = entry-sign*cfg.stop_points, entry+sign*cfg.stop_points*cfg.reward_risk
             net = lambda price: sign*(price-entry)*multiplier*size - 2*cfg.commission_per_side*size
@@ -162,7 +210,7 @@ def execute_session(frame, signal_values, recipe, terms, contract):
                     entry_price=entry, exit_price=exit_price, stop_price=stop, target_price=target, reason=reason,
                     pnl_dollars=pnl, initial_risk_dollars=cfg.stop_points*multiplier*size,
                     net_r=pnl/(cfg.stop_points*multiplier*size), commission=2*cfg.commission_per_side*size,
-                    min_net_excursion=pos['minimum'], max_net_excursion=pos['maximum'], intratrade_drawdown_bound=pos['dd']))
+                    min_net_excursion=pos['minimum'], max_net_excursion=pos['maximum'], intratrade_drawdown_bound=pos['dd'], **pos['extra']))
                 realized += pnl
                 mark, pos, last_exit = realized, None, i
         marks.append(dict(timestamp=frame.index[i].isoformat(), net=mark, low=lower, high=upper))
@@ -221,7 +269,7 @@ def summarize(trades, daily, terms, recipe):
 def run_scheduled(snapshot, application, recipe, start, end):
     from .dataset_snapshots import instant, validate_scope
     from .research_ideas import digest
-    cfg = FuturesRecipe.model_validate(recipe).model_dump(mode='json')
+    cfg = FuturesRecipe.model_validate(recipe).model_dump(mode='json', exclude_none=True)
     terms = FuturesTerms.model_validate(application['futures']).model_dump(mode='json')
     document = snapshot.document
     if not document['controlled'] or document['adjustment'] != 'unadjusted':
