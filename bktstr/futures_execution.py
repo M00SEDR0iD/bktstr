@@ -238,9 +238,13 @@ def execute_session(frame, signal_values, recipe, terms, contract):
                 mark, pos, last_exit = realized, None, i
         marks.append(dict(timestamp=frame.index[i].isoformat(), net=mark, low=lower, high=upper))
     if signal_values[-1]:
-        decisions.append(dict(signal_time=frame.index[-1].isoformat(),
+        terminal = dict(signal_time=frame.index[-1].isoformat(),
             eligible_at=(frame.index[-1]+pd.Timedelta(minutes=1)).isoformat(),
-            side='long' if signal_values[-1] == 1 else 'short', reason='session_ended'))
+            side='long' if signal_values[-1] == 1 else 'short', reason='session_ended')
+        if efficiency_values is not None:
+            last_efficiency = float(efficiency_values[-1])
+            terminal['efficiency_ratio_at_entry'] = last_efficiency if math.isfinite(last_efficiency) else None
+        decisions.append(terminal)
     return dict(trades=trades, decisions=decisions, marks=marks, pnl=realized)
 
 

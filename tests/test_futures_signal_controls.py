@@ -94,3 +94,12 @@ def test_entry_uses_prior_ratio_and_protection_continues():
     assert trade['reason']=='stop' and trade['exit_time']==f.index[4].isoformat()
     assert r['decisions'][1]['reason']=='position_open'
     assert r['decisions'][1]['efficiency_ratio_at_entry']==1
+
+
+@pytest.mark.parametrize('period,expected',[(2,0.0),(4,None)])
+def test_terminal_signal_retains_available_or_missing_ratio(period,expected):
+    from bktstr.futures_execution import execute_session
+    r=execute_session(prices([100]*4),[0,0,0,1],cfg(efficiency_period=period,max_efficiency_ratio=.5),micro_terms(),'MNQU6')
+    assert r['trades']==[]
+    assert r['decisions'][0]['reason']=='session_ended'
+    assert r['decisions'][0]['efficiency_ratio_at_entry']==expected
