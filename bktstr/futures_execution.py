@@ -42,7 +42,7 @@ class Signal(Object):
 
 
 class FuturesRecipe(Object):
-    execution_model: Literal['futures-ohlcv.1.0.0', 'futures-ohlcv.1.1.0']
+    execution_model: Literal['futures-ohlcv.1.0.0', 'futures-ohlcv.1.1.0', 'futures-ohlcv.1.2.0']
     signal: Signal
     stop_points: float = Field(gt=0)
     risk_budget: float = Field(gt=0)
@@ -60,8 +60,17 @@ class FuturesRecipe(Object):
     atr_period: int | None = Field(default=None, gt=0, le=390)
     atr_reference_points: float | None = Field(default=None, gt=0)
 
+    signal_period: int | None = Field(default=None, ge=2, le=390)
+    efficiency_period: int | None = Field(default=None, ge=2, le=390)
+    max_efficiency_ratio: float | None = Field(default=None, ge=0, le=1)
+
     @model_validator(mode='after')
     def versioned_options(self):
+        controls = {'signal_period', 'efficiency_period', 'max_efficiency_ratio'}
+        if self.execution_model != 'futures-ohlcv.1.2.0' and controls & self.model_fields_set:
+            raise ValueError('signal controls require futures-ohlcv.1.2.0')
+        if (self.efficiency_period is None) != (self.max_efficiency_ratio is None):
+            raise ValueError('efficiency period and maximum must be specified together')
         additions = {'opening_bias', 'cash_start_offset', 'quantity_step', 'atr_period', 'atr_reference_points'}
         if self.execution_model == 'futures-ohlcv.1.0.0':
             if additions & self.model_fields_set:
@@ -82,17 +91,18 @@ def signals(frame, recipe):
     """Completed-bar detectors, reset by caller for each session; no outcomes."""
     cfg = FuturesRecipe.model_validate(recipe)
     close = frame.close
+    period = cfg.signal_period or (14 if cfg.signal.kind == 'rsi' else 20)
     if cfg.signal.kind == 'rsi':
         delta = close.diff()
-        gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
-        loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+        gain = delta.clip(lower=0).ewm(alpha=1/period, adjust=False, min_periods=period).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1/period, adjust=False, min_periods=period).mean()
         value = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
         value = value.mask((loss == 0) & (gain > 0), 100).mask((loss == 0) & (gain == 0), 50)
         lower, upper = cfg.signal.threshold, 100 - cfg.signal.threshold
     else:
-        deviation = close.rolling(20, min_periods=20).std(ddof=0).replace(0, np.nan)
+        deviation = close.rolling(period, min_periods=period).std(ddof=0).replace(0, np.nan)
         if cfg.signal.kind == 'bollinger':
-            center = close.rolling(20, min_periods=20).mean()
+            center = close.rolling(period, min_periods=period).mean()
         else:
             typical = (frame.high + frame.low + close) / 3
             weights = frame.volume.copy()
@@ -141,6 +151,12 @@ def execute_session(frame, signal_values, recipe, terms, contract):
         true_range = pd.concat([frame.high-frame.low, (frame.high-previous).abs(),
                                 (frame.low-previous).abs()], axis=1).max(axis=1)
         atr_values = true_range.rolling(cfg.atr_period, min_periods=cfg.atr_period).mean().to_numpy()
+    efficiency_values = None
+    if cfg.efficiency_period is not None:
+        n = cfg.efficiency_period
+        distance = frame.close.diff(n).abs()
+        path = frame.close.diff().abs().rolling(n, min_periods=n).sum()
+        efficiency_values = (distance / path.replace(0, float('nan'))).mask(path == 0, 0.0).to_numpy()
     slip = cfg.slippage_ticks * tick
     trades, decisions, marks = [], [], []
     pos, realized, last_exit = None, 0.0, -10000
@@ -157,13 +173,20 @@ def execute_session(frame, signal_values, recipe, terms, contract):
             fair = float((values[offset,1]+values[offset,2])/2) if cfg.opening_bias and i > offset else None
             entry = opened + signal * slip
             wrong_direction = fair is not None and (signal*(values[i-1,3]-fair) >= 0 or signal*(entry-fair) >= 0)
+            efficiency = float(efficiency_values[i-1]) if efficiency_values is not None and i else None
+            regime_available = efficiency is None or math.isfinite(efficiency)
+            trending = regime_available and efficiency is not None and efficiency > cfg.max_efficiency_ratio
             reason = ('position_open' if pos else 'warmup' if i < offset + cfg.warmup_minutes else
                       'entry_cutoff' if i >= len(frame)-cfg.last_entry_buffer else
                       'cooldown' if i <= last_exit + cfg.cooldown_minutes else
                       'volatility_unavailable' if not available else
+                      'regime_unavailable' if not regime_available else
+                      'trending_regime' if trending else
                       'opening_direction' if wrong_direction else
                       'risk_budget_below_one_contract' if quantity < step else 'accepted')
-            extra = dict(fair_value=fair, atr_at_entry=atr if available else None, proposed_contracts=quantity) if cfg.execution_model=='futures-ohlcv.1.1.0' else {}
+            extra = dict(fair_value=fair, atr_at_entry=atr if available else None, proposed_contracts=quantity) if cfg.execution_model!='futures-ohlcv.1.0.0' else {}
+            if efficiency_values is not None:
+                extra['efficiency_ratio_at_entry'] = efficiency if regime_available else None
             decisions.append(dict(signal_time=frame.index[i-1].isoformat(), eligible_at=frame.index[i].isoformat(),
                                   side='long' if signal == 1 else 'short', reason=reason, **extra))
             if reason == 'accepted':
