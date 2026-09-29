@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0
+
+- Add explicit futures execution 1.1 with opening-candle direction filtering, causal ATR quantity scaling, integer quantity increments and premarket indicator warmup.
+- Retain version 1.0 execution and saved research identities. Record sizing and fair-value inputs with accepted and rejected signals.
+- Keep strategy recipes and prop-evaluation account scoring separate from the shared execution extension.
+
 ## 0.8.0
 
 - Persist futures evaluation drawdown flags as native JSON booleans, including nonempty trade results.

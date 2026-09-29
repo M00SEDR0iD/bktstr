@@ -133,7 +133,7 @@ def render_experiment_markdown(record, *, snapshot_available=None):
         f'Application: {_text(request["application"]["id"])}', '',
         f'Protocol: {_display(request.get("protocol", "Uncontrolled exploration"))}', '']
     if result.get('kind') == 'configured_backtest':
-        futures = result.get('metric_definitions', {}).get('execution_model') == 'futures-ohlcv.1.0.0'
+        futures = result.get('metric_definitions', {}).get('execution_model', '').startswith('futures-ohlcv.')
         objective = ('Primary objective: net EV in R/trade.' if result.get('metric_definitions')
                      else 'Historical result: original objective retained; current R-based metrics were not recorded.')
         headline = ['## Primary outcomes', '', objective, '',

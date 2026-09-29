@@ -170,7 +170,7 @@ body { margin:0; padding:20px; background:light-dark(#eef2f4,#10161b); color-sch
     const censored=Object.values(r.analysis?.censored || {}).reduce((sum,n)=>sum+(number(n)?n:0),0);
     const interval=Array.isArray(r.analysis?.interval)?r.analysis.interval.map(n=>fmt(n,4)+'%').join(' to '):'unavailable';
     study.textContent=`Forward outcomes, not trading profit. ${r.analysis?.primary_label || ''} mean: ${fmt(r.analysis?.mean,4)}%. Usable: ${r.analysis?.usable??'unavailable'}. Censored: ${r.analysis?censored:'unavailable'}. Interval: ${interval}. Uncertainty: ${r.analysis?.uncertainty_status || 'unavailable'}.`;
-    const futures=r.metric_definitions?.execution_model==='futures-ohlcv.1.0.0';
+    const futures=r.metric_definitions?.execution_model?.startsWith('futures-ohlcv.');
     if(futures&&r.challenge){
       study.hidden=false;
       const rows=r.challenge.session_starts||[],count=s=>rows.filter(x=>x.status===s).length;

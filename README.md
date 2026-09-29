@@ -1,6 +1,6 @@
 # BKTSTR
 
-**Current release: v0.8.0**
+**Current release: v0.9.0**
 
 BKTSTR is an independent trading research system for turning ideas into explicit,
 versioned strategies and testing them against market evidence. It is separate

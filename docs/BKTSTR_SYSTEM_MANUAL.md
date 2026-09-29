@@ -1,6 +1,6 @@
 # BKTSTR system design
 
-**Current release:** v0.8.0
+**Current release:** v0.9.0
 
 The [server storage contract](SERVER_RESEARCH_STORAGE.md) defines permanent online
 results, on-demand report rendering, fresh-data reruns and optional exact replay.

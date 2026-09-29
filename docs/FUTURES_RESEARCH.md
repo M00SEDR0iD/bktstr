@@ -3,7 +3,43 @@
 The existing configured-backtest worker accepts an explicit `futures-minute`
 application. Equity application hashes and execution behavior are preserved.
 Futures simulations use the shared orchestrator and the versioned
-`futures-ohlcv.1.0.0` execution model. This is historical simulation only.
+`futures-ohlcv.1.0.0` and `futures-ohlcv.1.1.0` execution models. This is historical simulation only.
+
+## Opening reference and volatility sizing in version 1.1
+
+Version 1.1 explicitly requires `opening_bias`, `cash_start_offset`, and
+`quantity_step`. `cash_start_offset` counts supplied warmup bars before the cash
+open; `warmup_minutes` counts the entry exclusion after that open. Supply complete
+premarket bars within the pinned dataset schedule when indicators need them.
+Rolling close indicators and ATR may use those earlier bars; session VWAP starts
+at the cash open. The opening reference is the first cash candle's high/low
+midpoint, available only after that candle closes. With `opening_bias: true`, a
+long requires both signal close and slipped entry below the reference; a short
+requires both above it. Equality rejects the trade. The reference changes only
+trade direction eligibility, never the fixed stop or target.
+
+Optional `atr_period` and `atr_reference_points` must appear together. ATR is the
+simple rolling mean of true range over completed candles, including the preceding
+close in true range. Entry quantity is:
+
+```text
+base_quantity = risk_budget / (stop_points * instrument_multiplier)
+scaled_quantity = base_quantity * atr_reference_points / prior_bar_ATR
+quantity = floor(min(max_contracts, scaled_quantity) / quantity_step) * quantity_step
+```
+
+Without ATR options, use the unscaled base quantity. Insufficient or zero ATR
+blocks entry; a quantity below one step also blocks entry. Freeze quantity for
+the entire position. `risk_budget` is a reference sizing budget under ATR scaling,
+not a hard dollar-risk cap; `max_contracts` is the explicit cap. Decisions and
+trades retain the reference price, entry ATR and proposed integer quantity.
+No fractional exchange contracts are created. For MNQ, five contracts represent
+half an NQ's dollar exposure, with MNQ candles, multiplier and commissions.
+
+Zero cooldown allows the next minute's eligible entry after a closed trade. It
+does not create repeated fills within one candle. `last_entry_buffer: 0` allows
+entries through the last supplied minute, followed by mandatory session close.
+Version 1.0 rejects all new options and preserves its previous serialized recipe.
 
 ## Application and policy
 
