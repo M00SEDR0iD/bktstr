@@ -25,12 +25,12 @@ research pipeline. This is a capability release, separate from recipe trials.
 - Existing warmup, position, cutoff, cooldown and volatility checks retain
   priority; the new regime checks precede opening-direction eligibility.
   Protective management never depends on the entry filter.
-- Omitting the new controls preserves version1.1 numerical behavior. No new
+- Omitting the new controls preserves version 1.1 numerical behavior. No new
   account assumptions, data source, dependencies, or broker execution.
 
 ## Research after release
 
-Keep all user-requested trading rules. Use periods no longer than30 with the
-existing30premarket candles, preserving eligibility from9:35. Register new
+Keep all user-requested trading rules. Use periods no longer than 30 with the
+existing 30 premarket candles, preserving eligibility from 9:35. Register new
 recipe batches before scoring development data. Compare filter-free controls
-on identical inputs. No later-period test until the fixed35% gate is reached.
+on identical inputs. No later-period test until the fixed 35% gate is reached.

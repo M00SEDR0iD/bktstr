@@ -306,7 +306,7 @@ CAPABILITIES = {
     },
     "providers": {
         "massive": "full-range pagination with 429/5xx retry; used when MASSIVE_API_KEY is configured",
-        "massive_futures": "contract discovery and raw 1m candles via /api/v1/market-data/futures; reuses MASSIVE_API_KEY; entitlement unverified until requested; configured-backtest futures-minute profile supports futures-ohlcv.1.0.0 and 1.1.0 with explicit contract and account terms",
+        "massive_futures": "contract discovery and raw 1m candles via /api/v1/market-data/futures; reuses MASSIVE_API_KEY; entitlement unverified until requested; configured-backtest futures-minute profile supports futures-ohlcv.1.0.0, 1.1.0 and 1.2.0 with explicit contract and account terms",
         "yahoo": "fallback for recent intraday data only",
     },
     "release": {

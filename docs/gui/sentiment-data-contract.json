@@ -1,5 +1,5 @@
 {
-  "version": "0.9.0",
+  "version": "0.10.0",
   "purpose": "Stable sentiment/provenance field contract for future BKTSTR GUI clients",
   "layers": [
     "sentiment",

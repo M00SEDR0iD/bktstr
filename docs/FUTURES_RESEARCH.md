@@ -3,7 +3,43 @@
 The existing configured-backtest worker accepts an explicit `futures-minute`
 application. Equity application hashes and execution behavior are preserved.
 Futures simulations use the shared orchestrator and the versioned
-`futures-ohlcv.1.0.0` and `futures-ohlcv.1.1.0` execution models. This is historical simulation only.
+`futures-ohlcv.1.0.0`, `futures-ohlcv.1.1.0` and `futures-ohlcv.1.2.0` execution models. This is historical simulation only.
+
+## Signal lookbacks and entry regime in version 1.2
+
+Version 1.2 adds optional `signal_period` (integer 2 through 390). It sets the
+Bollinger mean and population standard-deviation window, the VWAP deviation
+window, or the RSI exponential lookback. The defaults remain 20 for Bollinger
+and VWAP and 14 for RSI. RSI uses alpha `1 / signal_period`, `adjust=false`,
+and that many observations. VWAP's center still accumulates from the cash open.
+
+An optional entry filter uses `efficiency_period` (integer 2 through 390) and
+`max_efficiency_ratio` (0 through 1 inclusive); specify both or neither.
+For each completed candle, calculate:
+
+```text
+efficiency_ratio = abs(close[t] - close[t-n]) / sum(abs(close changes), last n changes)
+```
+
+A complete flat window has ratio zero. The ratio is one for a monotonic price
+path and lower when prices reverse. This measures the observed price path; it
+does not label future returns or establish a trading edge. Entry uses only the
+preceding completed candle. A ratio above the configured maximum rejects the
+entry as `trending_regime`; equality is allowed. Missing history rejects as
+`regime_unavailable`. Existing position, warmup, cutoff, cooldown and volatility
+checks retain priority. Protective stops and exits continue independently.
+
+When the filter is enabled, signal decisions and accepted trades retain
+`efficiency_ratio_at_entry`, with null for unavailable observations. The engine
+does not create signals while detector history is insufficient. Supply enough
+premarket candles if entries must become eligible immediately after the stated
+opening exclusion; a period is not a substitute for warmup data.
+
+All three new fields require execution model 1.2; older models reject them even
+when explicitly null. Omitting the controls retains version 1.1 numerical
+behavior and does not add ratio metadata. Existing saved recipes and results
+remain available. A rollback can replay older model versions but cannot execute
+1.2 recipes; retain their build and pinned inputs for exact replay.
 
 ## Opening reference and volatility sizing in version 1.1
 

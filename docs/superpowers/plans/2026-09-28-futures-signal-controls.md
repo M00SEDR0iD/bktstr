@@ -5,7 +5,7 @@
 **Goal:** Add reproducible indicator lookbacks and a causal efficiency-ratio entry filter.
 
 **Architecture:** Extend the existing futures recipe and shared executor with
-execution model1.2. Existing versions retain their validation and serialization.
+execution model 1.2. Existing versions retain their validation and serialization.
 Keep entry research in later immutable recipe revisions.
 
 **Tech Stack:** Python, pandas, Pydantic, existing FastAPI/SQLite worker.
@@ -16,7 +16,7 @@ Keep entry research in later immutable recipe revisions.
 
 - New execution identity: `futures-ohlcv.1.2.0`; release `0.10.0`.
 - Versions 1.0 and 1.1 reject the three new fields, including explicit nulls.
-- Omitting the new controls preserves version1.1 numerical behavior.
+- Omitting the new controls preserves version 1.1 numerical behavior.
 - No new dependencies or live execution; retain all saved research.
 
 ## Review Focus
@@ -40,9 +40,9 @@ signatures. Recipe fields and decision metadata follow the spec exactly.
   explicit period signals and causal prefixes for all three signal kinds.
 - [ ] Write tests for flat/monotonic/alternating ratio windows, threshold equality,
   unavailable history, next-bar causality, and protective exits despite a filter.
-- [ ] Extend the existing worker persistence test to versions1.0,1.1,1.2 and
+- [ ] Extend the existing worker persistence test to versions 1.0, 1.1, 1.2 and
   verify the new ratio survives in a saved trade.
-- [ ] Run the focused futures tests; expect new tests to fail on unsupported1.2.
+- [ ] Run the focused futures tests; expect new tests to fail on unsupported 1.2.
 - [ ] Implement optional periods and the completed-candle filter in the existing
   module, including rejection reasons and finite Python-float metadata.
 - [ ] Run the focused futures tests; expect all to pass. Commit the engine change.
@@ -53,10 +53,10 @@ signatures. Recipe fields and decision metadata follow the spec exactly.
 `CHANGELOG.md`, `bktstr/server.py`, release version references and their tests.
 
 **Interfaces:** Retain the existing configured-backtest API and worker. The
-capability text advertises1.2; health and release contracts identify0.10.0.
+capability text advertises 1.2; health and release contracts identify 0.10.0.
 
 - [ ] Document formulas, missing-history behavior, defaults, logs and rollback.
-- [ ] Update active release identities and acceptance defaults to0.10.0, preserving
+- [ ] Update active release identities and acceptance defaults to 0.10.0, preserving
   historical changelog entries.
 - [ ] Run full pytest, release consistency, compileall, and cache benchmark;
   expect all checks to pass. Commit documentation/release metadata.
